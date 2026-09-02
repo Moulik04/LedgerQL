@@ -108,7 +108,7 @@ def _build_financial_facts(con: duckdb.DuckDBPyConnection) -> None:
         """
         CREATE OR REPLACE TABLE financial_facts AS
         SELECT
-            n.cik,
+            s.cik,
             n.adsh,
             n.tag,
             strptime(n.ddate, '%Y%m%d')::DATE AS ddate,

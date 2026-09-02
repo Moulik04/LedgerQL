@@ -37,9 +37,9 @@ def test_core_tables_are_non_empty(con):
 def test_financial_facts_has_no_duplicate_keys(con):
     dupes = con.execute(
         """
-        SELECT cik, adsh, tag, ddate, qtrs, COUNT(*) AS n
+        SELECT cik, adsh, tag, ddate, qtrs, uom, COUNT(*) AS n
         FROM financial_facts
-        GROUP BY cik, adsh, tag, ddate, qtrs
+        GROUP BY cik, adsh, tag, ddate, qtrs, uom
         HAVING COUNT(*) > 1
     """
     ).fetchall()
