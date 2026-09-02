@@ -64,3 +64,24 @@ def test_download_all_fetches_every_quarter(tmp_path):
 
     assert paths == [tmp_path / "2024q3.zip", tmp_path / "2024q4.zip"]
     assert len(seen) == 2
+
+
+def test_download_quarter_cleans_up_on_http_error(tmp_path):
+    """Verify that failed downloads don't leave truncated files in the cache."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(500, content=b"server-error")
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    try:
+        download_quarter("2024q3", tmp_path, client=client)
+        raise AssertionError("should have raised HTTPStatusError")
+    except httpx.HTTPStatusError:
+        pass
+
+    # Verify no file was left behind
+    dest = tmp_path / "2024q3.zip"
+    assert not dest.exists(), "corrupt file should not be cached on HTTP error"
+    # Also verify no temp file was left behind
+    temp_dest = tmp_path / "2024q3.zip.part"
+    assert not temp_dest.exists(), "temp file should be cleaned up on HTTP error"

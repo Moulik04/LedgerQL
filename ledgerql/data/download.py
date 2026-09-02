@@ -36,13 +36,21 @@ def download_quarter(quarter: str, cache_dir: Path, client: httpx.Client | None 
     client = client or httpx.Client(
         headers={"User-Agent": USER_AGENT}, follow_redirects=True, timeout=60.0
     )
+
+    temp_dest = dest.with_suffix(".zip.part")
     try:
         url = f"{SEC_BASE_URL}/{quarter}.zip"
         with client.stream("GET", url, headers={"User-Agent": USER_AGENT}) as response:
             response.raise_for_status()
-            with dest.open("wb") as f:
+            with temp_dest.open("wb") as f:
                 for chunk in response.iter_bytes():
                     f.write(chunk)
+        # Atomically rename temp file to final destination on success
+        temp_dest.replace(dest)
+    except Exception:
+        # Clean up partial temp file on any error
+        temp_dest.unlink(missing_ok=True)
+        raise
     finally:
         if owns_client:
             client.close()
