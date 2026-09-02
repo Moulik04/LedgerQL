@@ -1,6 +1,9 @@
 # Internal planning doc — not part of the public project
 LEDGERQL_MASTER_PROMPT.md
 
+# Local git worktrees
+.worktrees/
+
 # Python
 __pycache__/
 *.py[cod]
