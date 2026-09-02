@@ -65,9 +65,21 @@ def _build_companies(con: duckdb.DuckDBPyConnection, companies: list[SP500Compan
         )
     """
     )
+    # A handful of S&P 500 constituents are dual-class shares (e.g. GOOGL/GOOG,
+    # FOXA/FOX, NWSA/NWS) that share a single CIK -- they're one SEC filer with
+    # two tickers. filings/financial_facts are CIK-grained, so companies must
+    # be too: keep the first-listed ticker per CIK (the CSV lists Class A
+    # before Class B/C) as the canonical row for that filer.
+    seen_ciks: set[int] = set()
+    deduped = []
+    for c in companies:
+        if c.cik in seen_ciks:
+            continue
+        seen_ciks.add(c.cik)
+        deduped.append(c)
     con.executemany(
         "INSERT INTO companies VALUES (?, ?, ?, ?)",
-        [(c.cik, c.ticker, c.name, c.gics_sector) for c in companies],
+        [(c.cik, c.ticker, c.name, c.gics_sector) for c in deduped],
     )
 
 
@@ -79,7 +91,10 @@ def _build_filings(con: duckdb.DuckDBPyConnection) -> None:
             adsh,
             cik,
             form,
-            CAST(fy AS INTEGER) AS fiscal_year,
+            -- fy is blank on some non-10-K forms (8-K, S-4, ...) that don't
+            -- carry fiscal-year metadata in real SEC data; TRY_CAST nulls
+            -- fiscal_year for those rows instead of failing the whole build.
+            TRY_CAST(fy AS INTEGER) AS fiscal_year,
             fp AS fiscal_period,
             strptime(period, '%Y%m%d')::DATE AS period_end_date,
             strptime(filed, '%Y%m%d')::DATE AS filed_date
