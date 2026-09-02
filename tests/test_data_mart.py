@@ -87,3 +87,76 @@ def test_financial_facts_excludes_dimensional_rows():
     assert not any(
         "Product" in t for t in all_tags
     ), "dimensional/segment rows must not leak into financial_facts"
+
+
+def test_tag_priority_resolution_revenue():
+    """Verify that when multiple tags for same concept exist in same partition,
+    the highest-priority tag is selected.
+    """
+    con = duckdb.connect(":memory:")
+    ensure_staging_tables(con)
+    # Add two filings: one with high-priority tag, one with fallback tag
+    con.execute(
+        """
+        INSERT INTO stg_sub VALUES
+        ('0000320193-25-000001', 320193, 'APPLE INC', '3571', '10-K', '20250930', 2025, 'FY', '20251101', '2025q4'),
+        ('0000320193-26-000002', 320193, 'APPLE INC', '3571', '10-K', '20260930', 2026, 'FY', '20261101', '2026q4')
+    """
+    )
+    # FY2025: high-priority tag RevenueFromContractWithCustomerExcludingAssessedTax
+    # FY2026: both high-priority and lower-priority Revenues tag (same cik/fiscal_year)
+    # to test that QUALIFY picks the one with higher priority
+    con.execute(
+        """
+        INSERT INTO stg_num VALUES
+        ('0000320193-25-000001', 'RevenueFromContractWithCustomerExcludingAssessedTax', 'us-gaap/2025', '20250930', 4, 'USD', '', '', 400000000000.0, '', 320193, '2025q4'),
+        ('0000320193-26-000002', 'RevenueFromContractWithCustomerExcludingAssessedTax', 'us-gaap/2026', '20260930', 4, 'USD', '', '', 450000000000.0, '', 320193, '2026q4'),
+        ('0000320193-26-000002', 'Revenues', 'us-gaap/2026', '20260930', 4, 'USD', '', '', 500000000000.0, '', 320193, '2026q4')
+    """
+    )
+    build_mart(con, COMPANIES)
+
+    rows = con.execute(
+        "SELECT fiscal_year, value, source_tag FROM v_revenue ORDER BY fiscal_year"
+    ).fetchall()
+    # FY2025: should pick RevenueFromContractWithCustomerExcludingAssessedTax (only option)
+    # FY2026: should pick RevenueFromContractWithCustomerExcludingAssessedTax (higher priority)
+    #         and use its value 450B, NOT the fallback Revenues value of 500B
+    assert len(rows) == 2
+    assert rows[0] == (
+        2025,
+        400000000000.0,
+        "RevenueFromContractWithCustomerExcludingAssessedTax",
+    )
+    assert rows[1] == (
+        2026,
+        450000000000.0,
+        "RevenueFromContractWithCustomerExcludingAssessedTax",
+    )
+
+
+def test_tag_priority_resolution_net_income():
+    """Verify tag priority for net_income concept with competing tags."""
+    con = duckdb.connect(":memory:")
+    ensure_staging_tables(con)
+    con.execute(
+        """
+        INSERT INTO stg_sub VALUES
+        ('0000320193-27-000003', 320193, 'APPLE INC', '3571', '10-K', '20270930', 2027, 'FY', '20271101', '2027q4')
+    """
+    )
+    # NetIncomeLoss is higher priority than ProfitLoss
+    # Seed both tags for same cik/fiscal_year to test priority
+    con.execute(
+        """
+        INSERT INTO stg_num VALUES
+        ('0000320193-27-000003', 'NetIncomeLoss', 'us-gaap/2027', '20270930', 4, 'USD', '', '', 95000000000.0, '', 320193, '2027q4'),
+        ('0000320193-27-000003', 'ProfitLoss', 'us-gaap/2027', '20270930', 4, 'USD', '', '', 100000000000.0, '', 320193, '2027q4')
+    """
+    )
+    build_mart(con, COMPANIES)
+
+    rows = con.execute("SELECT fiscal_year, value, source_tag FROM v_net_income").fetchall()
+    # Should pick NetIncomeLoss (higher priority) with value 95B, not ProfitLoss's 100B
+    assert len(rows) == 1
+    assert rows[0] == (2027, 95000000000.0, "NetIncomeLoss")
