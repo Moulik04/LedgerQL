@@ -108,6 +108,9 @@ def _build_financial_facts(con: duckdb.DuckDBPyConnection) -> None:
         """
         CREATE OR REPLACE TABLE financial_facts AS
         SELECT
+            -- Use registrant CIK from stg_sub (parsed from sub.txt), not from stg_num.
+            -- stg_num.cik is derived from accession number's leading digits, which
+            -- represents the filing agent (often third-party), not the registrant.
             s.cik,
             n.adsh,
             n.tag,
