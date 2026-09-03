@@ -21,7 +21,15 @@ One row per S&P 500 constituent.
 | name | VARCHAR | Apple Inc. |
 | gics_sector | VARCHAR | Information Technology |
 
-**Note on dual-class shares:** A handful of S&P 500 constituents issue multiple share classes with separate stock tickers but a single SEC CIK (e.g., GOOGL/GOOG, FOXA/FOX, NWSA/NWS). Since `companies`, `filings`, and `financial_facts` are all CIK-grained (one row per actual SEC filer, not per ticker), only one canonical ticker appears in this table: the first-listed ticker for that CIK from `data/sp500_constituents.csv` (the Class A share in all current cases). This means querying for the subordinate class ticker (e.g., GOOG) will find no `companies` row — only the canonical ticker (e.g., GOOGL) will match.
+**Note on dual-class shares:** A handful of S&P 500 constituents issue
+multiple share classes with separate stock tickers but a single SEC CIK
+(e.g., GOOGL/GOOG, FOXA/FOX, NWSA/NWS). Since `companies`, `filings`, and
+`financial_facts` are all CIK-grained (one row per actual SEC filer, not
+per ticker), only one canonical ticker appears in this table: the
+first-listed ticker for that CIK from `data/sp500_constituents.csv` (the
+Class A share in all current cases). This means querying for the
+subordinate class ticker (e.g., GOOG) will find no `companies` row — only
+the canonical ticker (e.g., GOOGL) will match.
 
 ## filings
 
@@ -39,13 +47,21 @@ made" style questions even though `financial_facts` only draws from 10-Ks.
 | period_end_date | DATE | 2024-09-30 |
 | filed_date | DATE | 2024-11-01 |
 
+`fiscal_year` and `fiscal_period` can be NULL/blank for non-10-K forms
+(e.g. 8-K, S-4) that don't carry fiscal-year metadata in real SEC data.
+
 ## financial_facts
 
 Long format: one row per reported numeric fact from a 10-K's primary
 financial statements, restricted to the filing's own fiscal-year period
 (prior-year comparatives shown in the same filing are excluded) and to
 consolidated, non-dimensional values (`segments = ''`, `coreg = ''` in
-the source data — no product-line or geographic breakdowns).
+the source data — no product-line or geographic breakdowns). Only plain
+`10-K` filings with `fp = 'FY'` are included — `10-K/A` (amended) and
+`10-KT` (transition period) filings are excluded. This covers every
+non-dimensional numeric fact for the filing's own period, not just
+monetary USD amounts — `uom` may also be a non-monetary unit such as
+`shares`, `pure`, or `vote`.
 
 | Column | Type | Example |
 |---|---|---|
