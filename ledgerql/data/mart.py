@@ -109,8 +109,8 @@ def _build_financial_facts(con: duckdb.DuckDBPyConnection) -> None:
         CREATE OR REPLACE TABLE financial_facts AS
         SELECT
             -- Use registrant CIK from stg_sub (parsed from sub.txt), not from stg_num.
-            -- stg_num.cik is derived from accession number's leading digits, which
-            -- represents the filing agent (often third-party), not the registrant.
+            -- stg_num.agent_cik is derived from the accession number's leading digits,
+            -- which represents the filing agent (often third-party), not the registrant.
             s.cik,
             n.adsh,
             n.tag,
@@ -152,9 +152,23 @@ def _build_concept_view(con: duckdb.DuckDBPyConnection, view_name: str, spec: Co
         JOIN companies c ON f.cik = c.cik
         WHERE f.qtrs = {spec.qtrs}
           AND f.tag IN ({tag_list})
+        -- Partition by (cik, fiscal_year, ddate) rather than just (cik,
+        -- fiscal_year): SEC's own fy metadata is occasionally wrong (e.g.
+        -- Federal Realty's two distinct 10-Ks -- for periods 2024-12-31 and
+        -- 2025-12-31 -- both carry sub.fy='2024' in real SEC data). Including
+        -- the real period end date (ddate) keeps genuinely different filings
+        -- from being silently collapsed into one row just because SEC mislabeled
+        -- their fiscal year the same; it's a no-op for every other company,
+        -- since ddate and fiscal_year are 1:1 everywhere else in this dataset.
+        -- The ORDER BY below still resolves genuine same-period fallback-tag
+        -- competition (e.g. NetIncomeLoss vs ProfitLoss for one real filing)
+        -- deterministically: tag priority first, then most-recent period end
+        -- date, then most-recently filed, as the final tiebreakers.
         QUALIFY ROW_NUMBER() OVER (
-            PARTITION BY f.cik, fl.fiscal_year
-            ORDER BY CASE f.tag {tag_priority_case} END
+            PARTITION BY f.cik, fl.fiscal_year, f.ddate
+            ORDER BY CASE f.tag {tag_priority_case} END,
+                     fl.period_end_date DESC,
+                     fl.filed_date DESC
         ) = 1
     """
     )

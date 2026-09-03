@@ -35,6 +35,7 @@ class IngestStats:
     sub_rows: int
     num_rows: int
     tag_rows: int
+    null_value_rows: int
     skipped_rows: int
 
 
@@ -53,7 +54,11 @@ def ensure_staging_tables(con: duckdb.DuckDBPyConnection) -> None:
         CREATE TABLE IF NOT EXISTS stg_num (
             adsh VARCHAR, tag VARCHAR, version VARCHAR, ddate VARCHAR, qtrs INTEGER,
             uom VARCHAR, segments VARCHAR, coreg VARCHAR, value DOUBLE, footnote VARCHAR,
-            cik INTEGER, quarter VARCHAR
+            -- agent_cik is parsed from the accession number's leading digits, i.e.
+            -- whoever SUBMITTED the accession (often a third-party filing agent),
+            -- NOT the registrant. For the real registrant CIK, see stg_sub.cik
+            -- (joined on adsh) -- that's what financial_facts.cik is built from.
+            agent_cik INTEGER, quarter VARCHAR
         )
     """
     )
@@ -70,7 +75,11 @@ def ensure_staging_tables(con: duckdb.DuckDBPyConnection) -> None:
 
 def _read_tsv_rows(zf: zipfile.ZipFile, filename: str) -> csv.DictReader:
     raw = zf.read(filename).decode("utf-8")
-    return csv.DictReader(io.StringIO(raw), delimiter="\t")
+    # SEC's TSV files are not quoted -- some fields (e.g. num.txt footnotes)
+    # legitimately start with a literal `"` character. QUOTE_NONE stops
+    # Python's default CSV quote-handling from misinterpreting that and
+    # potentially swallowing tabs/newlines across rows.
+    return csv.DictReader(io.StringIO(raw), delimiter="\t", quoting=csv.QUOTE_NONE)
 
 
 def ingest_quarter(
@@ -109,26 +118,38 @@ def ingest_quarter(
             )
 
         num_rows = []
+        null_value_rows = 0
         for row in _read_tsv_rows(zf, "num.txt"):
             if row.get("adsh") not in sub_by_adsh_in_scope:
                 continue
             try:
-                cik = int(row["adsh"].split("-")[0])
+                agent_cik = int(row["adsh"].split("-")[0])
             except (IndexError, ValueError):
                 skipped += 1
                 continue
             try:
                 qtrs = int(row["qtrs"])
-                value = float(row["value"])
             except (KeyError, ValueError):
                 skipped += 1
                 continue
+            raw_value = row.get("value", "")
+            if raw_value.strip() == "":
+                # Blank value is normal, valid SEC data (not a parsing failure) --
+                # store it as SQL NULL and count it separately from real skips.
+                value = None
+                null_value_rows += 1
+            else:
+                try:
+                    value = float(raw_value)
+                except ValueError:
+                    skipped += 1
+                    continue
             num_rows.append(
                 [row.get(c, "") for c in NUM_COLUMNS[:4]]
                 + [qtrs]
                 + [row.get("uom", ""), row.get("segments", ""), row.get("coreg", "")]
                 + [value, row.get("footnote", "")]
-                + [cik, quarter]
+                + [agent_cik, quarter]
             )
 
         tag_rows = [
@@ -154,6 +175,7 @@ def ingest_quarter(
         sub_rows=len(sub_rows),
         num_rows=len(num_rows),
         tag_rows=len(tag_rows),
+        null_value_rows=null_value_rows,
         skipped_rows=skipped,
     )
 

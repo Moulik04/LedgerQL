@@ -168,14 +168,18 @@ def test_ingest_quarter_filters_to_sp500_ciks(tmp_path):
     stats = ingest_quarter(con, "2024q4", zip_path, ciks={320193})
 
     assert stats == IngestStats(
-        quarter="2024q4", sub_rows=1, num_rows=2, tag_rows=1, skipped_rows=0
+        quarter="2024q4", sub_rows=1, num_rows=2, tag_rows=1, null_value_rows=0, skipped_rows=0
     )
 
     sub_ciks = con.execute("SELECT cik FROM stg_sub").fetchall()
     assert sub_ciks == [(320193,)]
 
-    num_ciks = con.execute("SELECT DISTINCT cik FROM stg_num").fetchall()
-    assert num_ciks == [(320193,)]
+    # stg_num.agent_cik is the accession's SUBMITTER cik (parsed from the adsh
+    # prefix), not necessarily the registrant's cik -- it happens to equal the
+    # registrant cik (320193) in this fixture, but that's not guaranteed in
+    # general (see stg_sub.cik for the real registrant cik).
+    num_agent_ciks = con.execute("SELECT DISTINCT agent_cik FROM stg_num").fetchall()
+    assert num_agent_ciks == [(320193,)]
 
     num_tags = con.execute("SELECT tag, segments FROM stg_num ORDER BY tag").fetchall()
     assert num_tags == [
@@ -192,5 +196,11 @@ def test_ingest_quarter_is_idempotent_per_quarter(tmp_path):
     ingest_quarter(con, "2024q4", zip_path, ciks={320193})
     ingest_quarter(con, "2024q4", zip_path, ciks={320193})
 
-    count = con.execute("SELECT COUNT(*) FROM stg_sub").fetchone()[0]
-    assert count == 1, "re-ingesting the same quarter must not duplicate rows"
+    sub_count = con.execute("SELECT COUNT(*) FROM stg_sub").fetchone()[0]
+    assert sub_count == 1, "re-ingesting the same quarter must not duplicate stg_sub rows"
+
+    num_count = con.execute("SELECT COUNT(*) FROM stg_num").fetchone()[0]
+    assert num_count == 2, "re-ingesting the same quarter must not duplicate stg_num rows"
+
+    tag_count = con.execute("SELECT COUNT(*) FROM stg_tag").fetchone()[0]
+    assert tag_count == 1, "re-ingesting the same quarter must not duplicate stg_tag rows"

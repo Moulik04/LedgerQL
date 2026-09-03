@@ -35,7 +35,7 @@ def run(db_path: Path) -> None:
         for s in stats:
             print(
                 f"  {s.quarter}: sub={s.sub_rows} num={s.num_rows} "
-                f"tag={s.tag_rows} skipped={s.skipped_rows}"
+                f"tag={s.tag_rows} null_value={s.null_value_rows} skipped={s.skipped_rows}"
             )
         if total_skipped:
             print(f"WARNING: {total_skipped} malformed rows skipped across all quarters")
@@ -44,6 +44,27 @@ def run(db_path: Path) -> None:
         n_facts = con.execute("SELECT COUNT(*) FROM financial_facts").fetchone()[0]
         n_filings = con.execute("SELECT COUNT(*) FROM filings").fetchone()[0]
         print(f"Mart built: {n_filings} filings, {n_facts} financial facts")
+
+        n_no_fy = con.execute("SELECT COUNT(*) FROM filings WHERE fiscal_year IS NULL").fetchone()[
+            0
+        ]
+        print(
+            f"  {n_no_fy} filings rows have no parseable fiscal_year "
+            "(non-10-K forms without fy metadata)"
+        )
+
+        n_no_10k = con.execute(
+            """
+            SELECT COUNT(*) FROM companies c
+            WHERE NOT EXISTS (
+                SELECT 1 FROM filings f WHERE f.cik = c.cik AND f.form = '10-K'
+            )
+        """
+        ).fetchone()[0]
+        print(
+            f"Coverage: {n_no_10k} of {len(companies)} companies "
+            "have zero 10-K filings in this window"
+        )
     finally:
         con.close()
 
