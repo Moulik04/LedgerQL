@@ -33,8 +33,10 @@ class _TableRowParser(HTMLParser):
     def handle_endtag(self, tag):
         if tag in ("td", "th"):
             text = re.sub(r"\s+", " ", "".join(self._cell_text)).strip()
-            # Strip stray markup artifacts (e.g. footnote markers, separators)
-            text = re.sub(r"[|†‡§¶†*]", "", text).strip()
+            # Strip stray Wikipedia footnote/reference markup (dagger/double-dagger
+            # footnote markers, section/pilcrow marks) — narrowly targeted so it
+            # can't accidentally strip a character from a legitimate company name.
+            text = re.sub(r"[†‡§¶]", "", text).strip()
             self._cur_row.append(text)
             self._in_cell = False
         elif tag == "tr":
