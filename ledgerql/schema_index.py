@@ -2,10 +2,11 @@
 
 Phase 2 injects the full analyst schema into every generation prompt --
 the schema is small (3 tables + 4 views) so there's nothing to
-selectively retrieve yet. Reads docs/schema.md and keeps only the H2
-sections that define tables/views, dropping narrative sections (the
-intro, the dual-class note, the worked SQL example) that read well for
-a human but don't improve SQL correctness and cost tokens.
+selectively retrieve yet. Reads docs/schema.md and keeps only whole H2
+sections that define tables/views (companies, filings, financial_facts,
+Concept views), dropping the file intro and any H2 sections that are
+pure narrative (e.g., notes or examples with their own headings) to save
+tokens without losing schema structure.
 """
 
 from pathlib import Path
