@@ -1,4 +1,4 @@
-.PHONY: setup test lint fmt data eval run api ui clean
+.PHONY: setup test lint fmt data eval baseline run api ui clean
 
 setup:
 	uv sync --all-groups
@@ -20,6 +20,9 @@ data:
 
 eval:
 	uv run python -m ledgerql.eval.run
+
+baseline:
+	uv run python evals/run_eval.py --db $(or $(LEDGERQL_DB_PATH),data/ledgerql.duckdb)
 
 api:
 	uv run uvicorn ledgerql.api:app --reload --port 8000
