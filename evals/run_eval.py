@@ -76,7 +76,7 @@ def results_match(
         return set(map(tuple, gold_rows)) == set(map(tuple, pred_rows))
     if compare == "ordered":
         return list(map(tuple, gold_rows)) == list(map(tuple, pred_rows))
-    return False
+    raise ValueError(f"unknown compare value: {compare!r}")
 
 
 def load_gold_cases(path: Path) -> list[dict]:

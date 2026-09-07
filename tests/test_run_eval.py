@@ -1,3 +1,5 @@
+import pytest
+
 from evals.run_eval import extract_numbers, results_match
 
 
@@ -56,3 +58,8 @@ def test_results_match_ordered_requires_same_order():
 def test_results_match_scalar_or_null_treats_both_none_as_match():
     assert results_match([(None,)], [(None,)], "scalar_or_null") is True
     assert results_match([(None,)], [(5.0,)], "scalar_or_null") is False
+
+
+def test_results_match_raises_on_unknown_compare_value():
+    with pytest.raises(ValueError, match="unknown compare value"):
+        results_match([(1,)], [(1,)], "not_a_real_compare_type")
