@@ -20,6 +20,18 @@ from pathlib import Path
 
 import duckdb
 
+# Ensure the project root (this file's parent directory) is importable when
+# this script is run directly (`python evals/run_eval.py`), which sets
+# sys.path[0] to evals/ rather than the project root. Normally the editable
+# install (`uv sync`) makes `ledgerql` importable without this, but that
+# depends on the interpreter processing the editable-install .pth file in
+# site-packages, and on at least one real machine that step was silently
+# skipped by CPython 3.12's site.py (which refuses to read a .pth file that
+# carries the macOS "hidden" (UF_HIDDEN) file flag) -- so `ledgerql` was not
+# importable even though `uv sync` reported everything installed correctly.
+# This bootstrap makes the script self-sufficient regardless of that.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 from ledgerql import generate as generate_module
 from ledgerql import pipeline
 
