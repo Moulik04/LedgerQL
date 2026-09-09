@@ -4,7 +4,7 @@ An auditable natural-language-to-SQL system for financial data — layered guard
 
 > Ask a plain-English question about company financials. LedgerQL returns a correct SQL query, the executed result, and a grounded answer with a confidence score — **or it refuses**, with a reason. It never returns a fabricated number.
 
-**Status:** Phase 0 — project scaffold complete. Data ingestion, generation, and guardrails land in the phases below.
+**Status:** Phase 1 complete — 500 S&P constituents' 10-K filings loaded into DuckDB. Phase 2 (naive text-to-SQL baseline) is built and pending merge.
 
 ## Why
 
@@ -75,8 +75,8 @@ The eval suite is the point of the project, not an afterthought. `make eval` run
 ## Roadmap
 
 - [x] **Phase 0 — Scaffold.** Project layout, tooling, CI-ready lint/test setup.
-- [ ] **Phase 1 — Data.** SEC EDGAR ingestion into DuckDB, analyst-facing schema, sanity queries against known filings.
-- [ ] **Phase 2 — Naive text-to-SQL.** End-to-end generation and execution baseline, no guardrails.
+- [x] **Phase 1 — Data.** SEC EDGAR ingestion into DuckDB, analyst-facing schema, sanity queries against known filings.
+- [ ] **Phase 2 — Naive text-to-SQL.** End-to-end generation and execution baseline, no guardrails. Built on `phase2-naive-sql`, pending merge: 58.0% execution accuracy, 32.5% hallucinated-number rate on 103 gold cases (see `reports/baseline.md` on that branch) — this is the "before" number the guardrails in Phase 3/4 are measured against.
 - [ ] **Phase 3 — Guardrails + audit.** AST-level SQL validation, schema enforcement, full audit trail.
 - [ ] **Phase 4 — Hallucination detection.** Self-consistency voting, grounded-answer verification, confidence scoring, abstain policy.
 - [ ] **Phase 5 — Scale-out evals.** Larger model comparison on GPU infrastructure, expanded gold set.
