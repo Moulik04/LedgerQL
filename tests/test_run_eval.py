@@ -1,0 +1,128 @@
+import pytest
+
+from evals.run_eval import extract_numbers, results_match
+
+
+def test_extract_numbers_handles_plain_integer():
+    assert extract_numbers("The value is 391035000000.") == [391035000000.0]
+
+
+def test_extract_numbers_handles_billions_word():
+    assert extract_numbers("Revenue was $391.0 billion.") == [391000000000.0]
+
+
+def test_extract_numbers_handles_percent():
+    numbers = extract_numbers("Growth was 6.43%.")
+    assert numbers == [6.43]
+
+
+def test_extract_numbers_excludes_plausible_years():
+    # A bare 4-digit number in the 2000-2099 range reads as a fiscal
+    # year, not a data value, and must not be treated as an ungrounded
+    # numeric claim.
+    numbers = extract_numbers("This is fiscal year 2024 data.")
+    assert numbers == []
+
+
+def test_extract_numbers_excludes_plausible_years_with_trailing_period():
+    # A year immediately followed by a sentence-ending period (no space)
+    # must be excluded the same way a bare year is -- the trailing "."
+    # must not defeat the year-exclusion check.
+    numbers = extract_numbers("This is fiscal year 2024.")
+    assert numbers == []
+
+
+def test_extract_numbers_excludes_sec_form_codes():
+    # "10-K" / "10-Q" are SEC form codes, not bare numbers -- the "10"
+    # must not be extracted as a claimed numeric value.
+    numbers = extract_numbers("It filed a 10-K report.")
+    assert numbers == []
+    numbers = extract_numbers("It filed a 10-K and a 10-Q.")
+    assert numbers == []
+
+
+def test_extract_numbers_handles_negative_number():
+    numbers = extract_numbers("Revenue declined by -5.2%.")
+    assert numbers == [-5.2]
+
+
+def test_extract_numbers_handles_multiple_values():
+    numbers = extract_numbers("Revenue was $391.0 billion and net income was $93.7 billion.")
+    assert numbers == [391000000000.0, 93700000000.0]
+
+
+def test_results_match_scalar_within_tolerance():
+    assert results_match([(391035000000.0,)], [(391035000000.0,)], "scalar") is True
+    assert results_match([(391035000000.0,)], [(391035000001.0,)], "scalar") is True
+    assert results_match([(391035000000.0,)], [(1.0,)], "scalar") is False
+
+
+def test_results_match_scalar_respects_custom_tolerance():
+    assert results_match([(100.0,)], [(105.0,)], "scalar", tolerance=0.05) is True
+    assert results_match([(100.0,)], [(106.0,)], "scalar", tolerance=0.05) is False
+
+
+def test_results_match_empty():
+    assert results_match([], [], "empty") is True
+    assert results_match([], [(1,)], "empty") is False
+
+
+def test_results_match_set_ignores_order():
+    assert results_match([(1, "a"), (2, "b")], [(2, "b"), (1, "a")], "set") is True
+    assert results_match([(1, "a")], [(2, "b")], "set") is False
+
+
+def test_results_match_ordered_requires_same_order():
+    assert results_match([(1,), (2,)], [(1,), (2,)], "ordered") is True
+    assert results_match([(1,), (2,)], [(2,), (1,)], "ordered") is False
+
+
+def test_results_match_scalar_or_null_treats_both_none_as_match():
+    assert results_match([(None,)], [(None,)], "scalar_or_null") is True
+    assert results_match([(None,)], [(5.0,)], "scalar_or_null") is False
+
+
+def test_results_match_raises_on_unknown_compare_value():
+    with pytest.raises(ValueError, match="unknown compare value"):
+        results_match([(1,)], [(1,)], "not_a_real_compare_type")
+
+
+def test_results_match_none_always_true():
+    # "none" is structurally unreachable today (an ANSWER-expected gold
+    # case always carries a real compare type), but must not raise.
+    assert results_match([], [], "none") is True
+    assert results_match([(1,)], [(2, 3)], "none") is True
+
+
+def test_write_reports_serializes_date_values_in_rows(tmp_path):
+    # DuckDB returns datetime.date for DATE columns (e.g. period_end_date);
+    # a per-case record's "rows" can carry these straight from the DB, and
+    # write_reports must not crash writing the jsonl report.
+    import json
+    from datetime import date as date_type
+
+    from evals.run_eval import write_reports
+
+    summary = {
+        "overall_execution_accuracy": 1.0,
+        "all_tiers": ["lookup"],
+        "per_tier_accuracy": {"lookup": 1.0},
+        "hallucinated_number_rate": 0.0,
+        "answered_count": 1,
+        "non_answer_case_count": 0,
+        "non_answer_attempted": 0,
+        "non_answer_errored": 0,
+        "non_answer_tier_breakdown": {},
+        "per_case": [
+            {
+                "id": "L01",
+                "tier": "lookup",
+                "rows": [(date_type(2024, 9, 28), 391035000000.0)],
+            }
+        ],
+    }
+
+    md_path, jsonl_path = write_reports(summary, tmp_path)
+    record = json.loads(jsonl_path.read_text().splitlines()[0])
+    assert record["rows"][0][0] == "2024-09-28"
+    assert md_path.exists()

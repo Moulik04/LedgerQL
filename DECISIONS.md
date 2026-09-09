@@ -83,3 +83,28 @@ A running log of non-obvious design choices. Format: context → options → dec
 **Decision:** Partition by `(f.cik, fl.fiscal_year, f.ddate)`, keep the `fiscal_year`/`fiscal_period` labels as SEC reported them (no attempt to correct SEC's `fy` value). Both of FRT's real filings now appear as separate rows in every concept view instead of one silently winning a coin flip.
 
 **Consequence:** No more data loss for FRT (or any future company hitting the same SEC data-quality pattern) — both real periods are visible, and `period_end_date` correctly distinguishes them. The known residual gap: both FRT rows still display `fiscal_year = 2024` in the `fiscal_year` column (SEC's own mislabeling is not corrected), so a caller filtering strictly by `fiscal_year = 2025` will still miss FRT's most recent filing — they'd need to use `period_end_date` instead for this specific company. This is called out here rather than silently fixed further, since correcting `fiscal_year` itself would require fiscal-year-end-aware logic per company, out of scope for this fix.
+
+---
+
+## 2026-09-09 — DuckDB connections to the same file must share config, or every query silently fails
+
+**Context:** The final-review fix wave added `config={"enable_external_access": "false"}` to `execute.execute()`'s connection, closing a real gap (a read-only connection still allows `COPY ... TO` and `read_csv_auto()` against the local filesystem). `evals/run_eval.py` opens its own long-lived connection to the same DB file, with the plain default config, to run gold SQL for scoring. DuckDB refuses to open a second connection to a file that's already open with a different configuration — even when both are read-only — so every one of `pipeline.ask()`'s 103 per-case calls failed with a connection error. The failure was silent at the level that mattered: `run()` catches pipeline exceptions per-case and records them, so the run completed and printed "0.0% overall execution accuracy" as if the model were simply wrong on every question, not because nothing ran. Two real end-to-end runs were reported/interrupted before this was ever exercised to completion, so nothing caught it until this one did.
+
+**Options:**
+- Drop `enable_external_access: false` from `execute()` — reverts a real security fix to solve an unrelated harness bug.
+- Have `run_eval.py` avoid opening its own connection at all, executing gold SQL through `execute.execute()` instead — bigger change, and gold-SQL execution intentionally doesn't need `execute()`'s timeout/row-cap machinery built for untrusted LLM output.
+- Match `run_eval.py`'s connection config to `execute()`'s exactly.
+
+**Decision:** Match the config. `run_eval.py`'s gold connection now opens with the same `config={"enable_external_access": "false"}` — it never needed filesystem access either, so the lockdown is free there too.
+
+**Consequence:** Any future connection opened against `data/ledgerql.duckdb` (or the eval fixture) from within the same process as another open connection must use an identical `config` dict, or it will fail the same way. If a new code path introduces a third connection with its own config for a legitimate reason, that reason should be logged here, not silently divergent.
+
+---
+
+## 2026-09-09 — jsonl report writer must not assume DuckDB result values are JSON-native
+
+**Context:** Per the fix wave, each per-case record in `reports/baseline_<date>.jsonl` now includes the raw `columns`/`rows`/`truncated` from `execute()`'s result, so a hallucination determination can be audited without re-running the query. `write_reports()` called `json.dumps(record)` directly. The first real full run to reach this line (after the connection-config fix above) crashed there: DuckDB returns `datetime.date` for `DATE` columns (e.g. `period_end_date`), which `json.dumps` cannot serialize by default. Like the bug above, this was only exercised by a genuine end-to-end run — no unit test constructed a record with a real DB-typed value, and the two prior attempts died before reaching this line for unrelated reasons.
+
+**Decision:** `json.dumps(record, default=str)`. Any value json can't natively encode (date, Decimal, etc.) gets stringified rather than crashing the whole report after 103 real LLM calls. Added `test_write_reports_serializes_date_values_in_rows` so this stays covered without needing a live DB or Ollama.
+
+**Consequence:** The jsonl report is now robust to any DuckDB-native type showing up in a result set, at the cost of those values reading as strings (e.g. `"2024-09-28"`) rather than native JSON types in the report — acceptable since the report is for human/audit reading, not further machine parsing.

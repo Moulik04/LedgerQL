@@ -46,6 +46,9 @@ marked `needs_validation` print in a separate REVIEW NEEDED section and
 don't fail the exit code by themselves — read the `validation_note` and
 decide. **Phase 2's baseline number is not valid until this passes clean
 (or every REVIEW NEEDED item has been resolved one way or the other).**
+It passed clean, and the real baseline is recorded in
+`reports/baseline.md`: 58.0% execution accuracy, 32.5%
+hallucinated-number rate on all 103 cases.
 
 CI runs the same check on every push/PR (`.github/workflows/ci.yml`,
 `eval-validate` job), but against `tests/fixtures/eval_fixture.duckdb`
