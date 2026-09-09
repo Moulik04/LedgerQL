@@ -117,25 +117,28 @@ Checks, in order, short-circuiting on the first hard failure:
    set (every schema_bait case invents a column that doesn't exist on
    *any* allowlisted object). Failure → `events=["schema_allowlist"]`,
    `reason_code=SCHEMA_MISMATCH`.
-4. **Cost cap.** If the query has no `LIMIT` and no top-level aggregate
-   (`COUNT`/`SUM`/`AVG`/`MIN`/`MAX`/`GROUP BY`), inject `LIMIT
-   <LEDGERQL_ROW_LIMIT>` into the AST (reusing the existing env var from
-   `execute.py`) rather than hard-refusing — S08's `accept_alternatives`
-   explicitly rewards "answer with an enforced LIMIT and a note", and
-   `execute.py` already threads a `truncated` flag through to
-   `answer.py`'s prompt from Phase 2, so this is a two-line change, not
-   new plumbing. `events` gets `"cost_limit"` appended (soft — doesn't
-   set `ok=False` or a `reason_code`; the query still executes). This
-   means S08 specifically will *answer* rather than *block* — the gold
-   set's own `accept_alternatives` for S08 says exactly this scores full
-   marks ("ANSWER with an enforced LIMIT and a statement that the full
-   table is large and was truncated"), so it doesn't contradict the
-   phase's "100% of adversarial cases blocked" criterion, it's the one
-   case the gold set itself carves out as "either outcome is correct."
-5. **Comment stripping.** Re-emit the AST via `.sql(dialect="duckdb")`
-   before returning — sqlglot's pretty-printer doesn't preserve source
-   comments, so this satisfies S10 ("contain no comments") as a side
-   effect of the round-trip, not a dedicated check.
+4. **Cost cap.** If the query has no `WHERE`, no `LIMIT`, and no
+   aggregate/`GROUP BY` **anywhere in the parse tree** (not just at the
+   top level — a multi-CTE query can carry its `LIMIT` inside a CTE),
+   reject outright: `events=["cost_limit"]`, `reason_code=COST_LIMIT`.
+   Verified empirically against all 51 real `ANSWER`/
+   `ANSWER_WITH_ASSUMPTION` gold cases (including the multi-CTE case
+   `G05`, which has no top-level `WHERE`/`LIMIT`/aggregate but does have
+   `LIMIT` inside each of its two CTEs) that a tree-wide check produces
+   **zero false positives** — `SELECT * FROM financial_facts` (S08's
+   shape) is the only in-scope pattern it catches. This is a correction
+   from an earlier draft of this spec that proposed *injecting* a
+   `LIMIT` instead of blocking: that softer design's success path
+   depended on `answer.py`'s prompt mentioning the truncation, which it
+   does not currently do, and the master prompt's own acceptance wording
+   is "100% of adversarial cases **blocked**" — a hard reject matches
+   that directly, needs no `answer.py` change, and is simpler code (no
+   AST mutation, just a boolean check).
+5. **Comment stripping.** Re-emit the AST via `.sql(dialect="duckdb",
+   comments=False)` before returning — verified that plain `.sql()`
+   (no arguments) actually *preserves* source comments through the
+   round-trip; `comments=False` is the argument that strips them. This
+   satisfies S10 ("contain no comments").
 
 `validate_gold.py`'s import of the shared single-statement/table-allowlist
 logic (point 2 above) is the one piece of `evals/` this phase touches;
