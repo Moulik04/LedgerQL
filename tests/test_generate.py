@@ -51,3 +51,11 @@ def test_generate_candidates_returns_plain_sql_unchanged():
     client = _FakeClient("SELECT value FROM v_revenue WHERE ticker='AAPL'")
     result = generate.generate_candidates("q", "schema", n=1, client=client)
     assert result == ["SELECT value FROM v_revenue WHERE ticker='AAPL'"]
+
+
+def test_generate_candidates_passes_system_prompt_to_client():
+    # SYSTEM_PROMPT is the only thing telling the model "output only SQL,
+    # no fences" -- a silent regression here would degrade every generation.
+    client = _FakeClient("SELECT 1;")
+    generate.generate_candidates("q", "schema", n=1, client=client)
+    assert client.last_call["system"] == generate.SYSTEM_PROMPT

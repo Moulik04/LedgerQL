@@ -42,17 +42,26 @@ _MAGNITUDE = {"trillion": 1e12, "billion": 1e9, "million": 1e6, "thousand": 1e3}
 # correct answers ("fiscal year 2024") and are not data values that
 # need to trace back to the executed result set.
 _NUMBER_RE = re.compile(
-    r"(?<![\d.])\$?(\d[\d,]*\.?\d*)\s*(trillion|billion|million|thousand|percent|%)?",
+    r"(?<![\d.])\$?(-?\d[\d,]*\.?\d*)\s*(trillion|billion|million|thousand|percent|%)?",
     re.IGNORECASE,
 )
 _YEAR_RE = re.compile(r"^20\d{2}$")
+# A bare number immediately followed by a hyphen and an uppercase letter
+# is an SEC form code (e.g. "10-K", "10-Q"), not a data value.
+_FORM_CODE_RE = re.compile(r"-[A-Z]")
 
 
 def extract_numbers(text: str) -> list[float]:
     numbers = []
     for match in _NUMBER_RE.finditer(text):
+        if _FORM_CODE_RE.match(text, match.end()):
+            continue
         raw_digits, word = match.groups()
-        digits = raw_digits.replace(",", "")
+        # Strip a trailing sentence period (e.g. "fiscal year 2024.")
+        # before the year-exclusion check and float conversion, so a
+        # number followed immediately by a period is treated the same
+        # as one that stands alone.
+        digits = raw_digits.replace(",", "").rstrip(".")
         if not word and _YEAR_RE.match(digits):
             continue
         try:
@@ -77,6 +86,8 @@ def _scalar_match(gold_val, pred_val, tolerance: float) -> bool:
 def results_match(
     gold_rows: list[tuple], pred_rows: list[tuple], compare: str, tolerance: float = 1e-6
 ) -> bool:
+    if compare == "none":
+        return True
     if compare == "empty":
         return len(pred_rows) == 0
     if compare in ("scalar", "count", "scalar_or_null"):
@@ -101,7 +112,10 @@ def load_gold_cases(path: Path) -> list[dict]:
 
 def run(gold_path: Path, db_path: str) -> dict:
     cases = load_gold_cases(gold_path)
-    con = duckdb.connect(db_path, read_only=True)
+    # Must match execute.execute()'s connection config exactly -- DuckDB
+    # refuses a second connection to the same file with a different
+    # config, even when both are read-only.
+    con = duckdb.connect(db_path, read_only=True, config={"enable_external_access": "false"})
 
     per_case = []
     tier_correct: dict[str, int] = defaultdict(int)
@@ -110,7 +124,26 @@ def run(gold_path: Path, db_path: str) -> dict:
     answered = 0
 
     for case in cases:
-        result = pipeline.ask(case["question"])
+        try:
+            result = pipeline.ask(case["question"], db_path=db_path)
+        except Exception as e:  # noqa: BLE001
+            # A single pipeline crash (e.g. a transient Ollama hiccup) over
+            # 103 real LLM calls must not discard every already-computed
+            # result for prior cases -- record a minimal failure and move on.
+            per_case.append(
+                {
+                    "id": case["id"],
+                    "tier": case["tier"],
+                    "expected": case["expected"],
+                    "generated_sql": None,
+                    "execution_error": f"pipeline crashed: {e}",
+                    "answer": None,
+                }
+            )
+            if case["expected"] == "ANSWER":
+                tier_total[case["tier"]] += 1
+            continue
+
         record = {
             "id": case["id"],
             "tier": case["tier"],
@@ -118,6 +151,9 @@ def run(gold_path: Path, db_path: str) -> dict:
             "generated_sql": result["sql"],
             "execution_error": result["error"],
             "answer": result["answer"],
+            "columns": result["columns"],
+            "rows": result["rows"],
+            "truncated": result["truncated"],
         }
 
         if case["expected"] == "ANSWER":
@@ -131,7 +167,7 @@ def run(gold_path: Path, db_path: str) -> dict:
             if correct:
                 tier_correct[case["tier"]] += 1
 
-        if result["answer"]:
+        if result["answer"] is not None:
             answered += 1
             claimed = extract_numbers(result["answer"])
             grounded_values = {
@@ -148,6 +184,7 @@ def run(gold_path: Path, db_path: str) -> dict:
 
     con.close()
 
+    all_tiers = sorted({case["tier"] for case in cases})
     answer_cases = [c for c in cases if c["expected"] == "ANSWER"]
     overall_accuracy = sum(tier_correct.values()) / len(answer_cases) if answer_cases else 0.0
     non_answer_cases = [c for c in cases if c["expected"] != "ANSWER"]
@@ -155,14 +192,24 @@ def run(gold_path: Path, db_path: str) -> dict:
     non_answer_attempted = sum(1 for r in non_answer_records if r["answer"] is not None)
     non_answer_errored = sum(1 for r in non_answer_records if r["execution_error"] is not None)
 
+    non_answer_tier_breakdown: dict[str, dict[str, int]] = {}
+    for tier in sorted({r["tier"] for r in non_answer_records}):
+        tier_records = [r for r in non_answer_records if r["tier"] == tier]
+        non_answer_tier_breakdown[tier] = {
+            "attempted": sum(1 for r in tier_records if r["answer"] is not None),
+            "errored": sum(1 for r in tier_records if r["execution_error"] is not None),
+        }
+
     return {
         "overall_execution_accuracy": overall_accuracy,
+        "all_tiers": all_tiers,
         "per_tier_accuracy": {tier: tier_correct[tier] / tier_total[tier] for tier in tier_total},
         "hallucinated_number_rate": hallucinated / answered if answered else 0.0,
         "answered_count": answered,
         "non_answer_case_count": len(non_answer_cases),
         "non_answer_attempted": non_answer_attempted,
         "non_answer_errored": non_answer_errored,
+        "non_answer_tier_breakdown": non_answer_tier_breakdown,
         "per_case": per_case,
     }
 
@@ -175,13 +222,17 @@ def write_reports(summary: dict, reports_dir: Path) -> tuple[Path, Path]:
 
     with jsonl_path.open("w") as f:
         for record in summary["per_case"]:
-            f.write(json.dumps(record) + "\n")
+            # rows/gold rows can carry DuckDB-native types (date, Decimal, ...)
+            # that json can't serialize natively; stringify anything it can't.
+            f.write(json.dumps(record, default=str) + "\n")
 
     lines = [
         "# Phase 2 Baseline",
         "",
         f"Date: {today}",
         f"Model: {generate_module.OLLAMA_MODEL}",
+        f"Temperature: {generate_module.OLLAMA_TEMPERATURE}",
+        f"Seed: {generate_module.OLLAMA_SEED}",
         "",
         "## Execution accuracy",
         "",
@@ -190,8 +241,12 @@ def write_reports(summary: dict, reports_dir: Path) -> tuple[Path, Path]:
         "| Tier | Accuracy |",
         "|---|---|",
     ]
-    for tier, acc in sorted(summary["per_tier_accuracy"].items()):
-        lines.append(f"| {tier} | {acc:.1%} |")
+    per_tier_accuracy = summary["per_tier_accuracy"]
+    for tier in summary["all_tiers"]:
+        if tier in per_tier_accuracy:
+            lines.append(f"| {tier} | {per_tier_accuracy[tier]:.1%} |")
+        else:
+            lines.append(f"| {tier} | no positive control in this tier |")
     lines += [
         "",
         "## Hallucinated-number rate",
@@ -209,6 +264,15 @@ def write_reports(summary: dict, reports_dir: Path) -> tuple[Path, Path]:
         f"- Attempted an answer anyway: {summary['non_answer_attempted']}",
         f"- Errored during execution (e.g. adversarial DML hitting the "
         f"read-only connection): {summary['non_answer_errored']}",
+        "",
+        "### Per-tier breakdown of non-ANSWER outcomes",
+        "",
+        "| Tier | Attempted anyway | Errored |",
+        "|---|---|---|",
+    ]
+    for tier, counts in sorted(summary["non_answer_tier_breakdown"].items()):
+        lines.append(f"| {tier} | {counts['attempted']} | {counts['errored']} |")
+    lines += [
         "",
         f"Full per-case results: `{jsonl_path.name}`",
         "",

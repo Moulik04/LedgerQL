@@ -40,6 +40,22 @@ def test_ask_skips_answer_generation_on_execution_error(monkeypatch):
     assert calls == []
 
 
+def test_ask_threads_db_path_to_execute(monkeypatch):
+    monkeypatch.setattr(generate_module, "generate_candidates", lambda q, s, n=1: ["SELECT 1"])
+    calls = []
+
+    def fake_execute(sql, **kwargs):
+        calls.append(kwargs)
+        return ExecutionResult(columns=["x"], rows=[(1,)])
+
+    monkeypatch.setattr(execute_module, "execute", fake_execute)
+    monkeypatch.setattr(answer_module, "write_answer", lambda q, r: "The value is 1.")
+
+    pipeline.ask("what is 1?", db_path="custom.duckdb")
+
+    assert calls == [{"db_path": "custom.duckdb"}]
+
+
 def test_ask_uses_real_schema_context(monkeypatch):
     captured = {}
 

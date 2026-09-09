@@ -49,6 +49,17 @@ def test_execute_reports_syntax_errors(tmp_path):
     assert result.rows == []
 
 
+def test_execute_blocks_filesystem_export(tmp_path):
+    # Even on a read-only connection, DuckDB's external-access functions
+    # (COPY ... TO, read_csv_auto, etc.) can write/read arbitrary files on
+    # disk. Disabling enable_external_access must block this.
+    db_path = _make_db(tmp_path, [(1, "x")])
+    out_path = tmp_path / "exfiltrated.csv"
+    result = execute.execute(f"COPY (SELECT 1 AS a) TO '{out_path}' (HEADER)", db_path=db_path)
+    assert result.error is not None
+    assert not out_path.exists()
+
+
 def test_execute_times_out_on_slow_query(tmp_path):
     db_path = tmp_path / "slow.duckdb"
     con = duckdb.connect(str(db_path))

@@ -12,10 +12,13 @@ from ledgerql import generate as generate_module
 from ledgerql import schema_index
 
 
-def ask(question: str) -> dict:
+def ask(question: str, db_path: str | None = None) -> dict:
     schema_context = schema_index.get_schema_context()
     sql = generate_module.generate_candidates(question, schema_context, n=1)[0]
-    result = execute_module.execute(sql)
+    if db_path is not None:
+        result = execute_module.execute(sql, db_path=db_path)
+    else:
+        result = execute_module.execute(sql)
 
     base = {
         "question": question,

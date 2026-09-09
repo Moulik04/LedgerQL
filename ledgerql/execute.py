@@ -5,9 +5,10 @@ timeout and a row-count cap. This is baseline infrastructure hygiene,
 not a guardrail: Phase 2 has no AST validation, no cost estimation, no
 schema allowlisting (those are Phase 3's guardrails.py) -- but the
 connection is read-only from day one, consistent with the master
-prompt's non-negotiable constraint #3, and results are capped so a
-pathological query can't exhaust memory or blow the answer-generation
-prompt's context.
+prompt's non-negotiable constraint #3, and results are capped so what
+reaches the answer-generation prompt and report stays bounded (this
+caps prompt/report size, not memory used while fetching -- the full
+result set is still materialized in memory before any capping happens).
 """
 
 import concurrent.futures
@@ -36,7 +37,7 @@ def execute(
     row_limit: int = ROW_LIMIT,
 ) -> ExecutionResult:
     try:
-        con = duckdb.connect(db_path, read_only=True)
+        con = duckdb.connect(db_path, read_only=True, config={"enable_external_access": "false"})
     except Exception as e:  # noqa: BLE001
         return ExecutionResult(error=str(e))
 
@@ -61,4 +62,9 @@ def execute(
     except Exception as e:  # noqa: BLE001
         return ExecutionResult(error=str(e))
     finally:
-        con.close()
+        # con.close() must never be allowed to raise out of execute() and
+        # override/replace an ExecutionResult that's already being returned.
+        try:
+            con.close()
+        except Exception:  # noqa: BLE001
+            pass
