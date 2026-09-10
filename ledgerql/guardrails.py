@@ -116,8 +116,12 @@ def validate(sql: str, db_path: str = DB_PATH) -> GuardrailResult:
             detail=f"references non-allowlisted table(s): {sorted(stray_tables)}",
         )
 
-    allowed_columns = _live_columns(db_path)
-    referenced_columns = {c.name.lower() for c in stmt.find_all(exp.Column)}
+    try:
+        allowed_columns = _live_columns(db_path)
+    except Exception as e:  # noqa: BLE001
+        return GuardrailResult(ok=False, sql=sql, reason_code="EXEC_ERROR", detail=str(e))
+    aliases = {a.alias.lower() for a in stmt.find_all(exp.Alias) if a.alias}
+    referenced_columns = {c.name.lower() for c in stmt.find_all(exp.Column)} - aliases
     stray_columns = referenced_columns - allowed_columns
     if stray_columns:
         return GuardrailResult(

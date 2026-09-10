@@ -98,3 +98,20 @@ def test_validate_allows_cte_with_limit_inside_cte_but_not_top_level(tmp_path):
         "WITH a AS (SELECT cik FROM companies LIMIT 5) SELECT * FROM a", db_path=db_path
     )
     assert result.ok is True
+
+
+def test_validate_allows_column_alias_referenced_in_order_by(tmp_path):
+    db_path = _make_companies_db(tmp_path, ["cik", "ticker"])
+    result = guardrails.validate(
+        "SELECT ticker, COUNT(*) AS company_count FROM companies "
+        "GROUP BY ticker ORDER BY company_count DESC LIMIT 5",
+        db_path=db_path,
+    )
+    assert result.ok is True
+
+
+def test_validate_returns_exec_error_on_bad_db_path(tmp_path):
+    bad_path = str(tmp_path / "does_not_exist" / "x.duckdb")
+    result = guardrails.validate("SELECT 1", db_path=bad_path)
+    assert result.ok is False
+    assert result.reason_code == "EXEC_ERROR"

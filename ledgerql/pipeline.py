@@ -24,60 +24,69 @@ from ledgerql import schema_index
 def ask(question: str, db_path: str | None = None) -> dict:
     start = time.monotonic()
 
-    classify_result = classify_module.classify(question)
-    if classify_result.verdict != "IN_SCOPE":
-        return _finish(question, start, classify_result, reason_code=classify_result.verdict)
+    try:
+        classify_result = classify_module.classify(question)
+        if classify_result.verdict != "IN_SCOPE":
+            return _finish(question, start, classify_result, reason_code=classify_result.verdict)
 
-    schema_context = schema_index.get_schema_context()
-    sql = generate_module.generate_candidates(question, schema_context, n=1)[0]
+        schema_context = schema_index.get_schema_context()
+        sql = generate_module.generate_candidates(question, schema_context, n=1)[0]
 
-    if db_path is not None:
-        guard = guardrails_module.validate(sql, db_path=db_path)
-    else:
-        guard = guardrails_module.validate(sql)
+        if db_path is not None:
+            guard = guardrails_module.validate(sql, db_path=db_path)
+        else:
+            guard = guardrails_module.validate(sql)
 
-    if not guard.ok:
-        return _finish(
-            question,
-            start,
-            classify_result,
-            sql=sql,
-            guardrail_events=guard.events,
-            reason_code=guard.reason_code,
-            error=guard.detail,
-        )
+        if not guard.ok:
+            return _finish(
+                question,
+                start,
+                classify_result,
+                sql=sql,
+                guardrail_events=guard.events,
+                reason_code=guard.reason_code,
+                error=guard.detail,
+            )
 
-    if db_path is not None:
-        exec_result = execute_module.execute(guard.sql, db_path=db_path)
-    else:
-        exec_result = execute_module.execute(guard.sql)
+        if db_path is not None:
+            exec_result = execute_module.execute(guard.sql, db_path=db_path)
+        else:
+            exec_result = execute_module.execute(guard.sql)
 
-    if exec_result.error is not None:
+        if exec_result.error is not None:
+            return _finish(
+                question,
+                start,
+                classify_result,
+                sql=guard.sql,
+                guardrail_events=guard.events,
+                reason_code="EXEC_ERROR",
+                columns=exec_result.columns,
+                rows=exec_result.rows,
+                truncated=exec_result.truncated,
+                error=exec_result.error,
+            )
+
+        answer_text = answer_module.write_answer(question, exec_result)
         return _finish(
             question,
             start,
             classify_result,
             sql=guard.sql,
             guardrail_events=guard.events,
-            reason_code="EXEC_ERROR",
             columns=exec_result.columns,
             rows=exec_result.rows,
             truncated=exec_result.truncated,
-            error=exec_result.error,
+            answer=answer_text,
         )
-
-    answer_text = answer_module.write_answer(question, exec_result)
-    return _finish(
-        question,
-        start,
-        classify_result,
-        sql=guard.sql,
-        guardrail_events=guard.events,
-        columns=exec_result.columns,
-        rows=exec_result.rows,
-        truncated=exec_result.truncated,
-        answer=answer_text,
-    )
+    except Exception as e:  # noqa: BLE001
+        # Last-resort catch-all: guarantees the master prompt's "every query
+        # is logged, nothing silently dropped" constraint holds even when an
+        # unhandled exception (Ollama down, empty candidate list, a bug in
+        # any stage) would otherwise propagate out of ask() before _finish()
+        # -- the sole audit.write_record() call site -- is ever reached.
+        fallback_classify = classify_module.ClassifyResult(verdict="EXEC_ERROR", explanation=str(e))
+        return _finish(question, start, fallback_classify, reason_code="EXEC_ERROR", error=str(e))
 
 
 def _finish(

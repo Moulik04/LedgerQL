@@ -209,7 +209,7 @@ def main() -> int:
     args = ap.parse_args()
 
     cases = load_cases(Path(args.gold))
-    con = duckdb.connect(args.db, read_only=True)
+    con = duckdb.connect(args.db, read_only=True, config={"enable_external_access": "false"})
 
     failures: list[tuple[str, str, str]] = []
     review: list[tuple[str, str, str]] = []

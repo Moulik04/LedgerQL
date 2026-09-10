@@ -151,6 +151,23 @@ def test_ask_returns_full_success_result(monkeypatch):
     assert "v_revenue" in captured["schema_context"]
 
 
+def test_ask_writes_audit_record_and_does_not_raise_on_classify_crash(monkeypatch):
+    records = _patch_audit(monkeypatch)
+
+    def _boom(q):
+        raise Exception("boom")
+
+    monkeypatch.setattr(classify_module, "classify", _boom)
+
+    result = pipeline.ask("Should I buy Tesla stock?")
+
+    assert result["reason_code"] == "EXEC_ERROR"
+    assert result["error"] == "boom"
+    assert result["answer"] is None
+    assert len(records) == 1
+    assert records[0]["reason_code"] == "EXEC_ERROR"
+
+
 def test_ask_threads_db_path_to_guardrails_and_execute(monkeypatch):
     _patch_audit(monkeypatch)
     monkeypatch.setattr(
