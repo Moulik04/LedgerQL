@@ -24,7 +24,6 @@ import sqlglot
 from sqlglot import exp
 
 DB_PATH = os.environ.get("LEDGERQL_DB_PATH", "data/ledgerql.duckdb")
-ROW_LIMIT = int(os.environ.get("LEDGERQL_ROW_LIMIT", "1000"))
 
 ALLOWED_TABLES = {
     "companies",
@@ -88,7 +87,7 @@ def _is_unbounded(stmt: exp.Expression) -> bool:
     return not (has_where or has_limit or has_agg)
 
 
-def validate(sql: str, db_path: str = DB_PATH, row_limit: int = ROW_LIMIT) -> GuardrailResult:
+def validate(sql: str, db_path: str = DB_PATH) -> GuardrailResult:
     try:
         stmts = parse_sql(sql)
     except Exception as e:  # noqa: BLE001

@@ -90,3 +90,11 @@ def test_validate_strips_comments_from_valid_sql(tmp_path):
     assert result.ok is True
     assert "system" not in result.sql
     assert "ignore rules" not in result.sql
+
+
+def test_validate_allows_cte_with_limit_inside_cte_but_not_top_level(tmp_path):
+    db_path = _make_companies_db(tmp_path, ["cik", "ticker"])
+    result = guardrails.validate(
+        "WITH a AS (SELECT cik FROM companies LIMIT 5) SELECT * FROM a", db_path=db_path
+    )
+    assert result.ok is True
