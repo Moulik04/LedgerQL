@@ -4,7 +4,7 @@ An auditable natural-language-to-SQL system for financial data — layered guard
 
 > Ask a plain-English question about company financials. LedgerQL returns a correct SQL query, the executed result, and a grounded answer with a confidence score — **or it refuses**, with a reason. It never returns a fabricated number.
 
-**Status:** Phase 1 complete — 500 S&P constituents' 10-K filings loaded into DuckDB. Phase 2 (naive text-to-SQL baseline) is built and pending merge.
+**Status:** Phase 3 complete — guardrails (AST-level SQL validation, live schema allowlisting, cost caps) and a full audit trail are live. 58.0% execution accuracy, 28.6% hallucinated-number rate, 88.9% adversarial guardrail catch rate on the 103-case gold set.
 
 ## Why
 
@@ -76,8 +76,8 @@ The eval suite is the point of the project, not an afterthought. `make eval` run
 
 - [x] **Phase 0 — Scaffold.** Project layout, tooling, CI-ready lint/test setup.
 - [x] **Phase 1 — Data.** SEC EDGAR ingestion into DuckDB, analyst-facing schema, sanity queries against known filings.
-- [ ] **Phase 2 — Naive text-to-SQL.** End-to-end generation and execution baseline, no guardrails. Built on `phase2-naive-sql`, pending merge: 58.0% execution accuracy, 32.5% hallucinated-number rate on 103 gold cases (see `reports/baseline.md` on that branch) — this is the "before" number the guardrails in Phase 3/4 are measured against.
-- [ ] **Phase 3 — Guardrails + audit.** AST-level SQL validation, schema enforcement, full audit trail.
+- [x] **Phase 2 — Naive text-to-SQL.** End-to-end generation and execution baseline, no guardrails. 58.0% execution accuracy, 32.5% hallucinated-number rate on 103 gold cases — the "before" number Phase 3's guardrails are measured against.
+- [x] **Phase 3 — Guardrails + audit.** AST-level SQL validation (sqlglot), live schema allowlisting, cost caps, a soft LLM scope prefilter, and a full JSONL audit trail on every request. 58.0% execution accuracy (unchanged from Phase 2 — guardrails don't cost correctness), 28.6% hallucinated-number rate, 88.9% (8/9) adversarial guardrail catch rate (see `DECISIONS.md` for the one documented miss) — see `reports/baseline.md`.
 - [ ] **Phase 4 — Hallucination detection.** Self-consistency voting, grounded-answer verification, confidence scoring, abstain policy.
 - [ ] **Phase 5 — Scale-out evals.** Larger model comparison on GPU infrastructure, expanded gold set.
 - [ ] **Phase 6 — Fine-tuning (stretch).** LoRA fine-tune of the local generation model on the gold set.
