@@ -1,12 +1,12 @@
-"""Stage 7a: answer generation (Phase 2 version).
+"""Stage 7a: grounded answer generation.
 
-Phase 2 shows the model both the question and the executed result and
-asks for a plain-English answer -- unverified, no grounding check.
-Phase 4 replaces this with a stricter version that hides the question
-(to force grounding in the data alone) and adds a numeric verifier;
-this function's behavior is expected to change substantially then --
-that evolution is the point of the ablation story, not a defect to
-avoid by over-building Phase 2 now.
+The model sees only the executed result's column names and rows --
+never the original natural-language question, never the SQL. This is
+deliberate: with no question to answer "from memory" against, the only
+thing the model can plausibly do is describe the table in front of it,
+which is what makes the numeric verifier (verify.py) a meaningful check
+rather than a race against a model that already has its own idea of
+what the answer "should" be.
 """
 
 import os
@@ -21,9 +21,10 @@ OLLAMA_TEMPERATURE = float(os.environ.get("OLLAMA_TEMPERATURE", "0.2"))
 OLLAMA_SEED = int(os.environ.get("OLLAMA_SEED", "42"))
 
 SYSTEM_PROMPT = (
-    "You answer questions about company financials using only the data "
-    "table provided below. Write one or two plain-English sentences. "
-    "State any unit or fiscal year explicitly."
+    "Write one or two plain-English sentences describing the data in this "
+    "table. Use only the values shown -- do not add, round differently, or "
+    "infer any number not present. State any unit or fiscal year exactly as "
+    "given."
 )
 
 
@@ -36,13 +37,12 @@ def _format_result(result: ExecutionResult) -> str:
 
 
 def write_answer(
-    question: str,
     result: ExecutionResult,
     client: ollama.Client | None = None,
 ) -> str:
     client = client or ollama.Client(host=OLLAMA_HOST)
     table_text = _format_result(result)
-    prompt = f"Question: {question}\n\nResult:\n{table_text}\n\nAnswer:"
+    prompt = f"Result:\n{table_text}\n\nAnswer:"
     response = client.generate(
         model=OLLAMA_MODEL,
         system=SYSTEM_PROMPT,
