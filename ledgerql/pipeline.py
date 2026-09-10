@@ -1,13 +1,14 @@
-"""Orchestrates the Phase 3 guarded pipeline: classify -> schema ->
-generate -> guardrails -> execute -> answer -> audit.
+"""Orchestrates the Phase 4 pipeline: classify -> schema -> generate N
+candidates -> guardrails validate each -> execute each survivor ->
+consensus vote -> answer (question hidden) -> verify -> audit.
 
-classify.py (Layer 1) is a soft prefilter that can short-circuit
-before generation ever runs. guardrails.py (Layer 4) is the hard
-backstop that validates whatever SQL actually gets generated,
-independent of what classify.py decided. audit.py (Layer 8) writes
-exactly one record on every exit path via the shared _finish() helper
-below, satisfying the master prompt's 'every query is logged' hard
-constraint even on the classify/guardrail-rejected paths.
+Two independent abstain triggers sit between consensus and the answer
+stage: no candidate produced a usable result at all (consensus.py sets
+reason_code itself), or a usable winner exists but too few of the N
+candidates agreed with it (LOW_AGREEMENT_THRESHOLD, checked here). A
+third trigger, UNGROUNDED_ANSWER, sits after the answer is written, if
+verify.py finds a stated number with nothing backing it in the winning
+result.
 """
 
 import time
@@ -15,10 +16,16 @@ import time
 from ledgerql import answer as answer_module
 from ledgerql import audit as audit_module
 from ledgerql import classify as classify_module
+from ledgerql import consensus as consensus_module
 from ledgerql import execute as execute_module
 from ledgerql import generate as generate_module
 from ledgerql import guardrails as guardrails_module
 from ledgerql import schema_index
+from ledgerql import verify as verify_module
+from ledgerql.execute import ExecutionResult
+
+N_CANDIDATES = 5
+LOW_AGREEMENT_THRESHOLD = 0.6
 
 
 def ask(question: str, db_path: str | None = None) -> dict:
@@ -30,61 +37,99 @@ def ask(question: str, db_path: str | None = None) -> dict:
             return _finish(question, start, classify_result, reason_code=classify_result.verdict)
 
         schema_context = schema_index.get_schema_context()
-        sql = generate_module.generate_candidates(question, schema_context, n=1)[0]
+        sqls = generate_module.generate_candidates(
+            question,
+            schema_context,
+            n=N_CANDIDATES,
+            temperature=generate_module.OLLAMA_CONSENSUS_TEMPERATURE,
+        )
 
-        if db_path is not None:
-            guard = guardrails_module.validate(sql, db_path=db_path)
-        else:
-            guard = guardrails_module.validate(sql)
+        guards = []
+        for sql in sqls:
+            if db_path is not None:
+                guards.append(guardrails_module.validate(sql, db_path=db_path))
+            else:
+                guards.append(guardrails_module.validate(sql))
 
-        if not guard.ok:
+        execs = []
+        for guard in guards:
+            if not guard.ok:
+                execs.append(None)
+                continue
+            if db_path is not None:
+                execs.append(execute_module.execute(guard.sql, db_path=db_path))
+            else:
+                execs.append(execute_module.execute(guard.sql))
+
+        consensus_result = consensus_module.vote(guards, execs)
+
+        if consensus_result.reason_code is not None:
             return _finish(
                 question,
                 start,
                 classify_result,
-                sql=sql,
-                guardrail_events=guard.events,
-                reason_code=guard.reason_code,
-                error=guard.detail,
+                sql=consensus_result.sql,
+                guardrail_events=consensus_result.events,
+                reason_code=consensus_result.reason_code,
+                error=consensus_result.detail,
             )
 
-        if db_path is not None:
-            exec_result = execute_module.execute(guard.sql, db_path=db_path)
-        else:
-            exec_result = execute_module.execute(guard.sql)
-
-        if exec_result.error is not None:
+        if consensus_result.agreement < LOW_AGREEMENT_THRESHOLD:
             return _finish(
                 question,
                 start,
                 classify_result,
-                sql=guard.sql,
-                guardrail_events=guard.events,
-                reason_code="EXEC_ERROR",
-                columns=exec_result.columns,
-                rows=exec_result.rows,
-                truncated=exec_result.truncated,
-                error=exec_result.error,
+                sql=consensus_result.sql,
+                guardrail_events=consensus_result.events,
+                columns=consensus_result.columns,
+                rows=consensus_result.rows,
+                truncated=consensus_result.truncated,
+                reason_code="LOW_AGREEMENT",
+                confidence=consensus_result.agreement,
             )
 
-        answer_text = answer_module.write_answer(question, exec_result)
+        winner = ExecutionResult(
+            columns=consensus_result.columns,
+            rows=consensus_result.rows,
+            truncated=consensus_result.truncated,
+        )
+        answer_text = answer_module.write_answer(winner)
+
+        verify_result = verify_module.verify(
+            answer_text, consensus_result.columns, consensus_result.rows
+        )
+        if not verify_result.ok:
+            return _finish(
+                question,
+                start,
+                classify_result,
+                sql=consensus_result.sql,
+                guardrail_events=consensus_result.events,
+                columns=consensus_result.columns,
+                rows=consensus_result.rows,
+                truncated=consensus_result.truncated,
+                reason_code="UNGROUNDED_ANSWER",
+                error=verify_result.detail,
+                confidence=consensus_result.agreement,
+            )
+
         return _finish(
             question,
             start,
             classify_result,
-            sql=guard.sql,
-            guardrail_events=guard.events,
-            columns=exec_result.columns,
-            rows=exec_result.rows,
-            truncated=exec_result.truncated,
+            sql=consensus_result.sql,
+            guardrail_events=consensus_result.events,
+            columns=consensus_result.columns,
+            rows=consensus_result.rows,
+            truncated=consensus_result.truncated,
             answer=answer_text,
+            confidence=consensus_result.agreement,
         )
     except Exception as e:  # noqa: BLE001
         # Last-resort catch-all: guarantees the master prompt's "every query
         # is logged, nothing silently dropped" constraint holds even when an
-        # unhandled exception (Ollama down, empty candidate list, a bug in
-        # any stage) would otherwise propagate out of ask() before _finish()
-        # -- the sole audit.write_record() call site -- is ever reached.
+        # unhandled exception would otherwise propagate out of ask() before
+        # _finish() -- the sole audit.write_record() call site -- is reached.
         fallback_classify = classify_module.ClassifyResult(verdict="EXEC_ERROR", explanation=str(e))
         return _finish(question, start, fallback_classify, reason_code="EXEC_ERROR", error=str(e))
 
@@ -101,6 +146,7 @@ def _finish(
     truncated: bool = False,
     error: str | None = None,
     answer: str | None = None,
+    confidence: float | None = None,
 ) -> dict:
     guardrail_events = guardrail_events or []
     columns = columns or []
@@ -117,6 +163,7 @@ def _finish(
         "answer": answer,
         "reason_code": reason_code,
         "guardrail_events": guardrail_events,
+        "confidence": confidence,
     }
     audit_module.write_record(
         {
@@ -132,7 +179,7 @@ def _finish(
                 "error": error,
             },
             "answer": answer,
-            "confidence": None,
+            "confidence": confidence,
             "reason_code": reason_code,
             "latency_ms": latency_ms,
         }
