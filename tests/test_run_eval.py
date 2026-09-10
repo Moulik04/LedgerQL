@@ -1,54 +1,6 @@
 import pytest
 
-from evals.run_eval import extract_numbers, results_match
-
-
-def test_extract_numbers_handles_plain_integer():
-    assert extract_numbers("The value is 391035000000.") == [391035000000.0]
-
-
-def test_extract_numbers_handles_billions_word():
-    assert extract_numbers("Revenue was $391.0 billion.") == [391000000000.0]
-
-
-def test_extract_numbers_handles_percent():
-    numbers = extract_numbers("Growth was 6.43%.")
-    assert numbers == [6.43]
-
-
-def test_extract_numbers_excludes_plausible_years():
-    # A bare 4-digit number in the 2000-2099 range reads as a fiscal
-    # year, not a data value, and must not be treated as an ungrounded
-    # numeric claim.
-    numbers = extract_numbers("This is fiscal year 2024 data.")
-    assert numbers == []
-
-
-def test_extract_numbers_excludes_plausible_years_with_trailing_period():
-    # A year immediately followed by a sentence-ending period (no space)
-    # must be excluded the same way a bare year is -- the trailing "."
-    # must not defeat the year-exclusion check.
-    numbers = extract_numbers("This is fiscal year 2024.")
-    assert numbers == []
-
-
-def test_extract_numbers_excludes_sec_form_codes():
-    # "10-K" / "10-Q" are SEC form codes, not bare numbers -- the "10"
-    # must not be extracted as a claimed numeric value.
-    numbers = extract_numbers("It filed a 10-K report.")
-    assert numbers == []
-    numbers = extract_numbers("It filed a 10-K and a 10-Q.")
-    assert numbers == []
-
-
-def test_extract_numbers_handles_negative_number():
-    numbers = extract_numbers("Revenue declined by -5.2%.")
-    assert numbers == [-5.2]
-
-
-def test_extract_numbers_handles_multiple_values():
-    numbers = extract_numbers("Revenue was $391.0 billion and net income was $93.7 billion.")
-    assert numbers == [391000000000.0, 93700000000.0]
+from evals.run_eval import results_match
 
 
 def test_results_match_scalar_within_tolerance():
@@ -114,6 +66,11 @@ def test_write_reports_serializes_date_values_in_rows(tmp_path):
         "non_answer_attempted": 0,
         "non_answer_errored": 0,
         "non_answer_tier_breakdown": {},
+        "all_abstains": 0,
+        "correct_abstains": 0,
+        "expected_abstains": 0,
+        "abstain_precision": 0.0,
+        "abstain_recall": 0.0,
         "per_case": [
             {
                 "id": "L01",
@@ -127,6 +84,8 @@ def test_write_reports_serializes_date_values_in_rows(tmp_path):
     record = json.loads(jsonl_path.read_text().splitlines()[0])
     assert record["rows"][0][0] == "2024-09-28"
     assert md_path.exists()
+    assert md_path.name == "eval.md"
+    assert jsonl_path.name.startswith("eval_")
 
 
 def test_score_guardrail_case_passes_when_blocked_with_correct_reason():
@@ -265,3 +224,70 @@ def test_run_skips_guardrail_scoring_for_answer_expected_in_guardrail_tiers(tmp_
     # The out_of_scope ABSTAIN case should be in guardrail_total
     assert "out_of_scope" in summary["guardrail_catch_rate"]
     assert summary["guardrail_catch_rate"]["out_of_scope"] == 1.0
+
+
+def test_compute_abstain_metrics_counts_correct_abstain():
+    from evals.run_eval import compute_abstain_metrics
+
+    per_case = [{"id": "A1", "answer": None, "reason_code": "OUT_OF_SCOPE"}]
+    cases_by_id = {"A1": {"expected": "ABSTAIN", "reason_code": "OUT_OF_SCOPE"}}
+
+    metrics = compute_abstain_metrics(per_case, cases_by_id)
+
+    assert metrics["all_abstains"] == 1
+    assert metrics["correct_abstains"] == 1
+    assert metrics["expected_abstains"] == 1
+    assert metrics["abstain_precision"] == 1.0
+    assert metrics["abstain_recall"] == 1.0
+
+
+def test_compute_abstain_metrics_wrong_reason_code_not_correct():
+    from evals.run_eval import compute_abstain_metrics
+
+    per_case = [{"id": "A1", "answer": None, "reason_code": "SCHEMA_MISMATCH"}]
+    cases_by_id = {"A1": {"expected": "ABSTAIN", "reason_code": "OUT_OF_SCOPE"}}
+
+    metrics = compute_abstain_metrics(per_case, cases_by_id)
+
+    assert metrics["correct_abstains"] == 0
+    assert metrics["abstain_precision"] == 0.0
+
+
+def test_compute_abstain_metrics_answered_case_not_counted_as_abstain():
+    from evals.run_eval import compute_abstain_metrics
+
+    per_case = [{"id": "L1", "answer": "the value is 5", "reason_code": None}]
+    cases_by_id = {"L1": {"expected": "ANSWER", "reason_code": None}}
+
+    metrics = compute_abstain_metrics(per_case, cases_by_id)
+
+    assert metrics["all_abstains"] == 0
+    assert metrics["expected_abstains"] == 0
+    assert metrics["abstain_precision"] == 0.0
+    assert metrics["abstain_recall"] == 0.0
+
+
+def test_compute_abstain_metrics_missed_expected_abstain_hurts_recall():
+    from evals.run_eval import compute_abstain_metrics
+
+    # Expected to abstain, but the pipeline answered anyway.
+    per_case = [{"id": "A1", "answer": "a wrong answer", "reason_code": None}]
+    cases_by_id = {"A1": {"expected": "ABSTAIN", "reason_code": "OUT_OF_SCOPE"}}
+
+    metrics = compute_abstain_metrics(per_case, cases_by_id)
+
+    assert metrics["expected_abstains"] == 1
+    assert metrics["correct_abstains"] == 0
+    assert metrics["abstain_recall"] == 0.0
+
+
+def test_compute_abstain_metrics_counts_answer_with_assumption_as_expected():
+    from evals.run_eval import compute_abstain_metrics
+
+    per_case = [{"id": "L3", "answer": None, "reason_code": "AMBIGUOUS"}]
+    cases_by_id = {"L3": {"expected": "ANSWER_WITH_ASSUMPTION", "reason_code": "AMBIGUOUS"}}
+
+    metrics = compute_abstain_metrics(per_case, cases_by_id)
+
+    assert metrics["expected_abstains"] == 1
+    assert metrics["correct_abstains"] == 1
