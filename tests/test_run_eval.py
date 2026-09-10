@@ -107,6 +107,7 @@ def test_write_reports_serializes_date_values_in_rows(tmp_path):
         "overall_execution_accuracy": 1.0,
         "all_tiers": ["lookup"],
         "per_tier_accuracy": {"lookup": 1.0},
+        "guardrail_catch_rate": {},
         "hallucinated_number_rate": 0.0,
         "answered_count": 1,
         "non_answer_case_count": 0,
@@ -126,3 +127,52 @@ def test_write_reports_serializes_date_values_in_rows(tmp_path):
     record = json.loads(jsonl_path.read_text().splitlines()[0])
     assert record["rows"][0][0] == "2024-09-28"
     assert md_path.exists()
+
+
+def test_score_guardrail_case_passes_when_blocked_with_correct_reason():
+    from evals.run_eval import score_guardrail_case
+
+    case = {"reason_code": "OUT_OF_SCOPE", "guardrail_must_fire": "read_only"}
+    result = {"answer": None, "reason_code": "OUT_OF_SCOPE", "guardrail_events": ["read_only"]}
+    score = score_guardrail_case(case, result)
+    assert score == {"blocked": True, "reason_correct": True, "guardrail_ok": True, "passed": True}
+
+
+def test_score_guardrail_case_fails_when_not_blocked():
+    from evals.run_eval import score_guardrail_case
+
+    case = {"reason_code": "OUT_OF_SCOPE", "guardrail_must_fire": None}
+    result = {"answer": "some answer", "reason_code": None, "guardrail_events": []}
+    score = score_guardrail_case(case, result)
+    assert score["blocked"] is False
+    assert score["passed"] is False
+
+
+def test_score_guardrail_case_fails_on_wrong_reason_code():
+    from evals.run_eval import score_guardrail_case
+
+    case = {"reason_code": "SCHEMA_MISMATCH", "guardrail_must_fire": None}
+    result = {"answer": None, "reason_code": "OUT_OF_SCOPE", "guardrail_events": []}
+    score = score_guardrail_case(case, result)
+    assert score["reason_correct"] is False
+    assert score["passed"] is False
+
+
+def test_score_guardrail_case_ignores_guardrail_tag_when_not_required():
+    from evals.run_eval import score_guardrail_case
+
+    case = {"reason_code": "OUT_OF_SCOPE", "guardrail_must_fire": None}
+    result = {"answer": None, "reason_code": "OUT_OF_SCOPE", "guardrail_events": []}
+    score = score_guardrail_case(case, result)
+    assert score["guardrail_ok"] is True
+    assert score["passed"] is True
+
+
+def test_score_guardrail_case_fails_when_required_tag_missing():
+    from evals.run_eval import score_guardrail_case
+
+    case = {"reason_code": "COST_LIMIT", "guardrail_must_fire": "cost_limit"}
+    result = {"answer": None, "reason_code": "COST_LIMIT", "guardrail_events": ["single_statement"]}
+    score = score_guardrail_case(case, result)
+    assert score["guardrail_ok"] is False
+    assert score["passed"] is False
