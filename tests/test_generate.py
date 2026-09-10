@@ -1,5 +1,3 @@
-import pytest
-
 from ledgerql import generate
 
 
@@ -9,13 +7,20 @@ class _FakeResponse:
 
 
 class _FakeClient:
-    def __init__(self, text: str):
-        self._text = text
+    def __init__(self, texts):
+        # Accept either a single string (every call returns the same
+        # text) or a list (one text per call, in order).
+        self._texts = [texts] if isinstance(texts, str) else list(texts)
+        self._call_index = 0
         self.last_call: dict | None = None
+        self.calls: list[dict] = []
 
     def generate(self, **kwargs):
         self.last_call = kwargs
-        return _FakeResponse(self._text)
+        self.calls.append(kwargs)
+        text = self._texts[min(self._call_index, len(self._texts) - 1)]
+        self._call_index += 1
+        return _FakeResponse(text)
 
 
 def test_generate_candidates_strips_markdown_fences():
@@ -41,12 +46,6 @@ def test_generate_candidates_includes_question_and_schema_in_prompt():
     assert "SCHEMA_TEXT_HERE" in client.last_call["prompt"]
 
 
-def test_generate_candidates_rejects_n_other_than_one():
-    client = _FakeClient("SELECT 1;")
-    with pytest.raises(NotImplementedError):
-        generate.generate_candidates("q", "schema", n=2, client=client)
-
-
 def test_generate_candidates_returns_plain_sql_unchanged():
     client = _FakeClient("SELECT value FROM v_revenue WHERE ticker='AAPL'")
     result = generate.generate_candidates("q", "schema", n=1, client=client)
@@ -54,8 +53,36 @@ def test_generate_candidates_returns_plain_sql_unchanged():
 
 
 def test_generate_candidates_passes_system_prompt_to_client():
-    # SYSTEM_PROMPT is the only thing telling the model "output only SQL,
-    # no fences" -- a silent regression here would degrade every generation.
     client = _FakeClient("SELECT 1;")
     generate.generate_candidates("q", "schema", n=1, client=client)
     assert client.last_call["system"] == generate.SYSTEM_PROMPT
+
+
+def test_generate_candidates_makes_n_calls():
+    client = _FakeClient(["SELECT 1;", "SELECT 2;", "SELECT 3;"])
+    result = generate.generate_candidates("q", "schema", n=3, client=client)
+    assert result == ["SELECT 1;", "SELECT 2;", "SELECT 3;"]
+    assert len(client.calls) == 3
+
+
+def test_generate_candidates_uses_distinct_seeds_per_call():
+    client = _FakeClient(["SELECT 1;", "SELECT 2;", "SELECT 3;"])
+    generate.generate_candidates("q", "schema", n=3, client=client)
+    seeds = [call["options"]["seed"] for call in client.calls]
+    assert seeds == [generate.OLLAMA_SEED, generate.OLLAMA_SEED + 1, generate.OLLAMA_SEED + 2]
+
+
+def test_generate_candidates_default_temperature_unaffected_by_n():
+    client = _FakeClient(["SELECT 1;", "SELECT 2;"])
+    generate.generate_candidates("q", "schema", n=2, client=client)
+    for call in client.calls:
+        assert call["options"]["temperature"] == generate.OLLAMA_TEMPERATURE
+
+
+def test_generate_candidates_accepts_explicit_temperature_override():
+    client = _FakeClient(["SELECT 1;", "SELECT 2;"])
+    generate.generate_candidates(
+        "q", "schema", n=2, temperature=generate.OLLAMA_CONSENSUS_TEMPERATURE, client=client
+    )
+    for call in client.calls:
+        assert call["options"]["temperature"] == generate.OLLAMA_CONSENSUS_TEMPERATURE
