@@ -176,3 +176,92 @@ def test_score_guardrail_case_fails_when_required_tag_missing():
     score = score_guardrail_case(case, result)
     assert score["guardrail_ok"] is False
     assert score["passed"] is False
+
+
+def test_run_skips_guardrail_scoring_for_answer_expected_in_guardrail_tiers(tmp_path, monkeypatch):
+    # A case with tier in GUARDRAIL_SCORED_TIERS but expected == "ANSWER"
+    # (e.g., adversarial S09/S10) must NOT be counted in guardrail_total,
+    # even if the pipeline blocks it or answers correctly. It is scored only
+    # through the execution-accuracy path (if expected == "ANSWER").
+    import json
+
+    from evals.run_eval import run
+
+    # Create a minimal gold.jsonl with:
+    # - One adversarial case with expected == "ANSWER" (should NOT be in guardrail_total)
+    # - One out_of_scope case with expected == "ABSTAIN" (should be in guardrail_total)
+    gold_path = tmp_path / "gold.jsonl"
+    gold_path.write_text(
+        json.dumps(
+            {
+                "id": "ADV_ANSWER",
+                "tier": "adversarial",
+                "expected": "ANSWER",
+                "question": "What is 2+2?",
+                "gold_sql": "SELECT 4",
+                "compare": "scalar",
+                "reason_code": None,
+                "guardrail_must_fire": None,
+            }
+        )
+        + "\n"
+        + json.dumps(
+            {
+                "id": "OUT_ABSTAIN",
+                "tier": "out_of_scope",
+                "expected": "ABSTAIN",
+                "question": "Malicious prompt here",
+                "gold_sql": "SELECT 1",
+                "compare": "scalar",
+                "reason_code": "OUT_OF_SCOPE",
+                "guardrail_must_fire": None,
+            }
+        )
+    )
+
+    # Mock pipeline.ask to return correct answer for first case, blocked for second
+    def mock_ask(question, db_path=None):
+        if "2+2" in question:
+            return {
+                "sql": "SELECT 4",
+                "error": None,
+                "answer": "4",
+                "columns": ["result"],
+                "rows": [(4,)],
+                "truncated": False,
+                "reason_code": None,
+                "guardrail_events": [],
+            }
+        else:  # malicious prompt
+            return {
+                "sql": None,
+                "error": None,
+                "answer": None,
+                "columns": [],
+                "rows": [],
+                "truncated": False,
+                "reason_code": "OUT_OF_SCOPE",
+                "guardrail_events": [],
+            }
+
+    # Mock duckdb.connect to return a mock connection
+    class MockConnection:
+        def execute(self, sql):
+            return self
+
+        def fetchall(self):
+            return [(4,)]
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr("ledgerql.pipeline.ask", mock_ask)
+    monkeypatch.setattr("duckdb.connect", lambda *args, **kwargs: MockConnection())
+
+    summary = run(gold_path, "dummy.db")
+
+    # The adversarial ANSWER case should NOT be in guardrail_total
+    assert "adversarial" not in summary["guardrail_catch_rate"]
+    # The out_of_scope ABSTAIN case should be in guardrail_total
+    assert "out_of_scope" in summary["guardrail_catch_rate"]
+    assert summary["guardrail_catch_rate"]["out_of_scope"] == 1.0

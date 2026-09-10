@@ -187,7 +187,7 @@ def run(gold_path: Path, db_path: str) -> dict:
             if correct:
                 tier_correct[case["tier"]] += 1
 
-        if case["tier"] in GUARDRAIL_SCORED_TIERS:
+        if case["tier"] in GUARDRAIL_SCORED_TIERS and case["expected"] == "ABSTAIN":
             score = score_guardrail_case(case, result)
             record["guardrail_score"] = score
             guardrail_total[case["tier"]] += 1
