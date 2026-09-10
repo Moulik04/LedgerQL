@@ -25,6 +25,9 @@ data/*.duckdb
 data/raw/
 data/*.zip
 
+# Logs (runtime audit trail)
+logs/
+
 # Model weights / caches
 *.gguf
 *.safetensors

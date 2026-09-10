@@ -40,23 +40,26 @@ except ImportError:  # pragma: no cover
 
 try:
     import sqlglot
-    from sqlglot import exp
 except ImportError:  # pragma: no cover
     sqlglot = None
+
+# Ensure the project root (this file's parent directory) is importable when
+# this script is run directly (`python evals/validate_gold.py`), which sets
+# sys.path[0] to evals/ rather than the project root. Normally the editable
+# install (`uv sync`) makes `ledgerql` importable without this, but that
+# depends on the interpreter processing the editable-install .pth file in
+# site-packages, and on at least one real machine that step was silently
+# skipped by CPython 3.12's site.py (which refuses to read a .pth file that
+# carries the macOS "hidden" (UF_HIDDEN) file flag) -- so `ledgerql` was not
+# importable even though `uv sync` reported everything installed correctly.
+# This bootstrap makes the script self-sufficient regardless of that.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from ledgerql.guardrails import check_single_select, check_table_allowlist, parse_sql
 
 REQUIRED = {"id", "tier", "difficulty", "question", "expected", "gold_sql", "compare", "tests"}
 BEHAVIOURS = {"ANSWER", "ABSTAIN", "ANSWER_WITH_ASSUMPTION"}
 COMPARES = {"scalar", "scalar_or_null", "set", "ordered", "empty", "none", "count"}
-
-ALLOWED_TABLES = {
-    "companies",
-    "filings",
-    "financial_facts",
-    "v_revenue",
-    "v_net_income",
-    "v_total_assets",
-    "v_cash",
-}
 
 # ticker -> a fragment expected in companies.name, for sanity-checking the
 # handful of companies this gold set relies on by name.
@@ -115,18 +118,15 @@ def check_single_select_and_tables(sql: str) -> str | None:
     if sqlglot is None:
         return None
     try:
-        stmts = sqlglot.parse(sql, read="duckdb")
+        stmts = parse_sql(sql)
     except Exception as e:  # noqa: BLE001
         return f"sqlglot parse error: {e}"
-    if len(stmts) != 1:
+    event = check_single_select(stmts)
+    if event == "single_statement":
         return f"{len(stmts)} statements, expected 1"
-    if not isinstance(stmts[0], exp.Select | exp.Union):
+    if event == "read_only":
         return f"top-level node is {type(stmts[0]).__name__}, not SELECT"
-    # CTE aliases (WITH a AS (...), b AS (...) ...) are not real tables —
-    # exclude them or every multi-CTE query false-positives as "stray".
-    cte_names = {cte.alias_or_name.lower() for cte in stmts[0].find_all(exp.CTE)}
-    tables = {t.name.lower() for t in stmts[0].find_all(exp.Table)}
-    stray = tables - ALLOWED_TABLES - cte_names
+    stray = check_table_allowlist(stmts[0])
     if stray:
         return f"references non-allowlisted table(s): {sorted(stray)}"
     return None
@@ -209,7 +209,7 @@ def main() -> int:
     args = ap.parse_args()
 
     cases = load_cases(Path(args.gold))
-    con = duckdb.connect(args.db, read_only=True)
+    con = duckdb.connect(args.db, read_only=True, config={"enable_external_access": "false"})
 
     failures: list[tuple[str, str, str]] = []
     review: list[tuple[str, str, str]] = []
