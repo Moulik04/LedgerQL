@@ -33,7 +33,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from ledgerql import generate as generate_module
 from ledgerql import pipeline
-from ledgerql.verify import extract_numbers, extract_years
+from ledgerql.verify import verify as verify_answer
 
 
 def _scalar_match(gold_val, pred_val, tolerance: float) -> bool:
@@ -185,21 +185,18 @@ def run(gold_path: Path, db_path: str) -> dict:
 
         if result["answer"] is not None:
             answered += 1
-            claimed = extract_numbers(result["answer"])
-            grounded_values = {
-                v for row in result["rows"] for v in row if isinstance(v, int | float)
-            }
-            ungrounded = [
-                n for n in claimed if not any(_scalar_match(g, n, 0.01) for g in grounded_values)
-            ]
-            if "fiscal_year" in result["columns"]:
-                idx = result["columns"].index("fiscal_year")
-                grounded_years = {row[idx] for row in result["rows"] if row[idx] is not None}
-                ungrounded += [
-                    float(y) for y in extract_years(result["answer"]) if y not in grounded_years
-                ]
-            record["hallucinated_numbers"] = ungrounded
-            if ungrounded:
+            # Reuse verify.py's own verify() directly -- the exact function
+            # the live pipeline already ran against this same answer/result
+            # pair -- rather than a second, independently-maintained
+            # grounding check. A prior version of this block reimplemented
+            # the comparison inline and silently drifted out of sync with a
+            # real verify.py fix (pre-scaled query results, e.g. `value /
+            # 1e9 AS revenue_in_billions`), causing this metric to flag
+            # answers as hallucinated that the live pipeline had already
+            # correctly verified as grounded.
+            verify_result = verify_answer(result["answer"], result["columns"], result["rows"])
+            record["hallucinated_numbers"] = verify_result.ungrounded_numbers
+            if not verify_result.ok:
                 hallucinated += 1
 
         per_case.append(record)
