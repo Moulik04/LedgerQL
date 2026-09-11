@@ -2,8 +2,11 @@
 
 Date: 2026-09-11
 Model: qwen2.5-coder:7b
-Temperature: 0.2
+Candidate temperature: 0.7
+Answer temperature: 0.2
 Seed: 42
+Candidates per question (N): 5
+Low-agreement threshold: 0.6
 
 ## Execution accuracy
 
@@ -32,7 +35,7 @@ This checks the answer against its own query's result set, not against the gold 
 
 ## Non-ANSWER cases (ABSTAIN / ANSWER_WITH_ASSUMPTION)
 
-53 cases where a guardrail-aware system should abstain or state an assumption. Phase 2 has no abstain logic, so this section is descriptive, not scored:
+53 cases where a guardrail-aware system should abstain or state an assumption. This section is descriptive (raw attempted/errored counts, not a pass/fail score) -- the Confidence & abstain section below is where abstain behavior is actually scored (precision/recall):
 
 - Attempted an answer anyway: 22
 - Errored during execution (e.g. adversarial DML hitting the read-only connection): 10
