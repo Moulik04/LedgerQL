@@ -44,6 +44,18 @@ def test_write_answer_comma_groups_large_numbers_in_the_prompt():
     assert "391035000000.0" not in client.last_call["prompt"]
 
 
+def test_write_answer_does_not_comma_group_a_plausible_bare_year():
+    # verify.py's extract_years() matches bare 4-digit years with
+    # (?<!\d)20\d{2}(?!\d) -- a comma-grouped "2,024" would silently
+    # fail to match, turning the fiscal-year check into a no-op for that
+    # value. A year-range int (2000-2099) must be shown undelimited.
+    client = _FakeClient("answer")
+    result = ExecutionResult(columns=["fiscal_year", "value"], rows=[(2024, 391035000000.0)])
+    answer.write_answer(result, client=client)
+    assert "2024\t391,035,000,000.0" in client.last_call["prompt"]
+    assert "2,024" not in client.last_call["prompt"]
+
+
 def test_write_answer_leaves_non_numeric_values_unformatted():
     client = _FakeClient("answer")
     result = ExecutionResult(columns=["ticker", "value"], rows=[("AAPL", None)])

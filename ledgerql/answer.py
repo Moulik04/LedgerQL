@@ -43,6 +43,14 @@ def _format_value(value: object) -> str:
     # only changes what the model sees, not how grounding is checked.
     if isinstance(value, bool) or not isinstance(value, int | float):
         return str(value)
+    # A plausible bare fiscal/calendar year (e.g. 2024) must not be
+    # comma-grouped ("2,024") -- not observed to leak into a real answer
+    # in either eval jsonl, but verify.py's extract_years() matches
+    # bare 4-digit years with `(?<!\d)20\d{2}(?!\d)`, which would not
+    # match a comma-grouped form, silently turning the fiscal-year check
+    # into a no-op for that value if it ever did leak through.
+    if isinstance(value, int) and 2000 <= value <= 2099:
+        return str(value)
     return f"{value:,}"
 
 
