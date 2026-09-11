@@ -19,6 +19,8 @@ import re
 
 import ollama
 
+from ledgerql import llm_backends
+
 OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
 OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen2.5-coder:7b")
 OLLAMA_TEMPERATURE = float(os.environ.get("OLLAMA_TEMPERATURE", "0.2"))
@@ -44,9 +46,9 @@ def generate_candidates(
     schema_context: str,
     n: int = 1,
     temperature: float | None = None,
-    client: ollama.Client | None = None,
+    client: ollama.Client | llm_backends.VLLMClient | None = None,
 ) -> list[str]:
-    client = client or ollama.Client(host=OLLAMA_HOST)
+    client = client or llm_backends.default_client()
     effective_temperature = OLLAMA_TEMPERATURE if temperature is None else temperature
     prompt = f"Schema:\n{schema_context}\n\nQuestion: {question}\n\nSQL:"
     candidates = []

@@ -13,6 +13,7 @@ import os
 
 import ollama
 
+from ledgerql import llm_backends
 from ledgerql.execute import ExecutionResult
 
 OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
@@ -64,9 +65,9 @@ def _format_result(result: ExecutionResult) -> str:
 
 def write_answer(
     result: ExecutionResult,
-    client: ollama.Client | None = None,
+    client: ollama.Client | llm_backends.VLLMClient | None = None,
 ) -> str:
-    client = client or ollama.Client(host=OLLAMA_HOST)
+    client = client or llm_backends.default_client()
     table_text = _format_result(result)
     prompt = f"Result:\n{table_text}\n\nAnswer:"
     response = client.generate(

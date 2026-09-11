@@ -83,6 +83,8 @@ from dataclasses import dataclass
 
 import ollama
 
+from ledgerql import llm_backends
+
 OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
 OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen2.5-coder:7b")
 OLLAMA_TEMPERATURE = float(os.environ.get("OLLAMA_TEMPERATURE", "0.2"))
@@ -132,8 +134,10 @@ class ClassifyResult:
     explanation: str
 
 
-def classify(question: str, client: ollama.Client | None = None) -> ClassifyResult:
-    client = client or ollama.Client(host=OLLAMA_HOST)
+def classify(
+    question: str, client: ollama.Client | llm_backends.VLLMClient | None = None
+) -> ClassifyResult:
+    client = client or llm_backends.default_client()
     examples = "\n".join(f"Q: {q}\nA: {v}" for q, v in _FEW_SHOT)
     prompt = f"{examples}\n\nQ: {question}\nA:"
     response = client.generate(
