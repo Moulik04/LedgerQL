@@ -31,9 +31,18 @@ import duckdb
 # This bootstrap makes the script self-sufficient regardless of that.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from ledgerql import answer as answer_module
 from ledgerql import generate as generate_module
 from ledgerql import pipeline
 from ledgerql.verify import verify as verify_answer
+
+# The report header reads its temperature/N/threshold values directly from
+# these modules' own constants (not hardcoded) so a future run with
+# different env-var overrides reports its real values. answer_module's
+# OLLAMA_TEMPERATURE is the actual answer-writing temperature;
+# generate_module's OLLAMA_CONSENSUS_TEMPERATURE is what self-consistency
+# candidate generation actually runs at -- these are two different
+# temperatures, not one value reused for both (see DECISIONS.md).
 
 
 def _scalar_match(gold_val, pred_val, tolerance: float) -> bool:
@@ -256,8 +265,11 @@ def write_reports(summary: dict, reports_dir: Path) -> tuple[Path, Path]:
         "",
         f"Date: {today}",
         f"Model: {generate_module.OLLAMA_MODEL}",
-        f"Temperature: {generate_module.OLLAMA_TEMPERATURE}",
+        f"Candidate temperature: {generate_module.OLLAMA_CONSENSUS_TEMPERATURE}",
+        f"Answer temperature: {answer_module.OLLAMA_TEMPERATURE}",
         f"Seed: {generate_module.OLLAMA_SEED}",
+        f"Candidates per question (N): {pipeline.N_CANDIDATES}",
+        f"Low-agreement threshold: {pipeline.LOW_AGREEMENT_THRESHOLD}",
         "",
         "## Execution accuracy",
         "",
@@ -293,8 +305,10 @@ def write_reports(summary: dict, reports_dir: Path) -> tuple[Path, Path]:
         "## Non-ANSWER cases (ABSTAIN / ANSWER_WITH_ASSUMPTION)",
         "",
         f"{summary['non_answer_case_count']} cases where a guardrail-aware "
-        "system should abstain or state an assumption. Phase 2 has no "
-        "abstain logic, so this section is descriptive, not scored:",
+        "system should abstain or state an assumption. This section is "
+        "descriptive (raw attempted/errored counts, not a pass/fail "
+        "score) -- the Confidence & abstain section below is where "
+        "abstain behavior is actually scored (precision/recall):",
         "",
         f"- Attempted an answer anyway: {summary['non_answer_attempted']}",
         f"- Errored during execution (e.g. adversarial DML hitting the "
