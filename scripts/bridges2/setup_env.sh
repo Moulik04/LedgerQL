@@ -2,41 +2,41 @@
 # One-time (idempotent) environment setup for the Phase 5 remote model
 # comparison on PSC Bridges-2. Run from a Bridges-2 LOGIN node (OnDemand
 # web shell or `ssh bridges2`) -- never inside an sbatch job, since
-# whether compute nodes have outbound internet to ollama.com/PyPI is
+# whether compute nodes have outbound internet to huggingface.co/PyPI is
 # unverified and this script needs both.
 #
 # Everything lives under $HOME (confirmed ~347T on /jet, effectively
 # unconstrained), not /ocean/projects/<alloc>/<user>/ -- that project
-# allocation is only 10GB total and two ~20GB Ollama models alone would
-# not fit there.
+# allocation is only 10GB total and the two model checkpoints alone
+# (~20GB AWQ + ~60GB fp16) would not fit there.
+#
+# vLLM (not Ollama -- LEDGERQL_MASTER_PROMPT.md explicitly prefers it for
+# Bridges-2) lives in its OWN venv here, entirely separate from the main
+# ledgerql `.venv`/`pyproject.toml` -- vllm+torch+CUDA are heavy,
+# GPU-specific dependencies that must never become a required install for
+# the 8GB M2 laptop. The eval process itself runs in the main ledgerql
+# venv and only needs httpx (already a base dependency) to talk to vLLM
+# over HTTP.
 #
 #   bash scripts/bridges2/setup_env.sh
 set -euo pipefail
 
 ROOT="$HOME/ledgerql-bridges2"
-OLLAMA_DIR="$ROOT/ollama"
+VLLM_ENV_DIR="$ROOT/vllm-env"
 REPO_DIR="$ROOT/ledgerql"
 
 mkdir -p "$ROOT"
 
-# --- Ollama (no root available on shared HPC nodes -- tarball, not the
-# systemd-based curl|sh installer) ---
-if [ -x "$OLLAMA_DIR/bin/ollama" ]; then
-    echo "Ollama already installed at $OLLAMA_DIR/bin/ollama -- skipping."
+# --- uv (no root needed, installs to $HOME/.local/bin) ---
+if command -v uv >/dev/null 2>&1; then
+    echo "uv already available: $(command -v uv)"
 else
-    echo "Installing Ollama (no-root tarball) into $OLLAMA_DIR..."
-    mkdir -p "$OLLAMA_DIR"
-    curl -L https://ollama.com/download/ollama-linux-amd64.tgz -o /tmp/ollama-linux-amd64.tgz
-    tar -C "$OLLAMA_DIR" -xzf /tmp/ollama-linux-amd64.tgz
-    rm -f /tmp/ollama-linux-amd64.tgz
+    echo "Installing uv..."
+    curl -LsSf https://astral.sh/uv/install.sh | sh
+    export PATH="$HOME/.local/bin:$PATH"
 fi
 
-export PATH="$OLLAMA_DIR/bin:$PATH"
-export LD_LIBRARY_PATH="$OLLAMA_DIR/lib/ollama:${LD_LIBRARY_PATH:-}"
-
-echo "Ollama version: $("$OLLAMA_DIR/bin/ollama" --version)"
-
-# --- LedgerQL repo ---
+# --- LedgerQL repo (main venv: small, CPU-only, just talks to vLLM over HTTP) ---
 if [ -d "$REPO_DIR/.git" ]; then
     echo "Repo already cloned at $REPO_DIR -- pulling latest main..."
     git -C "$REPO_DIR" fetch origin
@@ -46,42 +46,29 @@ else
     echo "Cloning LedgerQL into $REPO_DIR..."
     git clone https://github.com/Moulik04/LedgerQL.git "$REPO_DIR"
 fi
+(cd "$REPO_DIR" && uv sync --all-groups)
 
-# --- Python env ---
-cd "$REPO_DIR"
-if command -v uv >/dev/null 2>&1; then
-    echo "uv already available: $(command -v uv)"
+# --- vLLM's own separate venv ---
+if [ -x "$VLLM_ENV_DIR/.venv/bin/vllm" ]; then
+    echo "vLLM already installed at $VLLM_ENV_DIR/.venv -- skipping."
 else
-    echo "Installing uv (no root needed, installs to \$HOME/.local/bin)..."
-    curl -LsSf https://astral.sh/uv/install.sh | sh
-    export PATH="$HOME/.local/bin:$PATH"
+    echo "Creating a separate venv for vLLM at $VLLM_ENV_DIR..."
+    mkdir -p "$VLLM_ENV_DIR"
+    (cd "$VLLM_ENV_DIR" && uv venv --python 3.12 && uv pip install --python .venv/bin/python vllm "huggingface_hub[cli]")
 fi
-uv sync --all-groups
 
-# --- Pull both comparison models (large downloads -- do this here, on
-# the login node, not inside the GPU job) ---
-# ollama serve must be running locally for `ollama pull` to work; start
-# it backgrounded just for this setup step, then stop it -- the real
-# sbatch job starts its own instance on the GPU node later.
-"$OLLAMA_DIR/bin/ollama" serve &
-OLLAMA_SETUP_PID=$!
-sleep 3
+echo "vLLM version: $("$VLLM_ENV_DIR/.venv/bin/vllm" --version)"
 
-for model in qwen2.5-coder:32b qwen3-coder:30b; do
-    if "$OLLAMA_DIR/bin/ollama" list | grep -q "^${model} "; then
-        echo "$model already pulled -- skipping."
-    else
-        echo "Pulling $model (this is a large download, may take a while)..."
-        "$OLLAMA_DIR/bin/ollama" pull "$model"
-    fi
+# --- Pre-download both model checkpoints (large -- do this here, on the
+# login node, not inside the GPU job) ---
+for repo_id in \
+    "Qwen/Qwen2.5-Coder-32B-Instruct-AWQ" \
+    "Qwen/Qwen3-Coder-30B-A3B-Instruct"; do
+    echo "Downloading $repo_id (skips already-cached files automatically)..."
+    "$VLLM_ENV_DIR/.venv/bin/huggingface-cli" download "$repo_id"
 done
-
-kill "$OLLAMA_SETUP_PID" 2>/dev/null || true
-wait "$OLLAMA_SETUP_PID" 2>/dev/null || true
 
 echo ""
 echo "Setup complete. Verify with:"
-echo "  export PATH=\"$OLLAMA_DIR/bin:\$PATH\""
-echo "  export LD_LIBRARY_PATH=\"$OLLAMA_DIR/lib/ollama:\$LD_LIBRARY_PATH\""
-echo "  $OLLAMA_DIR/bin/ollama list"
+echo "  $VLLM_ENV_DIR/.venv/bin/vllm --version"
 echo "  cd $REPO_DIR && uv run pytest -q"
