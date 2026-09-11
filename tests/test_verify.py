@@ -128,3 +128,38 @@ def test_verify_still_rejects_a_genuinely_wrong_prescaled_number():
         [(391.035,)],
     )
     assert result.ok is False
+
+
+def test_verify_rejects_wrong_magnitude_word_against_scale_named_column():
+    # Scale-widening for a `revenue_in_billions` column must only add the
+    # one matching (billion) factor -- claiming "trillion" against the
+    # same raw value must still be rejected, not silently accepted via
+    # some other factor's widened value.
+    result = verify.verify(
+        "The revenue was $391.035 trillion.",
+        ["revenue_in_billions"],
+        [(391.035,)],
+    )
+    assert result.ok is False
+
+
+def test_verify_rejects_wrong_magnitude_word_against_billions_column_as_millions():
+    result = verify.verify(
+        "The revenue was $391.035 million.",
+        ["revenue_in_billions"],
+        [(391.035,)],
+    )
+    assert result.ok is False
+
+
+def test_verify_does_not_widen_a_column_whose_name_has_no_scale_word():
+    # A blanket (unscoped) widening bug would have made *any* small
+    # number ground a claim at any magnitude, regardless of column name.
+    # A column named plainly (no "thousand"/"million"/"billion"/
+    # "trillion" substring) must never be widened.
+    result = verify.verify(
+        "There were 5 billion.",
+        ["n"],
+        [(5,)],
+    )
+    assert result.ok is False

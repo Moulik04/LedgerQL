@@ -22,9 +22,21 @@ billion"), extract_numbers()'s own scaling multiplies it back up to
 391035000000.0 for comparison -- which no longer matches the
 already-scaled grounded value, and a genuinely correct answer gets
 wrongly rejected. `_grounded_with_scales()` below widens the grounded
-set to also include each raw grounded value multiplied by the same
-magnitude factors extract_numbers() applies, so a claimed number is
-accepted whether the query scaled the column itself or not.
+set to also include a value multiplied by a magnitude factor, but only
+when that value's own column name names the scale (e.g.
+`revenue_in_billions`, `revenue_millions` -- the real pattern the
+model's own generated SQL uses), and only by that one matching factor.
+
+An earlier version of this fix widened *every* grounded value by
+*every* magnitude factor unconditionally, regardless of column name.
+That accepted the pre-scaled cases it was meant to fix, but as a side
+effect also silently disabled the magnitude/unit check for everything
+else: any small number anywhere in a result would then also ground a
+claim a thousand/million/billion/trillion times its size (e.g. a
+`fiscal_year`-less count column `n=5` would ground "There were 5
+billion"). Caught by a whole-branch review, not a real run -- see
+`DECISIONS.md`'s 2026-09-11 entry on this bug. The column-name-scoped
+version below is the fix; do not widen unconditionally again.
 """
 
 import re
@@ -79,11 +91,18 @@ def _scalar_match(value: float, grounded: float, tolerance: float = 0.01) -> boo
     return abs(value - grounded) <= max(abs(grounded) * tolerance, 1e-9)
 
 
-def _grounded_with_scales(grounded_values: set[float]) -> set[float]:
-    scaled = set(grounded_values)
-    for g in grounded_values:
-        for factor in _MAGNITUDE.values():
-            scaled.add(g * factor)
+def _grounded_with_scales(columns: list[str], rows: list[tuple]) -> set[float]:
+    scaled = {
+        v for row in rows for v in row if isinstance(v, int | float) and not isinstance(v, bool)
+    }
+    for row in rows:
+        for col, v in zip(columns, row, strict=True):
+            if not isinstance(v, int | float) or isinstance(v, bool):
+                continue
+            col_lower = col.lower()
+            for word, factor in _MAGNITUDE.items():
+                if word in col_lower:
+                    scaled.add(v * factor)
     return scaled
 
 
@@ -95,9 +114,7 @@ class VerifyResult:
 
 
 def verify(answer: str, columns: list[str], rows: list[tuple]) -> VerifyResult:
-    grounded_values = _grounded_with_scales(
-        {v for row in rows for v in row if isinstance(v, int | float)}
-    )
+    grounded_values = _grounded_with_scales(columns, rows)
     claimed = extract_numbers(answer)
     ungrounded = [n for n in claimed if not any(_scalar_match(n, g) for g in grounded_values)]
 
