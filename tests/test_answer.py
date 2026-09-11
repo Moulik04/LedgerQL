@@ -22,10 +22,33 @@ def test_write_answer_includes_result_in_prompt_but_not_a_question():
     result = ExecutionResult(columns=["value"], rows=[(391035000000,)])
     answer_text = answer.write_answer(result, client=client)
     assert answer_text == "The value was $391.0 billion."
-    assert "391035000000" in client.last_call["prompt"]
+    # Comma-grouped, not the raw digit string -- see
+    # test_write_answer_comma_groups_large_numbers_in_the_prompt for why.
+    assert "391,035,000,000" in client.last_call["prompt"]
     # No question is ever passed to write_answer -- the prompt has
     # nothing question-shaped to leak, verified by construction: the
     # function signature itself no longer accepts one.
+
+
+def test_write_answer_comma_groups_large_numbers_in_the_prompt():
+    # Real finding from the Phase 4 eval run: shown a long undelimited
+    # digit string, qwen2.5-coder:7b deterministically drops a digit when
+    # restating it (391035000000 -> 39103500000). Confirmed directly
+    # against the live model that comma-grouping fixes it. verify.py's
+    # extract_numbers() strips commas before comparing, so this only
+    # changes what the model sees.
+    client = _FakeClient("answer")
+    result = ExecutionResult(columns=["value"], rows=[(391035000000.0,)])
+    answer.write_answer(result, client=client)
+    assert "391,035,000,000.0" in client.last_call["prompt"]
+    assert "391035000000.0" not in client.last_call["prompt"]
+
+
+def test_write_answer_leaves_non_numeric_values_unformatted():
+    client = _FakeClient("answer")
+    result = ExecutionResult(columns=["ticker", "value"], rows=[("AAPL", None)])
+    answer.write_answer(result, client=client)
+    assert "AAPL\tNone" in client.last_call["prompt"]
 
 
 def test_write_answer_handles_empty_result():

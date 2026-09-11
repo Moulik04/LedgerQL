@@ -28,11 +28,29 @@ SYSTEM_PROMPT = (
 )
 
 
+def _format_value(value: object) -> str:
+    # Large numbers rendered as one undelimited digit string (e.g.
+    # "391035000000.0") get a digit dropped on restatement -- a real,
+    # deterministic failure found in Phase 4's eval run (391035000000 ->
+    # 39103500000, identically across 4 separate gold cases at temperature
+    # 0.2, seed 42). Confirmed directly against the live model that
+    # comma-grouping the digits before showing them ("391,035,000,000.0")
+    # eliminates the drop -- reproduced 3/3 with the ungrouped form, fixed
+    # 3/3 after grouping, both at multiple seeds. A prompt-instruction-only
+    # attempt ("copy digits exactly") was tried first and did not help;
+    # this is a formatting fix, not a wording one. verify.py's own
+    # extract_numbers() already strips commas before comparing, so this
+    # only changes what the model sees, not how grounding is checked.
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        return str(value)
+    return f"{value:,}"
+
+
 def _format_result(result: ExecutionResult) -> str:
     header = "\t".join(result.columns)
     if not result.rows:
         return f"{header}\n(no rows)"
-    body = "\n".join("\t".join(str(v) for v in row) for row in result.rows)
+    body = "\n".join("\t".join(_format_value(v) for v in row) for row in result.rows)
     return f"{header}\n{body}"
 
 
