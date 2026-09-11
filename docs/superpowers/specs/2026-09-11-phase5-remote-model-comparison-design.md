@@ -25,46 +25,51 @@ that either.
   change. Whether to adopt a bigger model permanently is a decision for after the real numbers
   are in, and would need its own follow-up (a bigger model needs a standing place to run — this
   phase deliberately does not solve that).
-- **No code changes to `ledgerql/`.** `OLLAMA_MODEL` is already an env-var override read by
-  every module that calls Ollama (`generate.py`, `answer.py`, `classify.py`) — confirmed by
-  reading all three. Every script this phase adds is new, standalone tooling under
-  `scripts/bridges2/`, mirroring the existing pattern in the user's other project
-  (`~/Desktop/DS Project/scripts/bridges2/`).
+- **Minimal, isolated `ledgerql/` changes only.** The master prompt explicitly prefers vLLM (or
+  `transformers`+`peft`) over Ollama for Bridges-2 serving — confirmed by re-reading
+  `LEDGERQL_MASTER_PROMPT.md` §3, missed in this spec's first draft. `generate.py`, `answer.py`,
+  and `classify.py` all inject an optional `client` duck-typed to `ollama.Client`'s own
+  `.generate(model, system, prompt, options) -> obj.response` shape — confirmed by reading all
+  three. The only change needed is a single new module, `ledgerql/llm_backends.py`, providing
+  `default_client()` (returns `ollama.Client` or a new `VLLMClient` based on an `LLM_BACKEND` env
+  var) and `VLLMClient` itself (a pure-`httpx` adapter matching the same duck-typed shape — no
+  `vllm`/`torch` install needed client-side, only on the Bridges-2 *server*). The three modules'
+  own logic, and every existing test that injects a fake client directly, are untouched.
 - **Not a persistent remote-inference service.** Each comparison run is a single bounded SLURM
   job that starts Ollama, runs the eval, and ends. No tunnel, no long-running server the laptop
   depends on.
 
 ## Model candidates
 
-Two, both fit comfortably in 32GB of GPU memory (see Hardware below):
+Two, served via vLLM from their real HuggingFace repos (`vllm serve <repo-id>`), each at a
+precision level chosen to actually fit the available hardware without a documented reliability
+risk:
 
-1. **`qwen2.5-coder:32b`** (20GB, q4_K_M) — same model family as the existing baseline, just
-   larger. Isolates "does scale help" as close to a single variable as possible, since this
-   project's prompts (system prompts in `answer.py`/`generate.py`, temperature choices) were
-   empirically tuned against `qwen2.5-coder:7b`'s specific behavior.
-2. **`qwen3-coder:30b`** (19GB, q4_K_M, MoE — 30B total / 3.3B activated) — a newer generation,
-   different architecture, similar footprint. Worth the direct empirical comparison rather than
-   assuming "newer is better" for this specific task.
+1. **`Qwen/Qwen2.5-Coder-32B-Instruct-AWQ`** — the *official* Qwen-published 4-bit AWQ quant
+   (~20GB), fits a single V100-32GB with room for KV cache. Same model family as the existing
+   `qwen2.5-coder:7b` baseline, just larger — isolates "does scale help" as close to a single
+   variable as possible, since this project's prompts were empirically tuned against the 7B's
+   specific behavior. Dense architecture, no tensor-parallel complications.
+2. **`Qwen/Qwen3-Coder-30B-A3B-Instruct`** — run at **full fp16, no quantization**, across
+   **2× V100-32GB via vLLM tensor parallelism** (`--tensor-parallel-size 2`). The only available
+   AWQ quant for this model is third-party (not from Qwen) and carries an explicit upstream
+   warning ("suffers significant loss under 4-bit quantization, please use with caution"), plus a
+   `--enable-expert-parallel` requirement that effectively forces 2 GPUs anyway for its MoE expert
+   tensors to divide evenly. Given 2 GPUs are needed regardless, running at full fp16 avoids the
+   quantization-loss confound entirely — a bad result then means "the model," not "the quant."
 
-Both are pulled from Ollama's public model registry (`ollama.com/library`).
+## Hardware
 
-## Hardware: use `gpu:v100-32:1`, not L40S
-
-Bridges-2's `GPU-shared` partition has both V100-32 and L40S-48 nodes available. **This spec
-recommends V100-32**, even though L40S has more headroom, because:
-
-- `docs/bridges2.md` (the user's other project) has a **real, working, already-verified**
-  `--gres=gpu:v100-32:1` sbatch job on this exact account (`mjain10` / `cis260102p`). L40S is
-  only confirmed to exist via `sinfo` output in that doc — never actually used in a submitted
-  job on this account.
-- Both candidate models (19-20GB) fit in 32GB with room for KV cache/context at the short
-  prompt lengths this eval uses (single financial questions, not repo-scale context) — the
-  256K-context headroom L40S/qwen3-coder advertise is not needed here.
-- Reusing a proven resource string removes a real failure mode (wrong GRES syntax, a
-  partition/allocation permission difference) for no accuracy benefit.
-
-If V100-32 turns out to be unavailable/contended when the user actually submits, falling back to
-`gpu:l40s-48:1` is a one-line sbatch change — not a design change.
+- `Qwen2.5-Coder-32B-Instruct-AWQ`: `--gres=gpu:v100-32:1` on `GPU-shared` — a real, already-
+  working resource string for this account (`mjain10` / `cis260102p`) from the user's other
+  project's sbatch jobs. L40S-48 nodes also exist on this partition (confirmed via `sinfo` in
+  that project) but have never actually been used in a submitted job on this account; V100-32 is
+  reused here for the same reason, not because L40S is worse.
+- `Qwen3-Coder-30B-A3B-Instruct` (fp16): `--gres=gpu:v100-32:2`, same node (single-node tensor
+  parallelism — cross-node would need extra coordination this phase doesn't need). ~60GB of fp16
+  weights across 64GB of combined GPU memory is tight but should fit; Task 3's verification step
+  confirms `GPU-shared` actually permits a 2-GPU request for this account before Task 5 depends
+  on it (some shared partitions cap per-job GPU count below what a node physically has).
 
 ## Architecture: run entirely on the compute node, no tunnel
 
@@ -75,26 +80,28 @@ registered with PSC (password-only auth, confirmed — a non-interactive `ssh` a
 1. LedgerQL's repo (public on GitHub) is cloned onto Bridges-2.
 2. `data/ledgerql.duckdb` (gitignored, ~194MB) is copied over separately via `scp`, run by the
    user from this laptop (same reason as above — outbound `scp` needs the same password auth).
-3. Ollama is installed in user space on Bridges-2 (no root available on shared HPC nodes — the
-   standard `curl | sh` installer assumes systemd/root, so this uses Ollama's Linux tarball
-   instead, extracted to a user directory, `ollama serve` run as a plain background process
-   within the job — no systemd needed).
+3. vLLM is installed in a **separate, Bridges-2-only Python environment** (not the main
+   `ledgerql` `.venv` / `pyproject.toml` — `vllm`+`torch`+CUDA are heavy, GPU-specific
+   dependencies that must never become a required install for the 8GB M2 laptop). Model weights
+   are pre-downloaded via `huggingface-cli download` on the login node.
 4. One SLURM job per model (not both in one job) — simpler to reason about against an unverified
    walltime limit, and a failure in the second model's run can't invalidate the first's already-
-   captured results. Each job: starts `ollama serve &`, health-checks it, runs
-   `OLLAMA_MODEL=<model> make eval` against the copied DB and the existing `evals/gold.jsonl`,
-   then copies the report files to model-tagged names with `:` sanitized to `-` for filesystem/
-   scp safety (`reports/eval_bridges2_qwen2.5-coder-32b.md` /
-   `reports/eval_bridges2_qwen2.5-coder-32b_<date>.jsonl`, same pattern for the second model) so
-   the second run doesn't clobber the first.
+   captured results. Each job: starts `vllm serve <repo-id> --port 8000 [--tensor-parallel-size N
+   for the 2-GPU model]`, health-checks it via vLLM's OpenAI-compatible `/health` endpoint, then
+   runs `LLM_BACKEND=vllm OLLAMA_MODEL=<repo-id> make eval` (in the main `ledgerql` `.venv`, which
+   only needs `httpx` — already a base dependency — to talk to vLLM) against the copied DB and the
+   existing `evals/gold.jsonl`, then copies the report files to model-tagged names with `:`/`/`
+   sanitized to `-` for filesystem/scp safety (`reports/eval_bridges2_qwen2.5-coder-32b-awq.md` /
+   `..._<date>.jsonl`, same pattern for the second model) so the second run doesn't clobber the
+   first.
 5. The user `scp`s the tagged report files back to this laptop.
 
-**Model pull and Python dependency install happen on the login node, before any `sbatch`
+**Model download and Python dependency install happen on the login node, before any `sbatch`
 submission** — not inside the GPU job. This sidesteps an unverified risk (whether Bridges-2
-compute nodes even have outbound internet to `ollama.com`/PyPI; login nodes generally do). By
-the time a GPU job runs, `ollama pull` and `uv sync` have already completed and just need to read
-already-fetched data — matching the existing `setup_env.sh` precedent in the user's other
-project, which does exactly this for the same reason.
+compute nodes even have outbound internet to `huggingface.co`/PyPI; login nodes generally do). By
+the time a GPU job runs, the weights and both Python environments already exist locally and just
+need to be read — matching the existing `setup_env.sh` precedent in the user's other project,
+which does exactly this for the same reason.
 
 ## Open questions this plan resolves via verification, not assumption
 
@@ -103,14 +110,19 @@ docs) and its precedent in the sibling Bridges-2 doc ("everything below is verif
 real cluster, not assumed from generic docs"), the implementation plan's early steps are
 verification gates, not code:
 
-1. **Does the Ollama Linux tarball actually run on Bridges-2's login/compute nodes** (CPU
-   architecture, glibc version, no-root constraints)? Smoke-tested before anything else.
-2. **Current `GPU-shared` walltime limit and real queue wait**, via `scontrol show partition
+1. **Does vLLM actually install and serve on Bridges-2's login/compute nodes** (CUDA/driver
+   version compatibility, whether the AWQ quant kernel is supported on V100's Volta architecture —
+   AWQ support varies by GPU compute capability, not assumed compatible without a real smoke
+   test)? Smoke-tested before anything else.
+2. **Does `GPU-shared` actually permit a 2-GPU request for this account** — needed for the
+   `qwen3-coder` fp16 run; the sibling project's precedent only ever requested 1 GPU.
+3. **Current `GPU-shared` walltime limit and real queue wait**, via `scontrol show partition
    GPU-shared` and `squeue` — the sibling project's V100 job used 3 hours for a training run;
    this phase's workload is pure inference (~103 cases × ~6 LLM calls each × 2 models), likely
    faster, but not assumed faster without a real timed run.
-3. **SU cost of a real run** — checked against the ~481/500 SU balance after the first model
-   completes, before submitting the second.
+4. **SU cost of a real run** — checked against the ~481/500 SU balance after the first model
+   completes, before submitting the second (the 2-GPU fp16 run costs roughly double the SU rate
+   of the 1-GPU AWQ run, on top of it likely taking longer per-token at fp16 vs. 4-bit).
 
 ## Reporting
 
@@ -136,5 +148,7 @@ documenting a real finding whether or not it's the outcome that was hoped for.
 - A clear, evidence-based recommendation: is a bigger model worth pursuing further (and if so,
   which), or does the evidence point elsewhere (e.g., toward Phase 6's fine-tuning path, or
   toward neither and back to the pipeline's own structural limits).
-- Zero changes to `ledgerql/`'s application code; zero change to the live pipeline's default
-  model.
+- The only `ledgerql/` change is the new `llm_backends.py` module and its own tests; every
+  existing test and call site is untouched (verified by running the full local suite unchanged).
+  Zero change to the live pipeline's default model or default backend (`LLM_BACKEND` defaults to
+  `ollama`).
