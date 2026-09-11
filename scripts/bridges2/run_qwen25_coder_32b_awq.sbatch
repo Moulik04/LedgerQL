@@ -1,8 +1,8 @@
 #!/bin/bash
 #SBATCH --job-name=ledgerql-eval-32b
 #SBATCH --partition=GPU-shared
-#SBATCH --gres=gpu:v100-32:1
-#SBATCH --cpus-per-task=4
+#SBATCH --gres=gpu:h100-80:1
+#SBATCH --cpus-per-task=8
 #SBATCH --mem=32G
 #SBATCH --time=02:00:00
 #SBATCH --output=%x_%j.out

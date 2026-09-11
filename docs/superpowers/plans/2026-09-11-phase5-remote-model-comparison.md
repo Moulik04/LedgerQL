@@ -6,7 +6,7 @@
 
 **Architecture:** `ledgerql/llm_backends.py` (already implemented — see Task 1) adds a `VLLMClient` adapter, duck-typed to `ollama.Client`'s own `.generate()` shape, selected via `LLM_BACKEND=vllm`; `generate.py`/`answer.py`/`classify.py`'s own logic is unchanged. New standalone tooling under `scripts/bridges2/` clones/copies the repo and data to Bridges-2, installs vLLM in its own separate venv (no root on shared HPC nodes), and runs `LLM_BACKEND=vllm OLLAMA_MODEL=<repo-id> make eval`-equivalent inside a SLURM job with `vllm serve` running on the same GPU node(s) — no tunnel back to this laptop. The user runs every remote command manually and reports real output back into this session, since neither this session nor a dispatched subagent can reach Bridges-2 directly.
 
-**Tech Stack:** Bash (SLURM job scripts), `ledgerql/llm_backends.py` (httpx-based vLLM adapter, no new base dependency), vLLM + PyTorch (Bridges-2-only, isolated venv), PSC Bridges-2 (SLURM, `GPU-shared` partition, V100-32 GPUs).
+**Tech Stack:** Bash (SLURM job scripts), `ledgerql/llm_backends.py` (httpx-based vLLM adapter, no new base dependency), vLLM + PyTorch (Bridges-2-only, isolated venv), PSC Bridges-2 (SLURM, `GPU-shared` partition, H100-80 GPUs — confirmed available during Task 3, superseding the V100-32 plan in this plan's first draft).
 
 **Spec:** `docs/superpowers/specs/2026-09-11-phase5-remote-model-comparison-design.md` (revised after Task 1/2's first draft — see `git log` on that file for why)
 
@@ -15,11 +15,11 @@
 - The only `ledgerql/` change is `llm_backends.py` and the three one-line call-site edits in `generate.py`/`answer.py`/`classify.py` (done in Task 1). No further application-code changes.
 - No production/live-pipeline change. The local default stays `qwen2.5-coder:7b` via Ollama (`LLM_BACKEND` defaults to `"ollama"`).
 - Model download and Python dependency install happen on the Bridges-2 **login node**, before any `sbatch` submission — never inside the GPU job itself (unverified whether compute nodes have outbound internet; login nodes do).
-- `Qwen2.5-Coder-32B-Instruct-AWQ` uses `--gres=gpu:v100-32:1`; `Qwen3-Coder-30B-A3B-Instruct` (full fp16, no quantization) uses `--gres=gpu:v100-32:2` with `--tensor-parallel-size 2` — both on `GPU-shared`.
+- Both models use `--gres=gpu:h100-80:1` on `GPU-shared` — real `sinfo` output during Task 3 found H100-80 nodes on this account's allocation, which fit both checkpoints (~20GB AWQ, ~60GB fp16) on a single GPU each, superseding the original V100-32 plan (which would have needed 2 GPUs via tensor parallelism for the fp16 model). See `docs/bridges2.md`'s Status section for the real `sinfo` output and reasoning.
 - vLLM + its model checkpoints live under `$HOME` (`/jet/home/mjain10`, confirmed ~347T, effectively unconstrained) in their own venv, **separate from the main `ledgerql` `.venv`** — `vllm`/`torch`/CUDA must never become part of the base `pyproject.toml` install the 8GB M2 laptop also uses. Not `/ocean/projects/cis260102p/mjain10/` (confirmed only 10GB total; the two checkpoints alone are ~80GB combined).
 - One SLURM job per model, not both in one job.
 - Report filenames sanitize both `:` and `/` to `-` (HF repo ids contain `/`) for filesystem/`scp` safety.
-- Every claimed fact about the cluster (walltime limits, GPU availability, 2-GPU allocation permission, AWQ kernel support on V100/Volta) gets verified against real command output before a downstream step depends on it — never assumed from the sibling project's docs, which only ever used 1 GPU for training, not inference.
+- Every claimed fact about the cluster (walltime limits, GPU availability, AWQ kernel support on the actual hardware) gets verified against real command output before a downstream step depends on it — never assumed from the sibling project's docs, which only ever used 1x V100-32 for training, not inference, and never checked for H100 availability.
 
 ---
 
@@ -43,8 +43,10 @@ Done directly in this session:
 - `scripts/bridges2/setup_env.sh`: clones the repo, `uv sync`s the main venv (small, CPU-only — only needs `httpx` to talk to vLLM), creates a **separate** venv at `$HOME/ledgerql-bridges2/vllm-env` and installs `vllm` + `huggingface_hub[cli]` into it, pre-downloads both model checkpoints via `huggingface-cli download` on the login node. Idempotent.
 - `docs/bridges2.md`: durable, verified-facts record (access method, storage layout, GPU resource strings for each model) — rewritten from Task 1's original Ollama-based draft. Status section still has the `<!-- Filled in by Tasks 3-6 -->` placeholder.
 - `scripts/bridges2/run_model_eval.sh`: shared job body, `Usage: run_model_eval.sh <hf-repo-id> <tensor-parallel-size>`. Starts `vllm serve <repo-id> --port 8000 --tensor-parallel-size <N>`, health-checks the real `/health` endpoint (up to 10 minutes — large checkpoints take a while to load, unlike Ollama's near-instant startup), confirms GPU usage via `nvidia-smi`, runs `LLM_BACKEND=vllm OLLAMA_MODEL=<repo-id> uv run python evals/run_eval.py --db data/ledgerql.duckdb` in the main `ledgerql` venv, copies results to `reports/eval_bridges2_<sanitized-repo-id>.md` / `..._<date>.jsonl`.
-- `scripts/bridges2/run_qwen25_coder_32b_awq.sbatch`: `--gres=gpu:v100-32:1`, `--time=02:00:00`, calls `run_model_eval.sh Qwen/Qwen2.5-Coder-32B-Instruct-AWQ 1`.
-- `scripts/bridges2/run_qwen3_coder_30b_fp16.sbatch`: `--gres=gpu:v100-32:2`, `--time=03:00:00`, calls `run_model_eval.sh Qwen/Qwen3-Coder-30B-A3B-Instruct 2`. (Two separate sbatch files, not one MODEL-env-var-driven file — `#SBATCH --gres` is parsed at submission time, not runtime-evaluated from an exported var, and the two models need genuinely different GPU counts.)
+- `scripts/bridges2/run_qwen25_coder_32b_awq.sbatch`: `--gres=gpu:h100-80:1`, `--time=02:00:00`, calls `run_model_eval.sh Qwen/Qwen2.5-Coder-32B-Instruct-AWQ 1`.
+- `scripts/bridges2/run_qwen3_coder_30b_fp16.sbatch`: `--gres=gpu:h100-80:1`, `--time=03:00:00`, calls `run_model_eval.sh Qwen/Qwen3-Coder-30B-A3B-Instruct 1`. (Two separate sbatch files, not one MODEL-env-var-driven file — `#SBATCH --gres` is parsed at submission time, not runtime-evaluated from an exported var. Originally sized for a 2-GPU tensor-parallel fp16 run before H100's 80GB was confirmed available; both are now single-GPU.)
+
+**Update (Task 3, Step 1a):** real `sinfo -N -p GPU-shared -o "%N %G"` output showed H100-80 nodes (`w001`-`w010`, `gpu:h100-80:8`) on this account's allocation, not just the V100/L40S pools assumed above — both sbatch files were revised to `--gres=gpu:h100-80:1` and both models now run on a single GPU each (see `docs/bridges2.md`'s Status section and the spec's revised Hardware section). The rest of this file's references to V100/2-GPU below are historical — superseded by this finding, kept for context on the earlier attempt.
 
 All four scripts syntax-checked locally (`bash -n`) — no pytest equivalent exists for shell scripts that only make sense on a cluster this session can't reach.
 
@@ -57,38 +59,34 @@ Commit: `245abf7` — `feat(bridges2): rewrite Bridges-2 scripts for vLLM instea
 **Files:** none created/modified in this task except `docs/bridges2.md`'s Status section (append, don't rewrite the whole file).
 
 **Interfaces:**
-- Consumes: `docs/bridges2.md` from Task 2 (has a `<!-- Filled in by Tasks 3-6 -->` placeholder in Status).
-- Produces: confirmed real facts that Tasks 4-5 depend on — the actual GPU resource string, whether `GPU-shared` permits a 2-GPU request, the partition's walltime ceiling, and that vLLM (including the AWQ quantization kernel, which has real GPU-compute-capability requirements) genuinely runs on a Bridges-2 V100 before committing a full ~103-case run to it.
+- Consumes: `docs/bridges2.md` from Task 2.
+- Produces: confirmed real facts that Tasks 4-5 depend on — the partition's walltime ceiling and that vLLM (including the AWQ quantization kernel) genuinely runs on a Bridges-2 H100 before committing a full ~103-case run to it.
 
-This task is a verification gate, not code — its "test" is real command output from the human partner, run on Bridges-2. Hand the human partner this exact block and wait for their reply with the real output before proceeding.
+This task is a verification gate, not code — its "test" is real command output from the human partner, run on Bridges-2.
 
-- [ ] **Step 1: Hand off the verification commands**
+**Step 1a already done:** real `sinfo -N -p GPU-shared -o "%N %G"` output confirmed H100-80 nodes exist on this account's `GPU-shared` allocation (`w001`-`w010`, `gpu:h100-80:8`), recorded in `docs/bridges2.md`'s Status section. Both `.sbatch` files already use `--gres=gpu:h100-80:1`. No 2-GPU permission check is needed — both models fit one H100.
+
+- [ ] **Step 1b: Hand off the remaining verification commands**
 
 ```bash
 # From a Bridges-2 login node (ssh bridges2, or the OnDemand web shell):
 
-# 1. Confirm the real GPU resource string and availability on GPU-shared
-sinfo -N -p GPU-shared -o "%N %G"
-
-# 2. Confirm the partition's real walltime ceiling
+# 1. Confirm the partition's real walltime ceiling
 scontrol show partition GPU-shared | grep -i maxtime
 
-# 3. Confirm a 2-GPU request is even permitted on GPU-shared for this account
-scontrol show partition GPU-shared | grep -iE "maxnodes|maxcpuspernode|grpjob"
-sacctmgr show assoc user=mjain10 account=cis260102p format=user,account,maxjobs,maxsubmit,grpjobs 2>/dev/null || echo "sacctmgr query unavailable, note this down and proceed cautiously"
-
-# 4. Run the setup script (Task 2) if not already done
+# 2. Run the setup script (Task 2) if not already done
 bash ~/ledgerql-bridges2/ledgerql/scripts/bridges2/setup_env.sh
-# (first run: clones the repo to ~/ledgerql-bridges2/ledgerql -- if this
-# is truly the first time, `cd` there first or adjust the path above to
-# wherever it was cloned)
+# (first run: the repo doesn't exist yet --
+#   mkdir -p ~/ledgerql-bridges2 && cd ~/ledgerql-bridges2
+#   git clone https://github.com/Moulik04/LedgerQL.git ledgerql
+#   bash ledgerql/scripts/bridges2/setup_env.sh)
 
-# 5. Smoke-test vLLM + the AWQ quant actually work on a real V100 GPU
+# 3. Smoke-test vLLM + the AWQ quant actually work on a real H100
 #    allocation, before committing a full ~103-case run to it. This is
-#    a short interactive allocation, not a batch job. AWQ kernel support
-#    varies by GPU compute capability -- V100 is Volta (compute 7.0),
-#    NOT assumed compatible without this real test.
-srun --partition=GPU-shared --gres=gpu:v100-32:1 --time=00:15:00 --pty bash
+#    a short interactive allocation, not a batch job. H100 (Hopper,
+#    compute 9.0) is a much safer bet for AWQ kernel support than the
+#    originally-planned V100, but still not assumed without this test.
+srun --partition=GPU-shared --gres=gpu:h100-80:1 --time=00:15:00 --pty bash
 # (once the allocation starts, inside it:)
 cd ~/ledgerql-bridges2/vllm-env
 .venv/bin/vllm serve Qwen/Qwen2.5-Coder-32B-Instruct-AWQ --port 8000 &
@@ -108,28 +106,25 @@ exit  # ends the interactive allocation
 
 - [ ] **Step 2: Record the real output**
 
-Wait for the human partner to paste back the real output of all five commands above. Do not proceed to Task 4 on assumed output.
+Wait for the human partner to paste back the real output of all three commands above. Do not proceed to Task 4 on assumed output.
 
 - [ ] **Step 3: Reconcile against Global Constraints and fix any mismatch**
 
-- If Step 1's `sinfo` output shows a different real GRES string than `gpu:v100-32` for this account/partition today, update both `.sbatch` files' `--gres` lines to match and re-run their `bash -n` syntax checks.
-- If the 2-GPU check in Step 1 shows `GPU-shared` caps per-job GPU count below 2 for this account, flag this immediately — Task 5 (`qwen3-coder`, needs 2 GPUs) cannot proceed as planned; options become requesting the full `GPU` partition instead of `GPU-shared`, or dropping that model from this round. Do not guess; ask the human partner how to proceed once this is confirmed.
 - If `scontrol`'s maxtime is less than either `.sbatch` file's `--time`, lower it to fit and flag whether this fits the workload.
-- If the vLLM smoke test fails (AWQ kernel unsupported on V100, CUDA/driver mismatch, out-of-memory, etc.), do not proceed to a full job submission — debug it here, in a cheap 15-minute interactive allocation, not inside a 2-hour batch job. A common real failure mode worth checking for specifically: AWQ's Marlin/GPTQ-style kernels sometimes require compute capability ≥ 7.5 or ≥ 8.0 depending on the vLLM version — if V100 (7.0) is unsupported, the fallback is running `Qwen2.5-Coder-32B-Instruct` unquantized... which does not fit 32GB, so the real fallback would be dropping to a smaller model or requesting 2 GPUs for this one too. Surface this to the human partner rather than deciding unilaterally.
+- If the vLLM smoke test fails (AWQ kernel unsupported, CUDA/driver mismatch, out-of-memory, etc.), do not proceed to a full job submission — debug it here, in a cheap 15-minute interactive allocation, not inside a 2-hour batch job. Surface any real failure to the human partner rather than deciding unilaterally how to route around it.
 
 - [ ] **Step 4: Append the confirmed facts to `docs/bridges2.md`**
 
-Replace the `<!-- Filled in by Tasks 3-6 -->` placeholder comment in the Status section with a dated entry for the real findings from Steps 1-3 (exact GRES string, exact maxtime, 2-GPU permission confirmed or not, confirmation the vLLM/AWQ smoke test passed and what it showed). Tasks 4-6 each add their own further dated entry below this one — the Status section is a growing log, not a single value to overwrite again later. Then commit:
+Append a further dated entry to the Status section (below the sinfo entry already there) with the real findings from Steps 1-3 (exact maxtime, confirmation the vLLM/AWQ smoke test passed and what it showed). Tasks 4-6 each add their own further dated entry below this one. Then commit:
 
 ```bash
 git add docs/bridges2.md
 git commit -m "$(cat <<'EOF'
 docs(bridges2): record verified cluster facts before the first real run
 
-GPU resource string, GPU-shared's real walltime ceiling, 2-GPU
-allocation permission, and a successful vLLM + AWQ smoke test on a
-real Bridges-2 V100 allocation, confirmed via live commands rather
-than assumed.
+GPU-shared's real walltime ceiling and a successful vLLM + AWQ smoke
+test on a real Bridges-2 H100 allocation, confirmed via live commands
+rather than assumed.
 
 Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
 EOF
@@ -184,7 +179,7 @@ scp "bridges2:~/ledgerql-bridges2/ledgerql/reports/eval_bridges2_Qwen-Qwen2.5-Co
 
 - [ ] **Step 5: Read the real report and sanity-check it**
 
-Read the report. Pull 3-5 real per-case records from the jsonl the same way Phase 4's Task 7 did — spot-check that the hallucinated-number rate and execution accuracy are internally consistent with the actual answers/rows shown, not just trusted as an aggregate. A different inference backend (CUDA V100 via vLLM vs. this laptop's Metal via Ollama) is a new variable that hasn't been exercised in this project before; do not skip this step even if the numbers look plausible.
+Read the report. Pull 3-5 real per-case records from the jsonl the same way Phase 4's Task 7 did — spot-check that the hallucinated-number rate and execution accuracy are internally consistent with the actual answers/rows shown, not just trusted as an aggregate. A different inference backend (CUDA H100 via vLLM vs. this laptop's Metal via Ollama) is a new variable that hasn't been exercised in this project before; do not skip this step even if the numbers look plausible.
 
 - [ ] **Step 6: Record the real numbers in `docs/bridges2.md` and commit**
 
@@ -193,7 +188,7 @@ git add docs/bridges2.md reports/eval_bridges2_Qwen-Qwen2.5-Coder-32B-Instruct-A
 git commit -m "$(cat <<'EOF'
 docs(bridges2): record the real Qwen2.5-Coder-32B-Instruct-AWQ comparison run
 
-Real 103-case eval on a Bridges-2 V100-32 node via vLLM. <fill in the
+Real 103-case eval on a Bridges-2 H100-80 node via vLLM. <fill in the
 actual execution accuracy / hallucinated-number rate / abstain
 precision numbers and wall time here, plus a one-line note on the
 Step 5 spot-check findings>.
@@ -207,23 +202,23 @@ EOF
 
 ---
 
-### Task 5: Real run — `Qwen3-Coder-30B-A3B-Instruct` (fp16, 2 GPUs)
+### Task 5: Real run — `Qwen3-Coder-30B-A3B-Instruct` (fp16, single H100)
 
 **Files:** none created/modified except `docs/bridges2.md`'s Status section.
 
 **Interfaces:**
-- Consumes: same as Task 4, plus Task 3's confirmation that a 2-GPU request is permitted on `GPU-shared` for this account.
+- Consumes: same as Task 4.
 - Produces: `reports/eval_bridges2_Qwen-Qwen3-Coder-30B-A3B-Instruct.md` and its dated jsonl.
 
 - [ ] **Step 0: Check the remaining SU balance before spending more of it**
 
-Hand off: check the OnDemand portal's balance banner (or `sacctmgr`/equivalent if the human partner prefers a command). The design spec's account had ~481/500 SU before this phase started — confirm there's still a reasonable balance left after Task 4's run before committing to a second, larger (2-GPU, likely longer) job. Note from the sibling project's own verified experience: the balance banner shows SU **remaining**, not used.
+Hand off: check the OnDemand portal's balance banner (or `sacctmgr`/equivalent if the human partner prefers a command). The design spec's account had ~481/500 SU before this phase started — confirm there's still a reasonable balance left after Task 4's run before committing to a second job (H100 SU rates are unconfirmed and may be higher per hour than V100; the fp16 model likely also takes longer per-token than the 4-bit AWQ run). Note from the sibling project's own verified experience: the balance banner shows SU **remaining**, not used.
 
 Repeat Task 4's Steps 1-6 exactly, substituting `Qwen/Qwen3-Coder-30B-A3B-Instruct` / `run_qwen3_coder_30b_fp16.sbatch` / `ledgerql-eval-30b_<jobid>` for `Qwen2.5-Coder-32B-Instruct-AWQ` / `run_qwen25_coder_32b_awq.sbatch` / `ledgerql-eval-32b_<jobid>` everywhere (the report filenames, the `docs/bridges2.md`/commit content — append a further dated entry to the Status section, same as Task 4 did, not a replacement of it). Do not skip Step 5's spot-check just because Task 4's already passed — a different model, and a different GPU count/precision, can fail in different ways.
 
 - [ ] **Step 1: Hand off submission commands** (the DB is already copied from Task 4, no need to re-`scp` it)
 - [ ] **Step 2: Wait, hand off log-retrieval commands**
-- [ ] **Step 3: Record and verify real output** (2-GPU jobs: confirm `nvidia-smi` shows usage on *both* GPU indices, not just one — a job that only exercised 1 of 2 allocated GPUs likely means `--tensor-parallel-size 2` didn't actually take effect)
+- [ ] **Step 3: Record and verify real output** (single H100-80 job — confirm `nvidia-smi` shows real memory usage as usual; no multi-GPU check needed now that both models fit one GPU)
 - [ ] **Step 4: Bring results back**
 - [ ] **Step 5: Sanity-check real per-case records**
 - [ ] **Step 6: Record real numbers in `docs/bridges2.md`, commit**
@@ -278,15 +273,15 @@ cat > reports/phase5_model_comparison.md << 'EOF'
 Real 103-case eval (`evals/gold.jsonl`) run against three models,
 same guardrails/self-consistency/verifier pipeline, same seed. The
 7B run is local (M2, Metal, via Ollama); the 32B and 30B runs are on
-PSC Bridges-2 (V100-32 GPUs, via vLLM per LEDGERQL_MASTER_PROMPT.md's
+PSC Bridges-2 (H100-80 GPUs, via vLLM per LEDGERQL_MASTER_PROMPT.md's
 explicit preference) — see `docs/bridges2.md` for the real, verified
 cluster setup.
 
 | Model | Precision / GPUs | Execution accuracy | Hallucinated-number rate | Abstain precision | Wall time |
 |---|---|---|---|---|---|
 | qwen2.5-coder:7b (local baseline) | Ollama default quant, 0 (M2 Metal) | 54.0% | 0.0% | 27.1% | <fill in if known, else "not timed"> |
-| Qwen2.5-Coder-32B-Instruct-AWQ (Bridges-2) | AWQ 4-bit, 1x V100-32 | <fill in> | <fill in> | <fill in> | <fill in> |
-| Qwen3-Coder-30B-A3B-Instruct (Bridges-2) | fp16, 2x V100-32 | <fill in> | <fill in> | <fill in> | <fill in> |
+| Qwen2.5-Coder-32B-Instruct-AWQ (Bridges-2) | AWQ 4-bit, 1x H100-80 | <fill in> | <fill in> | <fill in> | <fill in> |
+| Qwen3-Coder-30B-A3B-Instruct (Bridges-2) | fp16, 1x H100-80 | <fill in> | <fill in> | <fill in> | <fill in> |
 
 ## Findings
 

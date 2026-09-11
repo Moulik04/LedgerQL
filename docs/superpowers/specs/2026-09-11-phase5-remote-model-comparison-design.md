@@ -46,30 +46,34 @@ precision level chosen to actually fit the available hardware without a document
 risk:
 
 1. **`Qwen/Qwen2.5-Coder-32B-Instruct-AWQ`** — the *official* Qwen-published 4-bit AWQ quant
-   (~20GB), fits a single V100-32GB with room for KV cache. Same model family as the existing
-   `qwen2.5-coder:7b` baseline, just larger — isolates "does scale help" as close to a single
-   variable as possible, since this project's prompts were empirically tuned against the 7B's
-   specific behavior. Dense architecture, no tensor-parallel complications.
-2. **`Qwen/Qwen3-Coder-30B-A3B-Instruct`** — run at **full fp16, no quantization**, across
-   **2× V100-32GB via vLLM tensor parallelism** (`--tensor-parallel-size 2`). The only available
-   AWQ quant for this model is third-party (not from Qwen) and carries an explicit upstream
-   warning ("suffers significant loss under 4-bit quantization, please use with caution"), plus a
-   `--enable-expert-parallel` requirement that effectively forces 2 GPUs anyway for its MoE expert
-   tensors to divide evenly. Given 2 GPUs are needed regardless, running at full fp16 avoids the
-   quantization-loss confound entirely — a bad result then means "the model," not "the quant."
+   (~20GB). Same model family as the existing `qwen2.5-coder:7b` baseline, just larger — isolates
+   "does scale help" as close to a single variable as possible, since this project's prompts were
+   empirically tuned against the 7B's specific behavior. Dense architecture, no tensor-parallel
+   complications.
+2. **`Qwen/Qwen3-Coder-30B-A3B-Instruct`** — run at **full fp16, no quantization** (~60GB). The
+   only available AWQ quant for this model is third-party (not from Qwen) and carries an explicit
+   upstream warning ("suffers significant loss under 4-bit quantization, please use with
+   caution"), plus a `--enable-expert-parallel` requirement for its MoE expert tensors to divide
+   evenly — running at full fp16 avoids the quantization-loss confound entirely, a bad result then
+   means "the model," not "the quant."
 
-## Hardware
+## Hardware: `--gres=gpu:h100-80:1` for both models
 
-- `Qwen2.5-Coder-32B-Instruct-AWQ`: `--gres=gpu:v100-32:1` on `GPU-shared` — a real, already-
-  working resource string for this account (`mjain10` / `cis260102p`) from the user's other
-  project's sbatch jobs. L40S-48 nodes also exist on this partition (confirmed via `sinfo` in
-  that project) but have never actually been used in a submitted job on this account; V100-32 is
-  reused here for the same reason, not because L40S is worse.
-- `Qwen3-Coder-30B-A3B-Instruct` (fp16): `--gres=gpu:v100-32:2`, same node (single-node tensor
-  parallelism — cross-node would need extra coordination this phase doesn't need). ~60GB of fp16
-  weights across 64GB of combined GPU memory is tight but should fit; Task 3's verification step
-  confirms `GPU-shared` actually permits a 2-GPU request for this account before Task 5 depends
-  on it (some shared partitions cap per-job GPU count below what a node physically has).
+A real `sinfo -N -p GPU-shared -o "%N %G"` (run during Task 3) showed this account's
+`GPU-shared` allocation also has `w001`-`w010` nodes with `gpu:h100-80:8` — H100s with 80GB
+VRAM, not just the V100-32/V100-16/L40S-48 pools this spec's first draft assumed (based on the
+sibling project's own precedent, which never checked for H100 availability). This is a strict
+upgrade over the original V100 plan:
+
+- Both checkpoints (~20GB AWQ, ~60GB fp16) fit on a **single** H100-80 — no 2-GPU tensor
+  parallelism needed for either model, eliminating the unconfirmed "does `GPU-shared` even permit
+  a 2-GPU request for this account" question entirely.
+- H100 is Hopper (compute capability 9.0), a much safer bet for AWQ quantization kernel support
+  than V100/Volta (7.0) — Task 3's smoke test still confirms this rather than assuming it, since
+  AWQ kernel support still varies by vLLM version even on well-supported architectures.
+
+Both jobs are simple `--gres=gpu:h100-80:1` requests. See `docs/bridges2.md` for the full real
+`sinfo` output and the dated record of this finding.
 
 ## Architecture: run entirely on the compute node, no tunnel
 
@@ -86,14 +90,14 @@ registered with PSC (password-only auth, confirmed — a non-interactive `ssh` a
    are pre-downloaded via `huggingface-cli download` on the login node.
 4. One SLURM job per model (not both in one job) — simpler to reason about against an unverified
    walltime limit, and a failure in the second model's run can't invalidate the first's already-
-   captured results. Each job: starts `vllm serve <repo-id> --port 8000 [--tensor-parallel-size N
-   for the 2-GPU model]`, health-checks it via vLLM's OpenAI-compatible `/health` endpoint, then
-   runs `LLM_BACKEND=vllm OLLAMA_MODEL=<repo-id> make eval` (in the main `ledgerql` `.venv`, which
-   only needs `httpx` — already a base dependency — to talk to vLLM) against the copied DB and the
-   existing `evals/gold.jsonl`, then copies the report files to model-tagged names with `:`/`/`
-   sanitized to `-` for filesystem/scp safety (`reports/eval_bridges2_qwen2.5-coder-32b-awq.md` /
-   `..._<date>.jsonl`, same pattern for the second model) so the second run doesn't clobber the
-   first.
+   captured results. Each job: starts `vllm serve <repo-id> --port 8000` (single H100, no
+   tensor-parallel flag needed for either model), health-checks it via vLLM's OpenAI-compatible
+   `/health` endpoint, then runs `LLM_BACKEND=vllm OLLAMA_MODEL=<repo-id> make eval` (in the main
+   `ledgerql` `.venv`, which only needs `httpx` — already a base dependency — to talk to vLLM)
+   against the copied DB and the existing `evals/gold.jsonl`, then copies the report files to
+   model-tagged names with `:`/`/` sanitized to `-` for filesystem/scp safety
+   (`reports/eval_bridges2_Qwen-Qwen2.5-Coder-32B-Instruct-AWQ.md` / `..._<date>.jsonl`, same
+   pattern for the second model) so the second run doesn't clobber the first.
 5. The user `scp`s the tagged report files back to this laptop.
 
 **Model download and Python dependency install happen on the login node, before any `sbatch`
@@ -111,18 +115,17 @@ real cluster, not assumed from generic docs"), the implementation plan's early s
 verification gates, not code:
 
 1. **Does vLLM actually install and serve on Bridges-2's login/compute nodes** (CUDA/driver
-   version compatibility, whether the AWQ quant kernel is supported on V100's Volta architecture —
-   AWQ support varies by GPU compute capability, not assumed compatible without a real smoke
-   test)? Smoke-tested before anything else.
-2. **Does `GPU-shared` actually permit a 2-GPU request for this account** — needed for the
-   `qwen3-coder` fp16 run; the sibling project's precedent only ever requested 1 GPU.
-3. **Current `GPU-shared` walltime limit and real queue wait**, via `scontrol show partition
+   version compatibility, whether the AWQ quant kernel is supported on H100's Hopper architecture
+   — a much safer bet than the originally-planned V100/Volta, but still not assumed compatible
+   without a real smoke test, since AWQ kernel support can vary by vLLM version even on
+   well-supported hardware)? Smoke-tested before anything else.
+2. **Current `GPU-shared` walltime limit and real queue wait**, via `scontrol show partition
    GPU-shared` and `squeue` — the sibling project's V100 job used 3 hours for a training run;
    this phase's workload is pure inference (~103 cases × ~6 LLM calls each × 2 models), likely
    faster, but not assumed faster without a real timed run.
-4. **SU cost of a real run** — checked against the ~481/500 SU balance after the first model
-   completes, before submitting the second (the 2-GPU fp16 run costs roughly double the SU rate
-   of the 1-GPU AWQ run, on top of it likely taking longer per-token at fp16 vs. 4-bit).
+3. **SU cost of a real run** — checked against the ~481/500 SU balance after the first model
+   completes, before submitting the second. Both are single-GPU H100 requests now, but the fp16
+   run likely still takes longer per-token than the 4-bit AWQ run, so not assumed equal cost.
 
 ## Reporting
 
