@@ -1,12 +1,12 @@
-"""Stage 7a: answer generation (Phase 2 version).
+"""Stage 7a: grounded answer generation.
 
-Phase 2 shows the model both the question and the executed result and
-asks for a plain-English answer -- unverified, no grounding check.
-Phase 4 replaces this with a stricter version that hides the question
-(to force grounding in the data alone) and adds a numeric verifier;
-this function's behavior is expected to change substantially then --
-that evolution is the point of the ablation story, not a defect to
-avoid by over-building Phase 2 now.
+The model sees only the executed result's column names and rows --
+never the original natural-language question, never the SQL. This is
+deliberate: with no question to answer "from memory" against, the only
+thing the model can plausibly do is describe the table in front of it,
+which is what makes the numeric verifier (verify.py) a meaningful check
+rather than a race against a model that already has its own idea of
+what the answer "should" be.
 """
 
 import os
@@ -21,28 +21,54 @@ OLLAMA_TEMPERATURE = float(os.environ.get("OLLAMA_TEMPERATURE", "0.2"))
 OLLAMA_SEED = int(os.environ.get("OLLAMA_SEED", "42"))
 
 SYSTEM_PROMPT = (
-    "You answer questions about company financials using only the data "
-    "table provided below. Write one or two plain-English sentences. "
-    "State any unit or fiscal year explicitly."
+    "Write one or two plain-English sentences describing the data in this "
+    "table. Use only the values shown -- do not add, round differently, or "
+    "infer any number not present. State any unit or fiscal year exactly as "
+    "given."
 )
+
+
+def _format_value(value: object) -> str:
+    # Large numbers rendered as one undelimited digit string (e.g.
+    # "391035000000.0") get a digit dropped on restatement -- a real,
+    # deterministic failure found in Phase 4's eval run (391035000000 ->
+    # 39103500000, identically across 4 separate gold cases at temperature
+    # 0.2, seed 42). Confirmed directly against the live model that
+    # comma-grouping the digits before showing them ("391,035,000,000.0")
+    # eliminates the drop -- reproduced 3/3 with the ungrouped form, fixed
+    # 3/3 after grouping, both at multiple seeds. A prompt-instruction-only
+    # attempt ("copy digits exactly") was tried first and did not help;
+    # this is a formatting fix, not a wording one. verify.py's own
+    # extract_numbers() already strips commas before comparing, so this
+    # only changes what the model sees, not how grounding is checked.
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        return str(value)
+    # A plausible bare fiscal/calendar year (e.g. 2024) must not be
+    # comma-grouped ("2,024") -- not observed to leak into a real answer
+    # in either eval jsonl, but verify.py's extract_years() matches
+    # bare 4-digit years with `(?<!\d)20\d{2}(?!\d)`, which would not
+    # match a comma-grouped form, silently turning the fiscal-year check
+    # into a no-op for that value if it ever did leak through.
+    if isinstance(value, int) and 2000 <= value <= 2099:
+        return str(value)
+    return f"{value:,}"
 
 
 def _format_result(result: ExecutionResult) -> str:
     header = "\t".join(result.columns)
     if not result.rows:
         return f"{header}\n(no rows)"
-    body = "\n".join("\t".join(str(v) for v in row) for row in result.rows)
+    body = "\n".join("\t".join(_format_value(v) for v in row) for row in result.rows)
     return f"{header}\n{body}"
 
 
 def write_answer(
-    question: str,
     result: ExecutionResult,
     client: ollama.Client | None = None,
 ) -> str:
     client = client or ollama.Client(host=OLLAMA_HOST)
     table_text = _format_result(result)
-    prompt = f"Question: {question}\n\nResult:\n{table_text}\n\nAnswer:"
+    prompt = f"Result:\n{table_text}\n\nAnswer:"
     response = client.generate(
         model=OLLAMA_MODEL,
         system=SYSTEM_PROMPT,

@@ -5,14 +5,13 @@ this script actually exercises pipeline.ask() and compares its output
 to gold.
 
 Run: python evals/run_eval.py --db data/ledgerql.duckdb
-Writes: reports/baseline.md and reports/baseline_<date>.jsonl
+Writes: reports/eval.md and reports/eval_<date>.jsonl
 """
 
 from __future__ import annotations
 
 import argparse
 import json
-import re
 import sys
 from collections import defaultdict
 from datetime import date
@@ -32,46 +31,18 @@ import duckdb
 # This bootstrap makes the script self-sufficient regardless of that.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from ledgerql import answer as answer_module
 from ledgerql import generate as generate_module
 from ledgerql import pipeline
+from ledgerql.verify import verify as verify_answer
 
-_MAGNITUDE = {"trillion": 1e12, "billion": 1e9, "million": 1e6, "thousand": 1e3}
-
-# A bare 4-digit number that reads as a plausible fiscal/calendar year
-# (2000-2099) is excluded -- these appear constantly in grounded,
-# correct answers ("fiscal year 2024") and are not data values that
-# need to trace back to the executed result set.
-_NUMBER_RE = re.compile(
-    r"(?<![\d.])\$?(-?\d[\d,]*\.?\d*)\s*(trillion|billion|million|thousand|percent|%)?",
-    re.IGNORECASE,
-)
-_YEAR_RE = re.compile(r"^20\d{2}$")
-# A bare number immediately followed by a hyphen and an uppercase letter
-# is an SEC form code (e.g. "10-K", "10-Q"), not a data value.
-_FORM_CODE_RE = re.compile(r"-[A-Z]")
-
-
-def extract_numbers(text: str) -> list[float]:
-    numbers = []
-    for match in _NUMBER_RE.finditer(text):
-        if _FORM_CODE_RE.match(text, match.end()):
-            continue
-        raw_digits, word = match.groups()
-        # Strip a trailing sentence period (e.g. "fiscal year 2024.")
-        # before the year-exclusion check and float conversion, so a
-        # number followed immediately by a period is treated the same
-        # as one that stands alone.
-        digits = raw_digits.replace(",", "").rstrip(".")
-        if not word and _YEAR_RE.match(digits):
-            continue
-        try:
-            value = float(digits)
-        except ValueError:
-            continue
-        if word and word.lower() in _MAGNITUDE:
-            value *= _MAGNITUDE[word.lower()]
-        numbers.append(value)
-    return numbers
+# The report header reads its temperature/N/threshold values directly from
+# these modules' own constants (not hardcoded) so a future run with
+# different env-var overrides reports its real values. answer_module's
+# OLLAMA_TEMPERATURE is the actual answer-writing temperature;
+# generate_module's OLLAMA_CONSENSUS_TEMPERATURE is what self-consistency
+# candidate generation actually runs at -- these are two different
+# temperatures, not one value reused for both (see DECISIONS.md).
 
 
 def _scalar_match(gold_val, pred_val, tolerance: float) -> bool:
@@ -118,6 +89,31 @@ def score_guardrail_case(case: dict, result: dict) -> dict:
     }
 
 
+ABSTAIN_EXPECTED_BEHAVIORS = {"ABSTAIN", "ANSWER_WITH_ASSUMPTION"}
+
+
+def compute_abstain_metrics(per_case: list[dict], cases_by_id: dict) -> dict:
+    all_abstains = [r for r in per_case if r["answer"] is None]
+    correct_abstains = [
+        r
+        for r in all_abstains
+        if cases_by_id[r["id"]]["expected"] in ABSTAIN_EXPECTED_BEHAVIORS
+        and r.get("reason_code") == cases_by_id[r["id"]].get("reason_code")
+    ]
+    expected_abstains = [
+        c for c in cases_by_id.values() if c["expected"] in ABSTAIN_EXPECTED_BEHAVIORS
+    ]
+    return {
+        "all_abstains": len(all_abstains),
+        "correct_abstains": len(correct_abstains),
+        "expected_abstains": len(expected_abstains),
+        "abstain_precision": len(correct_abstains) / len(all_abstains) if all_abstains else 0.0,
+        "abstain_recall": (
+            len(correct_abstains) / len(expected_abstains) if expected_abstains else 0.0
+        ),
+    }
+
+
 def load_gold_cases(path: Path) -> list[dict]:
     cases = []
     for line in path.read_text().splitlines():
@@ -128,6 +124,7 @@ def load_gold_cases(path: Path) -> list[dict]:
 
 def run(gold_path: Path, db_path: str) -> dict:
     cases = load_gold_cases(gold_path)
+    cases_by_id = {c["id"]: c for c in cases}
     # Must match execute.execute()'s connection config exactly -- DuckDB
     # refuses a second connection to the same file with a different
     # config, even when both are read-only.
@@ -174,6 +171,7 @@ def run(gold_path: Path, db_path: str) -> dict:
             "truncated": result["truncated"],
             "reason_code": result.get("reason_code"),
             "guardrail_events": result.get("guardrail_events", []),
+            "confidence": result.get("confidence"),
         }
 
         if case["expected"] == "ANSWER":
@@ -196,15 +194,18 @@ def run(gold_path: Path, db_path: str) -> dict:
 
         if result["answer"] is not None:
             answered += 1
-            claimed = extract_numbers(result["answer"])
-            grounded_values = {
-                v for row in result["rows"] for v in row if isinstance(v, int | float)
-            }
-            ungrounded = [
-                n for n in claimed if not any(_scalar_match(g, n, 0.01) for g in grounded_values)
-            ]
-            record["hallucinated_numbers"] = ungrounded
-            if ungrounded:
+            # Reuse verify.py's own verify() directly -- the exact function
+            # the live pipeline already ran against this same answer/result
+            # pair -- rather than a second, independently-maintained
+            # grounding check. A prior version of this block reimplemented
+            # the comparison inline and silently drifted out of sync with a
+            # real verify.py fix (pre-scaled query results, e.g. `value /
+            # 1e9 AS revenue_in_billions`), causing this metric to flag
+            # answers as hallucinated that the live pipeline had already
+            # correctly verified as grounded.
+            verify_result = verify_answer(result["answer"], result["columns"], result["rows"])
+            record["hallucinated_numbers"] = verify_result.ungrounded_numbers
+            if not verify_result.ok:
                 hallucinated += 1
 
         per_case.append(record)
@@ -227,6 +228,8 @@ def run(gold_path: Path, db_path: str) -> dict:
             "errored": sum(1 for r in tier_records if r["execution_error"] is not None),
         }
 
+    abstain_metrics = compute_abstain_metrics(per_case, cases_by_id)
+
     return {
         "overall_execution_accuracy": overall_accuracy,
         "all_tiers": all_tiers,
@@ -241,14 +244,15 @@ def run(gold_path: Path, db_path: str) -> dict:
         "non_answer_errored": non_answer_errored,
         "non_answer_tier_breakdown": non_answer_tier_breakdown,
         "per_case": per_case,
+        **abstain_metrics,
     }
 
 
 def write_reports(summary: dict, reports_dir: Path) -> tuple[Path, Path]:
     reports_dir.mkdir(parents=True, exist_ok=True)
     today = date.today().isoformat()
-    md_path = reports_dir / "baseline.md"
-    jsonl_path = reports_dir / f"baseline_{today}.jsonl"
+    md_path = reports_dir / "eval.md"
+    jsonl_path = reports_dir / f"eval_{today}.jsonl"
 
     with jsonl_path.open("w") as f:
         for record in summary["per_case"]:
@@ -257,12 +261,15 @@ def write_reports(summary: dict, reports_dir: Path) -> tuple[Path, Path]:
             f.write(json.dumps(record, default=str) + "\n")
 
     lines = [
-        "# Phase 3 Baseline",
+        "# LedgerQL Eval",
         "",
         f"Date: {today}",
         f"Model: {generate_module.OLLAMA_MODEL}",
-        f"Temperature: {generate_module.OLLAMA_TEMPERATURE}",
+        f"Candidate temperature: {generate_module.OLLAMA_CONSENSUS_TEMPERATURE}",
+        f"Answer temperature: {answer_module.OLLAMA_TEMPERATURE}",
         f"Seed: {generate_module.OLLAMA_SEED}",
+        f"Candidates per question (N): {pipeline.N_CANDIDATES}",
+        f"Low-agreement threshold: {pipeline.LOW_AGREEMENT_THRESHOLD}",
         "",
         "## Execution accuracy",
         "",
@@ -285,11 +292,23 @@ def write_reports(summary: dict, reports_dir: Path) -> tuple[Path, Path]:
         f"{summary['answered_count']} answered cases stated a number not "
         "present in that query's own executed result.",
         "",
+        "This checks the answer against its own query's result set, not "
+        "against the gold SQL -- it catches the model inventing or "
+        "mistranscribing a number, not the model answering a different "
+        "question than the one asked. A wrong-but-self-consistent SQL "
+        "query (e.g. an exact-match filter where gold uses a fuzzy one, "
+        "or a different date column) can still score 0% hallucinated: "
+        "every number it states really is in its own result, that result "
+        "is just an answer to the wrong query. That failure mode shows up "
+        "in execution accuracy, not here.",
+        "",
         "## Non-ANSWER cases (ABSTAIN / ANSWER_WITH_ASSUMPTION)",
         "",
         f"{summary['non_answer_case_count']} cases where a guardrail-aware "
-        "system should abstain or state an assumption. Phase 2 has no "
-        "abstain logic, so this section is descriptive, not scored:",
+        "system should abstain or state an assumption. This section is "
+        "descriptive (raw attempted/errored counts, not a pass/fail "
+        "score) -- the Confidence & abstain section below is where "
+        "abstain behavior is actually scored (precision/recall):",
         "",
         f"- Attempted an answer anyway: {summary['non_answer_attempted']}",
         f"- Errored during execution (e.g. adversarial DML hitting the "
@@ -314,6 +333,28 @@ def write_reports(summary: dict, reports_dir: Path) -> tuple[Path, Path]:
     for tier in sorted(GUARDRAIL_SCORED_TIERS):
         rate = summary["guardrail_catch_rate"].get(tier)
         lines.append(f"| {tier} | {rate:.1%} |" if rate is not None else f"| {tier} | no cases |")
+    lines += [
+        "",
+        "## Confidence & abstain",
+        "",
+        f"Abstain precision: {summary['abstain_precision']:.1%} "
+        f"({summary['correct_abstains']}/{summary['all_abstains']} abstains were correct) "
+        "-- Phase 4 acceptance target: >= 80%.",
+        f"Abstain recall: {summary['abstain_recall']:.1%} "
+        f"({summary['correct_abstains']}/{summary['expected_abstains']} cases that should "
+        "have abstained were caught).",
+        "",
+        "## Ablation",
+        "",
+        "| Configuration | Execution accuracy | Hallucinated-number rate "
+        "| Adversarial guardrail catch |",
+        "|---|---|---|---|",
+        "| naive (Phase 2) | 58.0% | 32.5% | n/a |",
+        "| +static guardrails (Phase 3) | 58.0% | 28.6% | 88.9% |",
+        f"| +self-consistency & verifier (Phase 4) | {summary['overall_execution_accuracy']:.1%} "
+        f"| {summary['hallucinated_number_rate']:.1%} "
+        f"| {summary['guardrail_catch_rate'].get('adversarial', 0.0):.1%} |",
+    ]
     lines += [
         "",
         f"Full per-case results: `{jsonl_path.name}`",

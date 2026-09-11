@@ -1,54 +1,6 @@
 import pytest
 
-from evals.run_eval import extract_numbers, results_match
-
-
-def test_extract_numbers_handles_plain_integer():
-    assert extract_numbers("The value is 391035000000.") == [391035000000.0]
-
-
-def test_extract_numbers_handles_billions_word():
-    assert extract_numbers("Revenue was $391.0 billion.") == [391000000000.0]
-
-
-def test_extract_numbers_handles_percent():
-    numbers = extract_numbers("Growth was 6.43%.")
-    assert numbers == [6.43]
-
-
-def test_extract_numbers_excludes_plausible_years():
-    # A bare 4-digit number in the 2000-2099 range reads as a fiscal
-    # year, not a data value, and must not be treated as an ungrounded
-    # numeric claim.
-    numbers = extract_numbers("This is fiscal year 2024 data.")
-    assert numbers == []
-
-
-def test_extract_numbers_excludes_plausible_years_with_trailing_period():
-    # A year immediately followed by a sentence-ending period (no space)
-    # must be excluded the same way a bare year is -- the trailing "."
-    # must not defeat the year-exclusion check.
-    numbers = extract_numbers("This is fiscal year 2024.")
-    assert numbers == []
-
-
-def test_extract_numbers_excludes_sec_form_codes():
-    # "10-K" / "10-Q" are SEC form codes, not bare numbers -- the "10"
-    # must not be extracted as a claimed numeric value.
-    numbers = extract_numbers("It filed a 10-K report.")
-    assert numbers == []
-    numbers = extract_numbers("It filed a 10-K and a 10-Q.")
-    assert numbers == []
-
-
-def test_extract_numbers_handles_negative_number():
-    numbers = extract_numbers("Revenue declined by -5.2%.")
-    assert numbers == [-5.2]
-
-
-def test_extract_numbers_handles_multiple_values():
-    numbers = extract_numbers("Revenue was $391.0 billion and net income was $93.7 billion.")
-    assert numbers == [391000000000.0, 93700000000.0]
+from evals.run_eval import results_match
 
 
 def test_results_match_scalar_within_tolerance():
@@ -114,6 +66,11 @@ def test_write_reports_serializes_date_values_in_rows(tmp_path):
         "non_answer_attempted": 0,
         "non_answer_errored": 0,
         "non_answer_tier_breakdown": {},
+        "all_abstains": 0,
+        "correct_abstains": 0,
+        "expected_abstains": 0,
+        "abstain_precision": 0.0,
+        "abstain_recall": 0.0,
         "per_case": [
             {
                 "id": "L01",
@@ -127,6 +84,86 @@ def test_write_reports_serializes_date_values_in_rows(tmp_path):
     record = json.loads(jsonl_path.read_text().splitlines()[0])
     assert record["rows"][0][0] == "2024-09-28"
     assert md_path.exists()
+    assert md_path.name == "eval.md"
+    assert jsonl_path.name.startswith("eval_")
+
+
+def test_write_reports_header_shows_real_candidate_and_answer_temperatures(tmp_path):
+    # The header used to hardcode/report a single "Temperature" line
+    # sourced from generate.OLLAMA_TEMPERATURE, which is the single-shot/
+    # answer-writing temperature, not the self-consistency candidate
+    # temperature (generate.OLLAMA_CONSENSUS_TEMPERATURE) that
+    # pipeline.ask() actually samples N candidates at. The header must
+    # show both real values, plus N and the low-agreement threshold, read
+    # live from the modules rather than hardcoded, so a run with
+    # different env-var overrides reports its real values.
+    from evals.run_eval import write_reports
+    from ledgerql import answer as answer_module
+    from ledgerql import generate as generate_module
+    from ledgerql import pipeline
+
+    summary = {
+        "overall_execution_accuracy": 0.0,
+        "all_tiers": [],
+        "per_tier_accuracy": {},
+        "guardrail_catch_rate": {},
+        "hallucinated_number_rate": 0.0,
+        "answered_count": 0,
+        "non_answer_case_count": 0,
+        "non_answer_attempted": 0,
+        "non_answer_errored": 0,
+        "non_answer_tier_breakdown": {},
+        "all_abstains": 0,
+        "correct_abstains": 0,
+        "expected_abstains": 0,
+        "abstain_precision": 0.0,
+        "abstain_recall": 0.0,
+        "per_case": [],
+    }
+
+    md_path, _ = write_reports(summary, tmp_path)
+    text = md_path.read_text()
+
+    assert f"Candidate temperature: {generate_module.OLLAMA_CONSENSUS_TEMPERATURE}" in text
+    assert f"Answer temperature: {answer_module.OLLAMA_TEMPERATURE}" in text
+    assert f"Candidates per question (N): {pipeline.N_CANDIDATES}" in text
+    assert f"Low-agreement threshold: {pipeline.LOW_AGREEMENT_THRESHOLD}" in text
+    # The two temperatures are genuinely different values in this project
+    # (0.2 vs 0.7 by default) -- the header must not collapse them to one.
+    assert generate_module.OLLAMA_CONSENSUS_TEMPERATURE != answer_module.OLLAMA_TEMPERATURE
+
+
+def test_write_reports_non_answer_section_reflects_phase4_abstain_scoring(tmp_path):
+    # Stale claim ("Phase 2 has no abstain logic, so this section is
+    # descriptive, not scored") is wrong by Phase 4: abstain precision/
+    # recall genuinely are scored, two sections below on the same page.
+    from evals.run_eval import write_reports
+
+    summary = {
+        "overall_execution_accuracy": 0.0,
+        "all_tiers": [],
+        "per_tier_accuracy": {},
+        "guardrail_catch_rate": {},
+        "hallucinated_number_rate": 0.0,
+        "answered_count": 0,
+        "non_answer_case_count": 0,
+        "non_answer_attempted": 0,
+        "non_answer_errored": 0,
+        "non_answer_tier_breakdown": {},
+        "all_abstains": 0,
+        "correct_abstains": 0,
+        "expected_abstains": 0,
+        "abstain_precision": 0.0,
+        "abstain_recall": 0.0,
+        "per_case": [],
+    }
+
+    md_path, _ = write_reports(summary, tmp_path)
+    text = md_path.read_text()
+
+    assert "Phase 2 has no abstain logic" not in text
+    non_answer_section = text.split("## Non-ANSWER cases")[1].split("## Confidence & abstain")[0]
+    assert "not scored" not in non_answer_section
 
 
 def test_score_guardrail_case_passes_when_blocked_with_correct_reason():
@@ -265,3 +302,146 @@ def test_run_skips_guardrail_scoring_for_answer_expected_in_guardrail_tiers(tmp_
     # The out_of_scope ABSTAIN case should be in guardrail_total
     assert "out_of_scope" in summary["guardrail_catch_rate"]
     assert summary["guardrail_catch_rate"]["out_of_scope"] == 1.0
+
+
+def test_run_hallucination_metric_agrees_with_verify_verify_on_prescaled_result(
+    tmp_path, monkeypatch
+):
+    # Regression test for the DRY fix in a1a520d: run()'s hallucination
+    # metric must call verify.verify() directly rather than reimplement
+    # its own grounding comparison inline. A prior inline reimplementation
+    # compared claimed numbers only against the *raw* grounded values (no
+    # scale widening at all), so a real gold-set pattern -- a query that
+    # pre-scales its own value (`SELECT value / 1e9 AS
+    # revenue_in_billions ...`) -- would wrongly flag a correct,
+    # already-scaled restatement ("$391.035 billion") as hallucinated,
+    # even though the live pipeline's own verify.verify() call had
+    # already correctly grounded it. This case must now score as NOT
+    # hallucinated, matching verify.verify() exactly.
+    import json
+
+    from evals.run_eval import run
+    from ledgerql.verify import verify as verify_answer
+
+    gold_path = tmp_path / "gold.jsonl"
+    gold_path.write_text(
+        json.dumps(
+            {
+                "id": "U01",
+                "tier": "unit_period",
+                "expected": "ANSWER",
+                "question": "What was the revenue, in billions?",
+                "gold_sql": "SELECT 391.035",
+                "compare": "scalar",
+                "reason_code": None,
+                "guardrail_must_fire": None,
+            }
+        )
+        + "\n"
+    )
+
+    answer_text = "The revenue was $391.035 billion."
+    columns = ["revenue_in_billions"]
+    rows = [(391.035,)]
+
+    def mock_ask(question, db_path=None):
+        return {
+            "sql": "SELECT value / 1e9 AS revenue_in_billions FROM v_revenue",
+            "error": None,
+            "answer": answer_text,
+            "columns": columns,
+            "rows": rows,
+            "truncated": False,
+            "reason_code": None,
+            "guardrail_events": [],
+            "confidence": 1.0,
+        }
+
+    class MockConnection:
+        def execute(self, sql):
+            return self
+
+        def fetchall(self):
+            return [(391.035,)]
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr("ledgerql.pipeline.ask", mock_ask)
+    monkeypatch.setattr("duckdb.connect", lambda *args, **kwargs: MockConnection())
+
+    summary = run(gold_path, "dummy.db")
+
+    expected = verify_answer(answer_text, columns, rows)
+    assert expected.ok is True
+
+    assert summary["hallucinated_number_rate"] == 0.0
+    record = summary["per_case"][0]
+    assert record["hallucinated_numbers"] == expected.ungrounded_numbers == []
+
+
+def test_compute_abstain_metrics_counts_correct_abstain():
+    from evals.run_eval import compute_abstain_metrics
+
+    per_case = [{"id": "A1", "answer": None, "reason_code": "OUT_OF_SCOPE"}]
+    cases_by_id = {"A1": {"expected": "ABSTAIN", "reason_code": "OUT_OF_SCOPE"}}
+
+    metrics = compute_abstain_metrics(per_case, cases_by_id)
+
+    assert metrics["all_abstains"] == 1
+    assert metrics["correct_abstains"] == 1
+    assert metrics["expected_abstains"] == 1
+    assert metrics["abstain_precision"] == 1.0
+    assert metrics["abstain_recall"] == 1.0
+
+
+def test_compute_abstain_metrics_wrong_reason_code_not_correct():
+    from evals.run_eval import compute_abstain_metrics
+
+    per_case = [{"id": "A1", "answer": None, "reason_code": "SCHEMA_MISMATCH"}]
+    cases_by_id = {"A1": {"expected": "ABSTAIN", "reason_code": "OUT_OF_SCOPE"}}
+
+    metrics = compute_abstain_metrics(per_case, cases_by_id)
+
+    assert metrics["correct_abstains"] == 0
+    assert metrics["abstain_precision"] == 0.0
+
+
+def test_compute_abstain_metrics_answered_case_not_counted_as_abstain():
+    from evals.run_eval import compute_abstain_metrics
+
+    per_case = [{"id": "L1", "answer": "the value is 5", "reason_code": None}]
+    cases_by_id = {"L1": {"expected": "ANSWER", "reason_code": None}}
+
+    metrics = compute_abstain_metrics(per_case, cases_by_id)
+
+    assert metrics["all_abstains"] == 0
+    assert metrics["expected_abstains"] == 0
+    assert metrics["abstain_precision"] == 0.0
+    assert metrics["abstain_recall"] == 0.0
+
+
+def test_compute_abstain_metrics_missed_expected_abstain_hurts_recall():
+    from evals.run_eval import compute_abstain_metrics
+
+    # Expected to abstain, but the pipeline answered anyway.
+    per_case = [{"id": "A1", "answer": "a wrong answer", "reason_code": None}]
+    cases_by_id = {"A1": {"expected": "ABSTAIN", "reason_code": "OUT_OF_SCOPE"}}
+
+    metrics = compute_abstain_metrics(per_case, cases_by_id)
+
+    assert metrics["expected_abstains"] == 1
+    assert metrics["correct_abstains"] == 0
+    assert metrics["abstain_recall"] == 0.0
+
+
+def test_compute_abstain_metrics_counts_answer_with_assumption_as_expected():
+    from evals.run_eval import compute_abstain_metrics
+
+    per_case = [{"id": "L3", "answer": None, "reason_code": "AMBIGUOUS"}]
+    cases_by_id = {"L3": {"expected": "ANSWER_WITH_ASSUMPTION", "reason_code": "AMBIGUOUS"}}
+
+    metrics = compute_abstain_metrics(per_case, cases_by_id)
+
+    assert metrics["expected_abstains"] == 1
+    assert metrics["correct_abstains"] == 1
