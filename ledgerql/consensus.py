@@ -7,6 +7,18 @@ requested sample count, not just the candidates that executed
 successfully, so a low SQL-generation success rate is itself a
 low-confidence signal instead of being hidden by only comparing
 survivors to each other.
+
+Clustering keys on row VALUES only, not column names. Found via the
+real Phase 4 end-to-end run, not assumed: at the consensus temperature,
+independently-sampled candidates for the same question routinely differ
+in how they alias/shape an equivalent column (`SUM(value) AS
+total_revenue` vs. a bare `value`) while returning identical underlying
+data -- clustering on column names too split 4 candidates that all
+produced the exact same top-10 companies/revenue figures into two
+separate 2-candidate clusters, reporting a false 0.4 "low agreement"
+for a case the model had actually converged on. Row values are the
+thing being grounded (verify.py and the final answer only ever look at
+values, never column labels), so they're the right thing to cluster on.
 """
 
 from collections import Counter
@@ -44,7 +56,7 @@ def vote(
     for i, exec_result in enumerate(executions):
         if exec_result is None or exec_result.error is not None:
             continue
-        key = (tuple(exec_result.columns), tuple(sorted(exec_result.rows, key=_row_sort_key)))
+        key = tuple(sorted(exec_result.rows, key=_row_sort_key))
         clusters.setdefault(key, []).append(i)
 
     all_events: list[str] = []

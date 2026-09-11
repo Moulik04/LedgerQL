@@ -148,3 +148,29 @@ def test_vote_winner_with_legitimately_empty_rows_is_not_a_no_winner_case():
     assert result.reason_code is None
     assert result.rows == []
     assert result.agreement == 1.0
+
+
+def test_vote_clusters_by_row_values_not_column_names():
+    # Real gold-set case (A01, "top 10 companies by revenue"): 4 of 5
+    # candidates return the exact same top-10 companies/values but with
+    # different column aliases (SUM(value) AS total_revenue vs. a bare
+    # value) -- these must still cluster together as one 4/5 agreement,
+    # not split into two 2/5 clusters just because the column label
+    # differs. Only the actual row values are being grounded; column
+    # names are never compared against anything downstream.
+    guards = [_guard("SELECT 1") for _ in range(5)]
+    same_values = [("WMT", 674538000000.0), ("AMZN", 637959000000.0)]
+    execs = [
+        ExecutionResult(columns=["ticker", "total_revenue"], rows=same_values),
+        ExecutionResult(columns=["ticker", "value"], rows=same_values),
+        ExecutionResult(columns=["ticker", "total_revenue"], rows=same_values),
+        ExecutionResult(columns=["ticker", "value"], rows=same_values),
+        ExecutionResult(
+            columns=["ticker", "name", "value"], rows=[("WMT", "Walmart", 674538000000.0)]
+        ),
+    ]
+
+    result = consensus.vote(guards, execs)
+
+    assert result.agreement == 4 / 5
+    assert result.rows == same_values
