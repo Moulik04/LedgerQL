@@ -4,7 +4,7 @@ An auditable natural-language-to-SQL system for financial data — layered guard
 
 > Ask a plain-English question about company financials. LedgerQL returns a correct SQL query, the executed result, and a grounded answer with a confidence score — **or it refuses**, with a reason. It never returns a fabricated number.
 
-**Status:** Phase 3 complete — guardrails (AST-level SQL validation, live schema allowlisting, cost caps) and a full audit trail are live. 58.0% execution accuracy, 28.6% hallucinated-number rate, 88.9% adversarial guardrail catch rate on the 103-case gold set.
+**Status:** Phase 4 complete — self-consistency voting, grounded-answer generation, and numeric verification are live on top of Phase 3's guardrails. 54.0% execution accuracy, 0.0% hallucinated-number rate, 27.1% abstain precision (target ≥80%, shipped short — see `DECISIONS.md`) on the 103-case gold set.
 
 ## Why
 
@@ -78,7 +78,7 @@ The eval suite is the point of the project, not an afterthought. `make eval` run
 - [x] **Phase 1 — Data.** SEC EDGAR ingestion into DuckDB, analyst-facing schema, sanity queries against known filings.
 - [x] **Phase 2 — Naive text-to-SQL.** End-to-end generation and execution baseline, no guardrails. 58.0% execution accuracy, 32.5% hallucinated-number rate on 103 gold cases — the "before" number Phase 3's guardrails are measured against.
 - [x] **Phase 3 — Guardrails + audit.** AST-level SQL validation (sqlglot), live schema allowlisting, cost caps, a soft LLM scope prefilter, and a full JSONL audit trail on every request. 58.0% execution accuracy (unchanged from Phase 2 — guardrails don't cost correctness), 28.6% hallucinated-number rate, 88.9% (8/9) adversarial guardrail catch rate (see `DECISIONS.md` for the one documented miss) — see `reports/baseline.md`.
-- [ ] **Phase 4 — Hallucination detection.** Self-consistency voting, grounded-answer verification, confidence scoring, abstain policy.
+- [x] **Phase 4 — Hallucination detection.** Self-consistency voting (N=5, clustered by result values), grounded-answer generation (the model never sees the original question), a numeric + fiscal-year verifier, and a confidence-based abstain policy. 54.0% execution accuracy (vs Phase 3's 58.0%), 0.0% hallucinated-number rate (the primary target — met), 27.1% abstain precision (target ≥80%, not met; root-caused and documented in `DECISIONS.md` — mostly structurally unreachable under this phase's reduced scope or genuine small-model limitations the verifier correctly catches) — see `reports/eval.md`.
 - [ ] **Phase 5 — Scale-out evals.** Larger model comparison on GPU infrastructure, expanded gold set.
 - [ ] **Phase 6 — Fine-tuning (stretch).** LoRA fine-tune of the local generation model on the gold set.
 - [ ] **Phase 7 — Portfolio polish.** Metrics table, ablations, demo, tagged release.
