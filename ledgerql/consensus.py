@@ -70,7 +70,16 @@ def vote(
             reason_code = Counter(rejection_reasons).most_common(1)[0][0]
         else:
             reason_code = "EXEC_ERROR"
-        first_rejected_sql = next((g.sql for g in guards if not g.ok), None)
+        # Prefer the first rejected candidate's sql for audit visibility
+        # (the common case: a guardrail actually blocked something worth
+        # showing). When every guard passed but every execution still
+        # errored (EXEC_ERROR with no rejections), fall back to the first
+        # passing guard's sql instead of leaving it None -- a real run hit
+        # this path 7 times, 5 on ANSWER-expected cases, with no audit
+        # trail of what was actually attempted.
+        first_rejected_sql = next((g.sql for g in guards if not g.ok), None) or next(
+            (g.sql for g in guards if g.ok), None
+        )
         return ConsensusResult(
             sql=first_rejected_sql,
             agreement=0.0,

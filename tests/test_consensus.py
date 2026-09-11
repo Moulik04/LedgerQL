@@ -127,6 +127,20 @@ def test_vote_no_winner_defaults_to_exec_error_when_no_rejection_reasons():
     assert result.reason_code == "EXEC_ERROR"
 
 
+def test_vote_exec_error_falls_back_to_a_passing_guards_sql_for_audit_trail():
+    # No rejected guard exists (every guard passed) so there is no
+    # rejected sql to show -- previously this left ConsensusResult.sql as
+    # None, losing the audit trail of what was actually attempted. It
+    # must fall back to the first passing guard's sql instead.
+    guards = [_guard("SELECT 1 FROM missing_table"), _guard("SELECT 2 FROM missing_table")]
+    execs = [ExecutionResult(error="timeout"), ExecutionResult(error="timeout")]
+
+    result = consensus.vote(guards, execs)
+
+    assert result.reason_code == "EXEC_ERROR"
+    assert result.sql == "SELECT 1 FROM missing_table"
+
+
 def test_vote_deduplicates_events_across_candidates():
     guards = [
         _guard("SELECT 1", events=["cost_limit"]),
