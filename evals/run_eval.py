@@ -280,6 +280,16 @@ def write_reports(summary: dict, reports_dir: Path) -> tuple[Path, Path]:
         f"{summary['answered_count']} answered cases stated a number not "
         "present in that query's own executed result.",
         "",
+        "This checks the answer against its own query's result set, not "
+        "against the gold SQL -- it catches the model inventing or "
+        "mistranscribing a number, not the model answering a different "
+        "question than the one asked. A wrong-but-self-consistent SQL "
+        "query (e.g. an exact-match filter where gold uses a fuzzy one, "
+        "or a different date column) can still score 0% hallucinated: "
+        "every number it states really is in its own result, that result "
+        "is just an answer to the wrong query. That failure mode shows up "
+        "in execution accuracy, not here.",
+        "",
         "## Non-ANSWER cases (ABSTAIN / ANSWER_WITH_ASSUMPTION)",
         "",
         f"{summary['non_answer_case_count']} cases where a guardrail-aware "
