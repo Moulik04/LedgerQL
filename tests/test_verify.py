@@ -93,3 +93,38 @@ def test_verify_ignores_fiscal_year_check_when_column_absent():
 def test_verify_passes_on_empty_result_with_no_claimed_numbers():
     result = verify.verify("No matching data was found.", ["value"], [])
     assert result.ok is True
+
+
+def test_verify_passes_when_query_prescaled_the_value_to_billions():
+    # A real gold-set query pattern: `SELECT value / 1e9 AS
+    # revenue_in_billions ...` -- the grounded row value is already in
+    # billions (391.035), and a correct answer restating it with a
+    # matching magnitude word must not be rejected just because
+    # extract_numbers() scales "391.035 billion" back up to
+    # 391035000000.0 for comparison.
+    result = verify.verify(
+        "The revenue was $391.035 billion.",
+        ["revenue_in_billions"],
+        [(391.035,)],
+    )
+    assert result.ok is True
+
+
+def test_verify_passes_when_query_prescaled_the_value_to_millions():
+    result = verify.verify(
+        "The revenue was $47941 million.",
+        ["revenue_millions"],
+        [(47941.0,)],
+    )
+    assert result.ok is True
+
+
+def test_verify_still_rejects_a_genuinely_wrong_prescaled_number():
+    # The scale-widening must not turn verification into a no-op --
+    # a number that doesn't match at any scale is still ungrounded.
+    result = verify.verify(
+        "The revenue was $999.0 billion.",
+        ["revenue_in_billions"],
+        [(391.035,)],
+    )
+    assert result.ok is False

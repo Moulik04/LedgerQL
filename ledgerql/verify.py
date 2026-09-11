@@ -12,6 +12,19 @@ deliberately excluded from extract_numbers() (they appear constantly in
 correct, grounded answers and are not the kind of "unsupported data
 value" that check exists to catch), so a wrong fiscal year would
 otherwise pass silently.
+
+Found via the real Phase 4 end-to-end run, not assumed: a real gold-set
+query can pre-scale a value itself (`SELECT value / 1e9 AS
+revenue_in_billions ...`), so the grounded row value is *already* in
+billions (e.g. `391.035`). When the model then correctly restates that
+same already-scaled number with a matching magnitude word ("$391.035
+billion"), extract_numbers()'s own scaling multiplies it back up to
+391035000000.0 for comparison -- which no longer matches the
+already-scaled grounded value, and a genuinely correct answer gets
+wrongly rejected. `_grounded_with_scales()` below widens the grounded
+set to also include each raw grounded value multiplied by the same
+magnitude factors extract_numbers() applies, so a claimed number is
+accepted whether the query scaled the column itself or not.
 """
 
 import re
@@ -66,6 +79,14 @@ def _scalar_match(value: float, grounded: float, tolerance: float = 0.01) -> boo
     return abs(value - grounded) <= max(abs(grounded) * tolerance, 1e-9)
 
 
+def _grounded_with_scales(grounded_values: set[float]) -> set[float]:
+    scaled = set(grounded_values)
+    for g in grounded_values:
+        for factor in _MAGNITUDE.values():
+            scaled.add(g * factor)
+    return scaled
+
+
 @dataclass
 class VerifyResult:
     ok: bool
@@ -74,7 +95,9 @@ class VerifyResult:
 
 
 def verify(answer: str, columns: list[str], rows: list[tuple]) -> VerifyResult:
-    grounded_values = {v for row in rows for v in row if isinstance(v, int | float)}
+    grounded_values = _grounded_with_scales(
+        {v for row in rows for v in row if isinstance(v, int | float)}
+    )
     claimed = extract_numbers(answer)
     ungrounded = [n for n in claimed if not any(_scalar_match(n, g) for g in grounded_values)]
 
