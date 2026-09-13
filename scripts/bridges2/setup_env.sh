@@ -25,9 +25,28 @@ ROOT="$HOME/ledgerql-bridges2"
 VLLM_ENV_DIR="$ROOT/vllm-env"
 REPO_DIR="$ROOT/ledgerql"
 
+# A local Python interpreter, not a download: real login-node testing found
+# `uv sync`'s own standalone-Python auto-download (needed since the system
+# python3 is 3.6.8 and the newest `module avail python` offers is 3.8.6 --
+# both well below pyproject.toml's requires-python >=3.11) repeatedly failed
+# ("Invalid tar file" / "operation timed out" after 3 retries over 26
+# minutes) -- large external binary transfers are unreliable from this
+# login node. `module load pytorch/26.05-2.11-py3` provides Python 3.13.7 at
+# a fixed local path with no download at all (confirmed identically in the
+# sibling ReorderPoint project's own setup_env.sh). Loading it also sets
+# VIRTUAL_ENV to its own read-only base env -- confirmed in that project to
+# confuse `uv venv`/`uv sync` into targeting the wrong environment unless
+# explicitly unset.
+module load pytorch/26.05-2.11-py3
+unset VIRTUAL_ENV
+PY_INTERP=/opt/packages/uv/python/cpython-3.13.7-linux-x86_64-gnu
+
 mkdir -p "$ROOT"
 
-# --- uv (no root needed, installs to $HOME/.local/bin) ---
+# --- uv (no root needed, installs to $HOME/.local/bin; the module above
+# also bundles its own uv, but ~/.local/bin's copy works fine standalone
+# too and this way the script doesn't depend on the module being loaded
+# for every future invocation) ---
 if command -v uv >/dev/null 2>&1; then
     echo "uv already available: $(command -v uv)"
 else
@@ -46,6 +65,9 @@ else
     echo "Cloning LedgerQL into $REPO_DIR..."
     git clone https://github.com/Moulik04/LedgerQL.git "$REPO_DIR"
 fi
+if [ ! -x "$REPO_DIR/.venv/bin/python" ]; then
+    (cd "$REPO_DIR" && uv venv --python "$PY_INTERP")
+fi
 (cd "$REPO_DIR" && uv sync --all-groups)
 
 # --- vLLM's own separate venv ---
@@ -54,7 +76,7 @@ if [ -x "$VLLM_ENV_DIR/.venv/bin/vllm" ]; then
 else
     echo "Creating a separate venv for vLLM at $VLLM_ENV_DIR..."
     mkdir -p "$VLLM_ENV_DIR"
-    (cd "$VLLM_ENV_DIR" && uv venv --python 3.12 && uv pip install --python .venv/bin/python vllm "huggingface_hub[cli]")
+    (cd "$VLLM_ENV_DIR" && uv venv --python "$PY_INTERP" && uv pip install --python .venv/bin/python vllm "huggingface_hub[cli]")
 fi
 
 echo "vLLM version: $("$VLLM_ENV_DIR/.venv/bin/vllm" --version)"
