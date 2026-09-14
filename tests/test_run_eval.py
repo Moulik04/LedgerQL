@@ -66,11 +66,16 @@ def test_write_reports_serializes_date_values_in_rows(tmp_path):
         "non_answer_attempted": 0,
         "non_answer_errored": 0,
         "non_answer_tier_breakdown": {},
+        "always_abstain_baseline": 0.0,
         "all_abstains": 0,
-        "correct_abstains": 0,
         "expected_abstains": 0,
-        "abstain_precision": 0.0,
-        "abstain_recall": 0.0,
+        "decision_correct_abstains": 0,
+        "strict_correct_abstains": 0,
+        "abstain_precision_decision": 0.0,
+        "abstain_precision_strict": 0.0,
+        "abstain_recall_decision": 0.0,
+        "abstain_recall_strict": 0.0,
+        "reason_code_accuracy": 0.0,
         "per_case": [
             {
                 "id": "L01",
@@ -113,11 +118,16 @@ def test_write_reports_header_shows_real_candidate_and_answer_temperatures(tmp_p
         "non_answer_attempted": 0,
         "non_answer_errored": 0,
         "non_answer_tier_breakdown": {},
+        "always_abstain_baseline": 0.0,
         "all_abstains": 0,
-        "correct_abstains": 0,
         "expected_abstains": 0,
-        "abstain_precision": 0.0,
-        "abstain_recall": 0.0,
+        "decision_correct_abstains": 0,
+        "strict_correct_abstains": 0,
+        "abstain_precision_decision": 0.0,
+        "abstain_precision_strict": 0.0,
+        "abstain_recall_decision": 0.0,
+        "abstain_recall_strict": 0.0,
+        "reason_code_accuracy": 0.0,
         "per_case": [],
     }
 
@@ -150,11 +160,16 @@ def test_write_reports_non_answer_section_reflects_phase4_abstain_scoring(tmp_pa
         "non_answer_attempted": 0,
         "non_answer_errored": 0,
         "non_answer_tier_breakdown": {},
+        "always_abstain_baseline": 0.0,
         "all_abstains": 0,
-        "correct_abstains": 0,
         "expected_abstains": 0,
-        "abstain_precision": 0.0,
-        "abstain_recall": 0.0,
+        "decision_correct_abstains": 0,
+        "strict_correct_abstains": 0,
+        "abstain_precision_decision": 0.0,
+        "abstain_precision_strict": 0.0,
+        "abstain_recall_decision": 0.0,
+        "abstain_recall_strict": 0.0,
+        "reason_code_accuracy": 0.0,
         "per_case": [],
     }
 
@@ -380,68 +395,15 @@ def test_run_hallucination_metric_agrees_with_verify_verify_on_prescaled_result(
     assert record["hallucinated_numbers"] == expected.ungrounded_numbers == []
 
 
-def test_compute_abstain_metrics_counts_correct_abstain():
-    from evals.run_eval import compute_abstain_metrics
+def test_run_eval_reexports_the_shared_compute_abstain_metrics():
+    # The real logic (decision vs strict correctness, accept_alternatives
+    # handling, the reconciliation-with-a-real-report regression check)
+    # lives in evals/abstain_scoring.py and is tested there --
+    # tests/test_abstain_scoring.py -- to avoid a second, drifting copy
+    # of the same tests (this project's own established two-sources-of-
+    # truth lesson). This just confirms run_eval.py still imports the
+    # real thing, not a stale local copy.
+    from evals.abstain_scoring import compute_abstain_metrics as canonical
+    from evals.run_eval import compute_abstain_metrics as reexported
 
-    per_case = [{"id": "A1", "answer": None, "reason_code": "OUT_OF_SCOPE"}]
-    cases_by_id = {"A1": {"expected": "ABSTAIN", "reason_code": "OUT_OF_SCOPE"}}
-
-    metrics = compute_abstain_metrics(per_case, cases_by_id)
-
-    assert metrics["all_abstains"] == 1
-    assert metrics["correct_abstains"] == 1
-    assert metrics["expected_abstains"] == 1
-    assert metrics["abstain_precision"] == 1.0
-    assert metrics["abstain_recall"] == 1.0
-
-
-def test_compute_abstain_metrics_wrong_reason_code_not_correct():
-    from evals.run_eval import compute_abstain_metrics
-
-    per_case = [{"id": "A1", "answer": None, "reason_code": "SCHEMA_MISMATCH"}]
-    cases_by_id = {"A1": {"expected": "ABSTAIN", "reason_code": "OUT_OF_SCOPE"}}
-
-    metrics = compute_abstain_metrics(per_case, cases_by_id)
-
-    assert metrics["correct_abstains"] == 0
-    assert metrics["abstain_precision"] == 0.0
-
-
-def test_compute_abstain_metrics_answered_case_not_counted_as_abstain():
-    from evals.run_eval import compute_abstain_metrics
-
-    per_case = [{"id": "L1", "answer": "the value is 5", "reason_code": None}]
-    cases_by_id = {"L1": {"expected": "ANSWER", "reason_code": None}}
-
-    metrics = compute_abstain_metrics(per_case, cases_by_id)
-
-    assert metrics["all_abstains"] == 0
-    assert metrics["expected_abstains"] == 0
-    assert metrics["abstain_precision"] == 0.0
-    assert metrics["abstain_recall"] == 0.0
-
-
-def test_compute_abstain_metrics_missed_expected_abstain_hurts_recall():
-    from evals.run_eval import compute_abstain_metrics
-
-    # Expected to abstain, but the pipeline answered anyway.
-    per_case = [{"id": "A1", "answer": "a wrong answer", "reason_code": None}]
-    cases_by_id = {"A1": {"expected": "ABSTAIN", "reason_code": "OUT_OF_SCOPE"}}
-
-    metrics = compute_abstain_metrics(per_case, cases_by_id)
-
-    assert metrics["expected_abstains"] == 1
-    assert metrics["correct_abstains"] == 0
-    assert metrics["abstain_recall"] == 0.0
-
-
-def test_compute_abstain_metrics_counts_answer_with_assumption_as_expected():
-    from evals.run_eval import compute_abstain_metrics
-
-    per_case = [{"id": "L3", "answer": None, "reason_code": "AMBIGUOUS"}]
-    cases_by_id = {"L3": {"expected": "ANSWER_WITH_ASSUMPTION", "reason_code": "AMBIGUOUS"}}
-
-    metrics = compute_abstain_metrics(per_case, cases_by_id)
-
-    assert metrics["expected_abstains"] == 1
-    assert metrics["correct_abstains"] == 1
+    assert reexported is canonical

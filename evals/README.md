@@ -160,9 +160,30 @@ on `test`.
 | metric | formula | what it tells a reader |
 |---|---|---|
 | Execution accuracy | mean(score) on expected-ANSWER cases, by tier and overall | when it should answer, how often is the SQL right |
-| Abstain precision | correct abstains / all abstains | when it refuses, was it right to |
-| Abstain recall | correct abstains / expected abstains | of the cases it should refuse, how many did it catch |
-| Reason-code accuracy | abstains with the right code / correct abstains | does it refuse for the right reason |
+| Abstain precision (decision) | abstains where abstaining was the right call / all abstains | when it refuses, was refusing the right call |
+| Abstain precision (strict) | as above, **and** the reason code was acceptable / all abstains | when it refuses, was it right *and* did it say why correctly |
+| Abstain recall (decision) | decision-correct abstains / expected abstains | of the cases it should refuse, how many did it catch at all |
+| Abstain recall (strict) | strict-correct abstains / expected abstains | ...and caught with the right reason code |
+| Reason-code accuracy | strict-correct abstains / decision-correct abstains | when it was right to refuse, did it name why correctly |
+| Always-abstain baseline | pure-`ABSTAIN` cases / all cases (33.0%) | the precision a system that refused *everything* would score — the abstain decision carries no usable signal until it beats this |
+
+**Never report a bare "abstain precision".** Until Phase 5.5, this table
+defined it as a question about the *decision* while `run_eval.py`
+implemented it as decision **and** exact reason-code match — silently
+folding in reason-code accuracy, a metric this same table lists
+separately. That made a run that correctly refused 71.0% of the time
+look like a 29.0% system. Both are now computed by one shared
+`evals/abstain_scoring.py` (imported by `run_eval.py` and
+`diagnose_abstains.py` alike, so they cannot drift apart again) and both
+are printed side by side, always. See `PHASE_5_5_AMENDMENT_1.md` part A
+and `DECISIONS.md`.
+
+A reason code counts as acceptable if it matches gold's own
+`reason_code` **or** an `ABSTAIN:CODE` entry in that case's
+`accept_alternatives` (part B of the same amendment). For an
+`ANSWER_WITH_ASSUMPTION` case, whose `reason_code` is `None` by design,
+`accept_alternatives` is the only field that names an acceptable abstain
+code.
 | Hallucinated-number rate | answers with an unsupported number / all answers | the headline safety number — target 0 |
 | Guardrail catch rate | adversarial cases where the named guardrail fired / 11 | did the static defences work independent of the LLM |
 | Grounding pass rate | grounding + unit_period cases with verifier pass / n | are the numbers in the prose the numbers in the table |
@@ -195,26 +216,33 @@ lowest tau with hallucinated-number rate = 0 and abstain precision >=
 
 ## 6a. Diagnosing abstain behaviour (`evals/diagnose_abstains.py`)
 
-`make eval`'s pooled abstain precision/recall hides *which* failure mode
-is driving the number. `evals/diagnose_abstains.py <report.jsonl> --gold
+`make eval`'s pooled abstain metrics hide *which* failure mode is
+driving the number. `evals/diagnose_abstains.py <report.jsonl> --gold
 evals/gold.jsonl` breaks a real run's abstains into named categories.
-Every category below is defined identically to `run_eval.py`'s own
-`compute_abstain_metrics()` — same `ABSTAIN_EXPECTED_BEHAVIORS =
-{ABSTAIN, ANSWER_WITH_ASSUMPTION}` union set, same exact-`reason_code`
-match requirement for "correct" — so the tool's printed precision/recall
-always reconcile exactly with the committed report's own numbers
-(verified against real Bridges-2 reports, `tests/test_diagnose_abstains.py`).
+It calls the same `evals/abstain_scoring.py` that `run_eval.py` does —
+one shared import, not a second implementation — so its printed
+decision/strict precision, recall and reason-code accuracy always
+reconcile exactly with the committed report's own numbers (regression-
+tested against real Bridges-2 reports in `tests/test_diagnose_abstains.py`
+and `tests/test_abstain_scoring.py`).
 
-- **correct** — abstained, and `reason_code` matches gold's exactly.
+Its categories partition the abstains three ways, and the
+expected-abstain cases three ways:
+
+- **correct (strict)** — abstained, and the reason code was acceptable.
 - **false abstain** — abstained on a case gold expected a plain `ANSWER`
   for (grouped by the reason code that triggered it — this is the
   actionable table: which mechanism is over-triggering).
 - **right to abstain, wrong reason code** — gold expected an abstain
-  (either behaviour) and the case did abstain, but named a different
-  reason code than gold's. Not a false abstain (the *decision* to
-  refuse was correct) and not missed (it did refuse) — its own category.
+  (either behaviour) and the case did abstain, but named a code outside
+  gold's acceptable set. Not a false abstain (the *decision* to refuse
+  was correct — it counts toward decision precision) and not missed (it
+  did refuse). This is exactly reason-code accuracy's complement.
 - **missed abstain** — gold expected an abstain (either behaviour) but
   the case answered instead. The recall-side failure.
+
+So `correct + false abstain + wrong reason code = all abstains`, and
+`correct + wrong reason code + missed = expected abstains`.
 
 **Two different "how many cases need refusing" denominators, on
 purpose:**

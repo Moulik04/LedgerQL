@@ -180,3 +180,81 @@ Both bigger models also showed a lower adversarial guardrail catch rate (55.6% v
 **Decision:** Ship Phase 5's model-comparison sub-goal with the nuanced finding, not a binary verdict: scale alone (same-family, quantized) does not help and is not worth pursuing further; a newer-generation model at full precision does help meaningfully, but that result confounds "newer generation" and "no quantization" as two different possible causes, and this comparison can't separate them. Abstain precision -- arguably the more safety-relevant number -- barely moved even under the real accuracy gain, which weighs against the theory that Phase 6's abstain-precision shortfall (documented 2026-09-11 above) is primarily a raw-capability gap a bigger or fine-tuned model would close on its own.
 
 **Consequence:** Phase 6 (fine-tuning) should not be scoped as "make the model smarter" alone -- this comparison's strongest signal is that abstain precision is resistant to model-capability improvements specifically, so Phase 6 planning should weight the structural fixes already identified in the 2026-09-11 entry (expanded reason-code vocabulary, the deferred calibration framework) at least as heavily as raw model quality. Whether to pursue a standing remote-inference path for `Qwen3-Coder-30B-A3B-Instruct` in production is an open question for the project owner, not decided here -- the live pipeline's default stays `qwen2.5-coder:7b` locally via Ollama.
+
+
+---
+
+## 2026-09-14 — The headline safety metric was measuring two things at once
+
+**Context:** `evals/README.md` section 5 defined abstain precision as a
+question about the *decision*: correct abstains / all abstains. The
+shipped `run_eval.py` implemented it as decision **and** exact
+`reason_code` match, silently folding in reason-code accuracy — a metric
+that same table lists separately. Nobody noticed for three phases,
+because there was only ever one number and it was always bad.
+
+It surfaced sideways. Building `evals/diagnose_abstains.py` to break
+abstains into named buckets produced a category the report had no name
+for: "abstained on a case that genuinely should have been refused, but
+named a different reason code" — 13 of 31 abstains on the Qwen3-30B run.
+That bucket is the entire difference between the two definitions, and it
+was large enough to change the story completely.
+
+Split out and measured on the real Qwen3-30B report:
+
+| metric | value |
+|---|---|
+| abstain precision (decision) | 71.0% |
+| abstain precision (strict) | 29.0% |
+| abstain recall (decision) | 41.5% |
+| abstain recall (strict) | 17.0% |
+| reason-code accuracy | 40.9% |
+| always-abstain baseline | 33.0% |
+
+The system decides to refuse correctly 71% of the time and then explains
+itself correctly only 41% of the time. Reported as one blended number,
+that reads as a 29% system — below the 33.0% a policy of refusing every
+single question would score, which is what made the abstain layer look
+like it carried no signal at all. It carries real signal; what it does
+badly is *name* the reason. Those have completely different fixes, and
+the blended number pointed at neither.
+
+**Options:**
+- Keep one number and pick a definition — rejected: the two questions
+  have different fixes (classifier ordering vs. decision mechanism), and
+  collapsing them is what hid this for three phases.
+- Report both, and never report a bare "abstain precision" again.
+- Also honour `accept_alternatives` in reason-code scoring, which
+  `run_eval.py` never did despite gold.jsonl carrying the field on
+  cases like O04 (`SCHEMA_MISMATCH`, accepts `OUT_OF_SCOPE`) and the
+  `ANSWER_WITH_ASSUMPTION` cases whose `reason_code` is `None` by design.
+
+**Decision:** Both, plus one shared module. `evals/abstain_scoring.py`
+now owns `ABSTAIN_EXPECTED_BEHAVIORS`, `acceptable_reason_codes()` and
+`compute_abstain_metrics()`; `run_eval.py` and `diagnose_abstains.py`
+both import it rather than each keeping their own copy. That copy-drift
+is precisely how this bug survived: the diagnostic and the harness had
+already reached *incompatible* definitions of "correct abstain" before
+anyone compared them. Sixth instance of the two-sources-of-truth bug
+class in this project, and the first one that corrupted a headline
+metric rather than a behaviour.
+
+Honouring `accept_alternatives` changed nothing on this particular run —
+checked before claiming it would: none of the 13 wrong-reason cases
+happened to name an accepted alternative (O04 got `EXEC_ERROR` where
+`OUT_OF_SCOPE` would have passed; M04 got `LOW_AGREEMENT` where
+`SCHEMA_MISMATCH` would have). It is still the correct scoring rule and
+will matter on future runs; it just does not retroactively improve this
+one, and saying so is worth more than quietly implying it did.
+
+**Consequence:** Phase 5.5's acceptance criteria are rewritten around
+the split (see `PHASE_5_5_AMENDMENT_1.md` part E): recall (decision) is
+the headline target at ≥0.85, reason-code accuracy is its own ≥0.80
+target, and strict precision is reported with *no* target attached
+because it is a derived product of the other two and setting a target on
+it invites trading one against the other. Task ordering changed too:
+classifier strengthening (Task 6) now runs before the confidence model
+(Task 1), because 31 of 53 cases that should have been refused were
+answered outright — a calibrator can only re-rank candidates the
+pipeline already considered refusing, so fitting one on top of a
+classifier with that miss rate optimises the wrong layer.

@@ -1,7 +1,7 @@
 import json
 
+from evals.abstain_scoring import ABSTAIN_EXPECTED_BEHAVIORS
 from evals.diagnose_abstains import (
-    ABSTAIN_EXPECTED_BEHAVIOURS,
     infer_observed_behaviour,
     infer_score,
     load_jsonl,
@@ -52,15 +52,10 @@ def _write_jsonl(path, records):
     path.write_text("\n".join(json.dumps(r) for r in records) + "\n")
 
 
-def test_main_reconciles_exactly_with_a_hand_computed_abstain_precision_and_recall(
-    tmp_path, capsys
-):
-    # A small but real scenario, computed by hand against the same
-    # definition run_eval.py's own compute_abstain_metrics() uses, to
-    # guard the actual bug this task fixed: the script must derive
-    # "observed behaviour" from the real `answer` field, and require an
-    # exact reason_code match for "correct" -- not just a behaviour
-    # match.
+def test_main_reconciles_exactly_with_a_hand_computed_decision_and_strict_metrics(tmp_path, capsys):
+    # A small but real scenario, computed by hand against
+    # evals/abstain_scoring.py's own definition -- the same shared
+    # function both this script and run_eval.py call.
     gold = [
         {"id": "A", "expected": "ABSTAIN", "reason_code": "OUT_OF_SCOPE", "tier": "t"},
         {"id": "B", "expected": "ABSTAIN", "reason_code": "SCHEMA_MISMATCH", "tier": "t"},
@@ -68,12 +63,13 @@ def test_main_reconciles_exactly_with_a_hand_computed_abstain_precision_and_reca
         {"id": "D", "expected": "ANSWER", "reason_code": None, "tier": "t"},
     ]
     records = [
-        # A: correctly abstains with the exact right reason.
+        # A: correctly abstains with the exact right reason (decision + strict).
         {"id": "A", "answer": None, "reason_code": "OUT_OF_SCOPE", "tier": "t"},
-        # B: abstains, but the wrong reason code -- not "correct".
+        # B: abstains on an ABSTAIN-expected case, but the wrong reason
+        # code -- decision correct, strict wrong.
         {"id": "B", "answer": None, "reason_code": "LOW_AGREEMENT", "tier": "t"},
         # C: expected to abstain (ANSWER_WITH_ASSUMPTION), but answered --
-        # a missed abstain, not counted in the abstain precision denominator.
+        # a missed abstain, not counted in either denominator's numerator.
         {"id": "C", "answer": "here's an answer", "reason_code": None, "tier": "t"},
         # D: expected ANSWER, but abstained anyway -- a false abstain.
         {"id": "D", "answer": None, "reason_code": "LOW_AGREEMENT", "tier": "t"},
@@ -84,45 +80,46 @@ def test_main_reconciles_exactly_with_a_hand_computed_abstain_precision_and_reca
     _write_jsonl(gold_path, gold)
     _write_jsonl(report_path, records)
 
-    # Hand-computed against run_eval.py's own definition:
     # did_abstain = {A, B, D} = 3
-    # correct_abstain = {A} (only A has expected in ABSTAIN_EXPECTED_BEHAVIOURS
-    #   and an exact reason_code match) = 1
-    # expected_abstain_recs = {A, B, C} = 3
-    # precision = 1/3, recall = 1/3
+    # decision_correct = {A, B} (both expected in ABSTAIN_EXPECTED_BEHAVIORS) = 2
+    # strict_correct = {A} (only A's reason_code matches gold's) = 1
+    # expected_abstains = {A, B, C} = 3
+    # precision_decision = 2/3, precision_strict = 1/3
+    # recall_decision = 2/3, recall_strict = 1/3
     did_abstain = [r for r in records if r["answer"] is None]
-    correct = [
-        r
-        for r in did_abstain
-        if {g["id"]: g for g in gold}[r["id"]]["expected"] in ABSTAIN_EXPECTED_BEHAVIOURS
-        and r["reason_code"] == {g["id"]: g for g in gold}[r["id"]]["reason_code"]
+    gold_by_id = {g["id"]: g for g in gold}
+    decision_correct = [
+        r for r in did_abstain if gold_by_id[r["id"]]["expected"] in ABSTAIN_EXPECTED_BEHAVIORS
     ]
-    expected_abstains = [g for g in gold if g["expected"] in ABSTAIN_EXPECTED_BEHAVIOURS]
+    strict_correct = [
+        r for r in decision_correct if r["reason_code"] == gold_by_id[r["id"]]["reason_code"]
+    ]
+    expected_abstains = [g for g in gold if g["expected"] in ABSTAIN_EXPECTED_BEHAVIORS]
     assert len(did_abstain) == 3
-    assert len(correct) == 1
+    assert len(decision_correct) == 2
+    assert len(strict_correct) == 1
     assert len(expected_abstains) == 3
 
     exit_code = main([str(report_path), "--gold", str(gold_path)])
 
     assert exit_code == 0
     out = capsys.readouterr().out
-    assert "abstain precision" in out
-    assert "33.3%" in out  # 1/3 precision
-    # Recall also 1/3 -- both percentages appear together, distinguished
-    # by their labeled lines rather than searched for independently here.
-    assert "abstain recall" in out
+    assert "abstain precision (decision)" in out
+    assert "abstain precision (strict)" in out
+    assert "66.7%" in out  # 2/3 decision precision/recall
+    assert "33.3%" in out  # 1/3 strict precision/recall
 
 
 def test_main_reproduces_the_real_committed_30b_report_exactly(capsys):
-    # The actual regression guard Task 0 asked for: run the diagnostic
-    # against the real, already-scored 30B report and confirm its
-    # printed abstain precision/recall match the report's own numbers
-    # exactly (29.0% / 17.0%), and that the invariants hold:
-    # correct + false == total_abstains, correct + missed == expected_abstains
-    # (using the strict two-way complement of each, not the finer
-    # correct/false/wrong-reason-code three-way breakdown the human-
-    # readable report sections print).
+    # The actual regression guard Task 0 asked for, extended for
+    # PHASE_5_5_AMENDMENT_1.md's decision/strict split: run the
+    # diagnostic against the real, already-scored 30B report and
+    # confirm its printed metrics match the amendment's own
+    # independently-verified numbers (71.0% / 29.0% / 41.5% / 17.0% /
+    # 40.9% / 33.0% baseline) exactly.
     from pathlib import Path
+
+    from evals.abstain_scoring import compute_abstain_metrics
 
     report_path = Path("reports/eval_bridges2_qwen3_30b.jsonl")
     gold_path = Path("evals/gold.jsonl")
@@ -133,32 +130,20 @@ def test_main_reproduces_the_real_committed_30b_report_exactly(capsys):
 
     records = load_jsonl(report_path)
     gold = {c["id"]: c for c in load_jsonl(gold_path)}
+    metrics = compute_abstain_metrics(records, gold)
 
-    did_abstain = [r for r in records if r["answer"] is None]
-    correct = [
-        r
-        for r in did_abstain
-        if gold[r["id"]]["expected"] in ABSTAIN_EXPECTED_BEHAVIOURS
-        and r.get("reason_code") == gold[r["id"]].get("reason_code")
-    ]
-    expected_abstains = [c for c in gold.values() if c["expected"] in ABSTAIN_EXPECTED_BEHAVIOURS]
-
-    total_abstains = len(did_abstain)
-    n_correct = len(correct)
-    n_expected = len(expected_abstains)
-    false_total = total_abstains - n_correct
-    missed_total = n_expected - n_correct
-
-    assert n_correct + false_total == total_abstains
-    assert n_correct + missed_total == n_expected
-    assert n_correct == 9
-    assert total_abstains == 31
-    assert n_expected == 53
+    assert metrics["all_abstains"] == 31
+    assert metrics["expected_abstains"] == 53
+    assert metrics["decision_correct_abstains"] == 22
+    assert metrics["strict_correct_abstains"] == 9
 
     exit_code = main([str(report_path), "--gold", str(gold_path)])
 
     assert exit_code == 0
     out = capsys.readouterr().out
-    assert "abstain precision                  29.0%" in out
-    assert "abstain recall                     17.0%" in out
-    assert "always-abstain baseline precision  33.0%" in out
+    assert "abstain precision (decision)           71.0%" in out
+    assert "abstain precision (strict)             29.0%" in out
+    assert "abstain recall (decision)              41.5%" in out
+    assert "abstain recall (strict)                17.0%" in out
+    assert "reason-code accuracy                   40.9%" in out
+    assert "always-abstain baseline precision      33.0%" in out

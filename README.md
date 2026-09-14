@@ -72,6 +72,14 @@ make test                  # runs the test suite
 
 The eval suite is the point of the project, not an afterthought. `make eval` runs the gold set across configurations (model × sample count × guardrails on/off) and writes a comparison report to `reports/`. The "guardrails off" column is the baseline the rest of the project is measured against.
 
+### A metric that was measuring two things at once
+
+The headline abstain-precision number sat at 27–29% across three models — *below* the 33.0% a system that simply refused every single question would score. That looked like an abstain layer carrying no signal at all.
+
+It wasn't. `evals/README.md` defined abstain precision as a question about the **decision** (was refusing the right call), but the harness implemented it as decision **and** exact reason-code match, silently folding in a second metric the same doc listed separately. Split apart on the same run: **71.0% decision precision, 40.9% reason-code accuracy** — a system that refuses correctly most of the time and then explains itself correctly less than half the time. Two different failures, two different fixes, and the blended number pointed at neither.
+
+It surfaced sideways, from building a diagnostic (`evals/diagnose_abstains.py`) that disagreed with the report it was diagnosing — and the disagreement turned out to be the report's, not the diagnostic's. Both now call one shared `evals/abstain_scoring.py`, so they can't drift apart again, and every precision figure is printed next to its coverage and next to that 33.0% baseline, permanently. Full write-up in `DECISIONS.md`.
+
 ## Roadmap
 
 - [x] **Phase 0 — Scaffold.** Project layout, tooling, CI-ready lint/test setup.

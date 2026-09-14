@@ -24,33 +24,44 @@ approximate "score" are derived from those real fields when the
 aspirational ones aren't present. See PHASE_5_5_MASTER_PROMPT.md Task 0
 and DECISIONS.md for why this reconciliation matters and what it found.
 
-Abstain precision/recall here are defined identically to
-`run_eval.py`'s own `compute_abstain_metrics()` (the same
-`ABSTAIN_EXPECTED_BEHAVIORS = {ABSTAIN, ANSWER_WITH_ASSUMPTION}` union
-set, and the same exact-reason_code-match requirement for "correct") --
-by design, so the two numbers always reconcile exactly. This union set
-is NOT the same thing as the "34 pure-ABSTAIN cases" used for the
-always-abstain baseline below -- see that section's own comment for why
-they're deliberately different denominators for different questions.
+Abstain precision/recall/reason-code-accuracy here are computed by the
+exact same `evals/abstain_scoring.py` module `run_eval.py` itself uses --
+a real import, not a second copy -- so the two always reconcile exactly.
+PHASE_5_5_AMENDMENT_1.md found `run_eval.py`'s original single "abstain
+precision" number silently conflated two different questions (was
+abstaining the right decision; was the reason code also right); this
+tool reports both ("decision" and "strict"), plus `accept_alternatives`-
+aware reason-code accuracy, never a single bare number again.
+
+The union set (53 cases: ABSTAIN + ANSWER_WITH_ASSUMPTION) used for
+`abstain_recall_*`'s denominator is NOT the same thing as the "34
+pure-ABSTAIN cases" used for the always-abstain baseline below -- see
+that section's own comment for why they're deliberately different
+denominators for different questions.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
-import math
 import sys
 from collections import Counter, defaultdict
 from pathlib import Path
 
-BEHAVIOURS = ["ANSWER", "ANSWER_WITH_ASSUMPTION", "ABSTAIN"]
+# Same bootstrap as run_eval.py, for the same reason: running this
+# directly (`python evals/diagnose_abstains.py`) sets sys.path[0] to
+# evals/ itself, not the project root, so `evals.abstain_scoring` (a
+# sibling module in this same directory) can't resolve as a package-
+# qualified import without this.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-# Matches run_eval.py's own ABSTAIN_EXPECTED_BEHAVIORS exactly -- kept as
-# a separate copy rather than an import so this stays a read-only,
-# report-consuming tool with no import-time dependency on the eval
-# harness (mirrors evals/validate_gold.py's own standalone-script
-# convention). Update both together if run_eval.py's set ever changes.
-ABSTAIN_EXPECTED_BEHAVIOURS = {"ABSTAIN", "ANSWER_WITH_ASSUMPTION"}
+from evals.abstain_scoring import (  # noqa: E402
+    ABSTAIN_EXPECTED_BEHAVIORS,
+    acceptable_reason_codes,
+    compute_abstain_metrics,
+)
+
+BEHAVIOURS = ["ANSWER", "ANSWER_WITH_ASSUMPTION", "ABSTAIN"]
 
 
 def load_jsonl(path: Path) -> list[dict]:
@@ -179,26 +190,27 @@ def main(argv: list[str] | None = None) -> int:
     print()
 
     # ---- 2. abstain metrics vs baseline -----------------------------------
-    # expected_abstains uses the SAME union set run_eval.py's
-    # compute_abstain_metrics() does (ABSTAIN + ANSWER_WITH_ASSUMPTION,
-    # 53 cases) -- this is what "abstain recall" is measured against
-    # today, and what the committed report's own printed percentage
-    # means. correct_abstain requires an exact reason_code match too,
-    # matching that same function -- checking only ABSTAIN-vs-ABSTAIN
-    # behaviour (as this script did before this fix) overcounts "correct"
-    # for any case where the model abstained for the wrong reason.
-    did_abstain = [r for r in recs if r["_observed"] == "ABSTAIN"]
-    expected_abstain_recs = [r for r in recs if r["_expected"] in ABSTAIN_EXPECTED_BEHAVIOURS]
-    correct_abstain = [
-        r
-        for r in did_abstain
-        if r["_expected"] in ABSTAIN_EXPECTED_BEHAVIOURS and r["_reason"] == r["_expected_reason"]
+    # Computed by the same evals/abstain_scoring.py compute_abstain_metrics()
+    # run_eval.py itself calls -- a real shared import, not a second
+    # reimplementation, so these numbers always reconcile with the
+    # committed report exactly. per_case/cases_by_id here use the real
+    # `answer`/`reason_code` fields directly (not the _observed/_reason
+    # display aliases this script builds for its own tables below), since
+    # that's the interface compute_abstain_metrics expects.
+    per_case = [
+        {"id": r.get("id"), "answer": r.get("answer"), "reason_code": r.get("reason_code")}
+        for r in recs
     ]
-    prec = len(correct_abstain) / len(did_abstain) if did_abstain else float("nan")
-    rec_ = (
-        len(correct_abstain) / len(expected_abstain_recs) if expected_abstain_recs else float("nan")
-    )
-    f1 = 2 * prec * rec_ / (prec + rec_) if prec and rec_ and not math.isnan(prec) else float("nan")
+    metrics = compute_abstain_metrics(per_case, gold)
+
+    did_abstain = [r for r in recs if r["_observed"] == "ABSTAIN"]
+    decision_correct = [r for r in did_abstain if r["_expected"] in ABSTAIN_EXPECTED_BEHAVIORS]
+    strict_ids = {
+        r.get("id")
+        for r in did_abstain
+        if r["_expected"] in ABSTAIN_EXPECTED_BEHAVIORS
+        and r["_reason"] in acceptable_reason_codes(gold.get(r.get("id"), {}))
+    }
 
     # The always-abstain baseline is a DIFFERENT question ("if the system
     # refused every single question, how good would that look?") and
@@ -216,18 +228,25 @@ def main(argv: list[str] | None = None) -> int:
     coverage = 1 - len(did_abstain) / n
 
     print("2. ABSTAIN BEHAVIOUR")
-    print(f"   coverage (fraction answered)      {coverage:6.1%}")
-    print(f"   abstain precision                 {prec:6.1%}")
-    print(f"   abstain recall                    {rec_:6.1%}")
-    print(f"   abstain F1                        {f1:6.1%}")
-    print(f"   always-abstain baseline precision {baseline:6.1%}   <-- must beat this")
-    if not math.isnan(prec) and prec <= baseline:
-        print("   *** precision is AT OR BELOW the trivial baseline: the abstain")
-        print("       decision carries no usable signal yet. Fix mechanism before tuning. ***")
+    print("   decision = was abstaining the right call, any reason code;")
+    print("   strict = right call AND an acceptable reason code (gold's own")
+    print("   reason_code, or an ABSTAIN:CODE entry in accept_alternatives)")
+    print("   -- PHASE_5_5_AMENDMENT_1.md part A: never report a single bare")
+    print("   'abstain precision' again, it silently conflated these two.")
+    print(f"   coverage (fraction answered)          {coverage:6.1%}")
+    print(f"   abstain precision (decision)          {metrics['abstain_precision_decision']:6.1%}")
+    print(f"   abstain precision (strict)            {metrics['abstain_precision_strict']:6.1%}")
+    print(f"   abstain recall (decision)             {metrics['abstain_recall_decision']:6.1%}")
+    print(f"   abstain recall (strict)               {metrics['abstain_recall_strict']:6.1%}")
+    print(f"   reason-code accuracy                  {metrics['reason_code_accuracy']:6.1%}")
+    print(f"   always-abstain baseline precision     {baseline:6.1%}   <-- must beat this")
+    if metrics["abstain_precision_strict"] <= baseline:
+        print("   *** strict precision is AT OR BELOW the trivial baseline: the")
+        print("       abstain decision carries no usable signal yet. ***")
     print()
 
     # ---- 3. false abstains by reason code ---------------------------------
-    false_abstain = [r for r in did_abstain if r["_expected"] not in ABSTAIN_EXPECTED_BEHAVIOURS]
+    false_abstain = [r for r in did_abstain if r["_expected"] not in ABSTAIN_EXPECTED_BEHAVIORS]
     print(f"3. FALSE ABSTAINS ({len(false_abstain)}) — abstained on an answerable case")
     if false_abstain:
         by_reason = Counter(r["_reason"] or "(none logged)" for r in false_abstain)
@@ -250,24 +269,27 @@ def main(argv: list[str] | None = None) -> int:
     # ---- 3a. abstained on the right case, wrong reason ---------------------
     # A case genuinely worth its own bucket, distinct from both "correct"
     # and "false abstain" above: the model correctly judged this an
-    # abstain-worthy case, but named a different (real, pipeline-
-    # producible) reason_code than gold expected. Not counted as a false
-    # abstain (the abstain decision itself was right) and not counted as
-    # missed (it did abstain) -- see PHASE_5_5_MASTER_PROMPT.md Task 0.
-    wrong_reason = [
-        r
-        for r in did_abstain
-        if r["_expected"] in ABSTAIN_EXPECTED_BEHAVIOURS and r["_reason"] != r["_expected_reason"]
-    ]
+    # abstain-worthy case, but named a reason code not in gold's
+    # acceptable set (its own reason_code plus any accept_alternatives --
+    # PHASE_5_5_AMENDMENT_1.md part B). Not counted as a false abstain
+    # (the abstain decision itself was right) and not counted as missed
+    # (it did abstain) -- its own category, this is reason_code_accuracy's
+    # complement (decision_correct - strict_correct from section 2).
+    wrong_reason_ids = {r.get("id") for r in decision_correct} - strict_ids
+    wrong_reason = [r for r in decision_correct if r.get("id") in wrong_reason_ids]
     print(f"3a. RIGHT TO ABSTAIN, WRONG REASON CODE ({len(wrong_reason)})")
     if wrong_reason:
         print(
             table(
                 [
-                    [r.get("id", "?"), str(r["_expected_reason"]), str(r["_reason"])]
+                    [
+                        r.get("id", "?"),
+                        "/".join(sorted(acceptable_reason_codes(gold.get(r.get("id"), {})))) or "-",
+                        str(r["_reason"]),
+                    ]
                     for r in wrong_reason
                 ],
-                ["id", "expected reason", "got reason"],
+                ["id", "acceptable reason(s)", "got reason"],
             )
         )
     print()
@@ -276,7 +298,7 @@ def main(argv: list[str] | None = None) -> int:
     missed = [
         r
         for r in recs
-        if r["_expected"] in ABSTAIN_EXPECTED_BEHAVIOURS
+        if r["_expected"] in ABSTAIN_EXPECTED_BEHAVIORS
         and r["_observed"]
         and r["_observed"] != "ABSTAIN"
     ]
@@ -287,29 +309,18 @@ def main(argv: list[str] | None = None) -> int:
         print("   ids: " + ", ".join(r.get("id", "?") for r in missed[:20]))
     print()
 
-    # ---- 3c. reason-code accuracy on correct abstains ----------------------
-    coded = [r for r in correct_abstain if r["_expected_reason"] and r["_reason"]]
-    if coded:
-        right = sum(
-            1 for r in coded if str(r["_reason"]).upper() == str(r["_expected_reason"]).upper()
-        )
-        pct = right / len(coded)
-        print(f"3c. REASON-CODE ACCURACY (on correct abstains)  {right}/{len(coded)} = {pct:.0%}")
-        print()
-
     # ---- 4. per-tier -------------------------------------------------------
+    # "abst. prec (dec/strict)" mirrors section 2's decision/strict split
+    # per tier -- a pooled precision can hide a tier that's collapsed
+    # under one definition but not the other.
     print("4. PER-TIER")
     rows = []
     for tier in sorted({r["_tier"] for r in recs}):
         t = [r for r in recs if r["_tier"] == tier]
         t_abs = [r for r in t if r["_observed"] == "ABSTAIN"]
-        t_ok = [
-            r
-            for r in t_abs
-            if r["_expected"] in ABSTAIN_EXPECTED_BEHAVIOURS
-            and r["_reason"] == r["_expected_reason"]
-        ]
-        t_should = sum(1 for r in t if r["_expected"] in ABSTAIN_EXPECTED_BEHAVIOURS)
+        t_decision_ok = [r for r in t_abs if r["_expected"] in ABSTAIN_EXPECTED_BEHAVIORS]
+        t_strict_ok = [r for r in t_decision_ok if r.get("id") in strict_ids]
+        t_should = sum(1 for r in t if r["_expected"] in ABSTAIN_EXPECTED_BEHAVIORS)
         scores = [r["_score"] for r in t if isinstance(r["_score"], int | float)]
         rows.append(
             [
@@ -317,11 +328,25 @@ def main(argv: list[str] | None = None) -> int:
                 str(len(t)),
                 f"{sum(scores) / len(scores):.2f}" if scores else "-",
                 f"{len(t_abs)}/{len(t)}",
-                f"{len(t_ok) / len(t_abs):.0%}" if t_abs else "-",
+                f"{len(t_decision_ok) / len(t_abs):.0%}" if t_abs else "-",
+                f"{len(t_strict_ok) / len(t_abs):.0%}" if t_abs else "-",
                 str(t_should),
             ]
         )
-    print(table(rows, ["tier", "n", "mean score", "abstained", "abst. prec", "should abstain"]))
+    print(
+        table(
+            rows,
+            [
+                "tier",
+                "n",
+                "mean score",
+                "abstained",
+                "prec (decision)",
+                "prec (strict)",
+                "should abstain",
+            ],
+        )
+    )
     print()
 
     # ---- 5. confidence -----------------------------------------------------

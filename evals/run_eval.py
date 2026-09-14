@@ -31,6 +31,7 @@ import duckdb
 # This bootstrap makes the script self-sufficient regardless of that.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from evals.abstain_scoring import compute_abstain_metrics
 from ledgerql import answer as answer_module
 from ledgerql import generate as generate_module
 from ledgerql import pipeline
@@ -86,31 +87,6 @@ def score_guardrail_case(case: dict, result: dict) -> dict:
         "reason_correct": reason_correct,
         "guardrail_ok": guardrail_ok,
         "passed": blocked and reason_correct and guardrail_ok,
-    }
-
-
-ABSTAIN_EXPECTED_BEHAVIORS = {"ABSTAIN", "ANSWER_WITH_ASSUMPTION"}
-
-
-def compute_abstain_metrics(per_case: list[dict], cases_by_id: dict) -> dict:
-    all_abstains = [r for r in per_case if r["answer"] is None]
-    correct_abstains = [
-        r
-        for r in all_abstains
-        if cases_by_id[r["id"]]["expected"] in ABSTAIN_EXPECTED_BEHAVIORS
-        and r.get("reason_code") == cases_by_id[r["id"]].get("reason_code")
-    ]
-    expected_abstains = [
-        c for c in cases_by_id.values() if c["expected"] in ABSTAIN_EXPECTED_BEHAVIORS
-    ]
-    return {
-        "all_abstains": len(all_abstains),
-        "correct_abstains": len(correct_abstains),
-        "expected_abstains": len(expected_abstains),
-        "abstain_precision": len(correct_abstains) / len(all_abstains) if all_abstains else 0.0,
-        "abstain_recall": (
-            len(correct_abstains) / len(expected_abstains) if expected_abstains else 0.0
-        ),
     }
 
 
@@ -229,9 +205,19 @@ def run(gold_path: Path, db_path: str) -> dict:
         }
 
     abstain_metrics = compute_abstain_metrics(per_case, cases_by_id)
+    # The always-abstain baseline deliberately uses ONLY pure ABSTAIN-
+    # expected cases, not the ABSTAIN_EXPECTED_BEHAVIORS union recall is
+    # measured against: a real abstain always sets some non-None
+    # reason_code, and gold's own reason_code for ANSWER_WITH_ASSUMPTION
+    # cases is None (with one exception), so those cases can never score
+    # "correct" under an always-abstain policy either -- see
+    # PHASE_5_5_AMENDMENT_1.md part A and evals/README.md section 6a.
+    pure_abstain_cases = [c for c in cases if c["expected"] == "ABSTAIN"]
+    always_abstain_baseline = len(pure_abstain_cases) / len(cases) if cases else 0.0
 
     return {
         "overall_execution_accuracy": overall_accuracy,
+        "always_abstain_baseline": always_abstain_baseline,
         "all_tiers": all_tiers,
         "per_tier_accuracy": {tier: tier_correct[tier] / tier_total[tier] for tier in tier_total},
         "guardrail_catch_rate": {
@@ -337,12 +323,32 @@ def write_reports(summary: dict, reports_dir: Path) -> tuple[Path, Path]:
         "",
         "## Confidence & abstain",
         "",
-        f"Abstain precision: {summary['abstain_precision']:.1%} "
-        f"({summary['correct_abstains']}/{summary['all_abstains']} abstains were correct) "
-        "-- Phase 4 acceptance target: >= 80%.",
-        f"Abstain recall: {summary['abstain_recall']:.1%} "
-        f"({summary['correct_abstains']}/{summary['expected_abstains']} cases that should "
-        "have abstained were caught).",
+        "Two different questions, reported separately per "
+        "PHASE_5_5_AMENDMENT_1.md (a single 'abstain precision' number "
+        "silently conflated them before this): was abstaining the right "
+        "*decision*, and separately, was the *reason code* also right.",
+        "",
+        f"Abstain precision (decision): {summary['abstain_precision_decision']:.1%} "
+        f"({summary['decision_correct_abstains']}/{summary['all_abstains']} abstains were "
+        "the right call, any reason code).",
+        f"Abstain precision (strict): {summary['abstain_precision_strict']:.1%} "
+        f"({summary['strict_correct_abstains']}/{summary['all_abstains']} abstains had "
+        "the right call AND the right reason code) -- Phase 4 acceptance target: >= 80%.",
+        f"Abstain recall (decision): {summary['abstain_recall_decision']:.1%} "
+        f"({summary['decision_correct_abstains']}/{summary['expected_abstains']} cases that "
+        "should have abstained were caught, any reason code).",
+        f"Abstain recall (strict): {summary['abstain_recall_strict']:.1%} "
+        f"({summary['strict_correct_abstains']}/{summary['expected_abstains']} cases that "
+        "should have abstained were caught with the right reason code).",
+        f"Reason-code accuracy: {summary['reason_code_accuracy']:.1%} "
+        f"({summary['strict_correct_abstains']}/{summary['decision_correct_abstains']} of the "
+        "abstains that were the right call also named the right reason).",
+        f"Always-abstain baseline: {summary['always_abstain_baseline']:.1%} -- the precision "
+        "a system that refused every single question would get (an "
+        "ANSWER_WITH_ASSUMPTION case can never score correct under that "
+        "policy either, since a real abstain always sets a reason code "
+        "and gold's own code for those is None). Every real run so far "
+        "has landed at or below this.",
         "",
         "## Ablation",
         "",
