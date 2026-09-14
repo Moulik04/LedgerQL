@@ -173,5 +173,11 @@ Execution accuracy and abstain precision are both essentially flat (within a cou
 
 Per-model report/jsonl kept local only (`reports/eval_bridges2_qwen25_32b.{md,jsonl}`, gitignored under `reports/*.md`/`reports/*.jsonl`), feeding into Task 6's consolidated comparison report.
 
+### 2026-09-14 — Task 5, first submission (job 45936558): KV cache too small for the default 256K context
+
+First `Qwen3-Coder-30B-A3B-Instruct` (fp16) submission failed cleanly and fast this time -- the fail-fast/full-log fixes from Task 4 worked exactly as intended, no truncated "See root cause above" this round. Real error: `vllm`'s default `max_model_len` for this model is 262144 (256K, matching its advertised long-context support) which needs 24GiB of KV cache; only ~12.4GiB was left on the H100 after ~60GB of fp16 weights, so engine startup raised `ValueError: ... the estimated maximum model length is 135584`.
+
+This eval's real prompts (schema context + one question) never come close to that -- `docs/schema.md` is ~4.6KB, on the order of ~1-1.5K tokens. Added `--max-model-len 8192` to `run_model_eval.sh`'s `vllm serve` invocation (applies to both models; harmless for the already-working AWQ job since its real usage was already far under that, and it reduces resource reservation there too). Re-submitting.
+
 <!-- Further entries appended by Tasks 5-6 as real commands are run and
      real output comes back. -->

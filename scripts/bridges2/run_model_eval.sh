@@ -62,9 +62,17 @@ mkdir -p "$HF_HOME"
 
 echo "Starting vllm serve for $REPO_ID (tensor-parallel-size=$TP_SIZE)..."
 echo "First run downloads the checkpoint into \$LOCAL ($LOCAL) -- this can take a while on top of model-load time."
+# --max-model-len caps KV cache reservation. Found for real: Qwen3-Coder's
+# default 262144 (256K) max context needs 24GiB of KV cache, more than fits
+# after ~60GB of fp16 weights on an 80GB H100 (only ~12.4GiB was left,
+# causing a real ValueError on the first fp16 job submission). This eval's
+# real prompts (schema context + one question) are on the order of a few
+# thousand tokens at most (docs/schema.md is ~4.6KB) -- 8192 leaves ample
+# headroom while shrinking the KV cache requirement to well under 1GiB.
 "$VLLM_PYTHON/vllm" serve "$REPO_ID" \
     --port 8000 \
     --tensor-parallel-size "$TP_SIZE" \
+    --max-model-len 8192 \
     > vllm_server.out 2> vllm_server.err &
 VLLM_PID=$!
 trap 'kill "$VLLM_PID" 2>/dev/null || true' EXIT
