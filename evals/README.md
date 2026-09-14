@@ -193,6 +193,57 @@ Choose the abstain threshold by sweeping tau on `calib`, picking the
 lowest tau with hallucinated-number rate = 0 and abstain precision >=
 0.8, then freezing it and evaluating on `test`.
 
+## 6a. Diagnosing abstain behaviour (`evals/diagnose_abstains.py`)
+
+`make eval`'s pooled abstain precision/recall hides *which* failure mode
+is driving the number. `evals/diagnose_abstains.py <report.jsonl> --gold
+evals/gold.jsonl` breaks a real run's abstains into named categories.
+Every category below is defined identically to `run_eval.py`'s own
+`compute_abstain_metrics()` — same `ABSTAIN_EXPECTED_BEHAVIORS =
+{ABSTAIN, ANSWER_WITH_ASSUMPTION}` union set, same exact-`reason_code`
+match requirement for "correct" — so the tool's printed precision/recall
+always reconcile exactly with the committed report's own numbers
+(verified against real Bridges-2 reports, `tests/test_diagnose_abstains.py`).
+
+- **correct** — abstained, and `reason_code` matches gold's exactly.
+- **false abstain** — abstained on a case gold expected a plain `ANSWER`
+  for (grouped by the reason code that triggered it — this is the
+  actionable table: which mechanism is over-triggering).
+- **right to abstain, wrong reason code** — gold expected an abstain
+  (either behaviour) and the case did abstain, but named a different
+  reason code than gold's. Not a false abstain (the *decision* to
+  refuse was correct) and not missed (it did refuse) — its own category.
+- **missed abstain** — gold expected an abstain (either behaviour) but
+  the case answered instead. The recall-side failure.
+
+**Two different "how many cases need refusing" denominators, on
+purpose:**
+- **Abstain recall's denominator (53 cases)** is `ABSTAIN` +
+  `ANSWER_WITH_ASSUMPTION` combined — matching `run_eval.py`'s own
+  definition, so this is what the committed report's printed "abstain
+  recall" percentage actually means today.
+- **The always-abstain baseline's denominator uses only the 34 pure
+  `ABSTAIN` cases.** A hypothetical system that refuses every single
+  question can, at best, get those 34 exactly right (a real abstain
+  always sets some non-`None` reason_code, and gold's own
+  `reason_code` for `ANSWER_WITH_ASSUMPTION` cases is `None` except one
+  — see `DECISIONS.md`, 2026-09-11, "structurally unreachable" — so
+  those 19 cases can never score "correct" under an always-abstain
+  policy either). That baseline is `34/103 = 33.0%` — every real run so
+  far (7B: 27.1%, 32B AWQ: 27.5%, 30B fp16: 29.0%) has landed *below*
+  it, meaning the abstain decision has carried no usable signal yet;
+  see `PHASE_5_5_MASTER_PROMPT.md` Task 1.
+
+**"Observed behaviour" is inferred from the real `answer`/`reason_code`
+fields, not an aspirational `observed_behavior` field** (that field, and
+the `score` field this section's own scoring rubric describes, don't
+exist in real per-case records yet — the pipeline has no
+`ANSWER_WITH_ASSUMPTION` output state to observe until
+`PHASE_5_5_MASTER_PROMPT.md` Task 2 builds one). Until then, the
+confusion matrix's `ANSWER_WITH_ASSUMPTION`-observed column is
+legitimately all-zero — that's an honest reflection of the pipeline's
+current two-state design, not a bug in the diagnostic.
+
 ## 7. Output of `make eval`
 
 `reports/eval_<date>.md`: headline table, ablation table, per-tier
