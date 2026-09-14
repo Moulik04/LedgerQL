@@ -66,33 +66,22 @@ This task is a verification gate, not code — its "test" is real command output
 
 **Step 1a already done:** real `sinfo -N -p GPU-shared -o "%N %G"` output confirmed H100-80 nodes exist on this account's `GPU-shared` allocation (`w001`-`w010`, `gpu:h100-80:8`), recorded in `docs/bridges2.md`'s Status section. Both `.sbatch` files already use `--gres=gpu:h100-80:1`. No 2-GPU permission check is needed — both models fit one H100.
 
-- [ ] **Step 1b: Hand off the remaining verification commands**
+**Steps 1b-1c also done, with a real detour recorded in `docs/bridges2.md`:** `scontrol show partition GPU-shared | grep -i maxtime` → `MaxTime=UNLIMITED`. `setup_env.sh` hit a real `Disk quota exceeded` during `uv pip install vllm` — investigated (not retried blindly): `$HOME`/`/jet` has a hard **25GiB project quota** (`lfs quota -p <projid> /jet`), not "effectively unconstrained" as first assumed, and nowhere near enough for the ~80GB of model checkpoints. Resolved by confirming (via a live `srun` H100 allocation) that compute nodes have real internet access and `$LOCAL` node-local scratch has 28T — `setup_env.sh` and `run_model_eval.sh` were both revised so model checkpoints download fresh into `$LOCAL` per-job (via `HF_HOME=$LOCAL/hf_cache`) instead of being pre-staged on the quota-constrained `$HOME`. `setup_env.sh` (installing vLLM into its own venv, no longer pre-downloading models) has been re-run successfully after these fixes.
+
+- [ ] **Step 1d: Hand off the smoke test**
+
+This is the one remaining verification before a full job submission — does vLLM actually serve the AWQ quant on a real H100, downloading into `$LOCAL` as redesigned. Short interactive allocation, not a batch job:
 
 ```bash
-# From a Bridges-2 login node (ssh bridges2, or the OnDemand web shell):
-
-# 1. Confirm the partition's real walltime ceiling
-scontrol show partition GPU-shared | grep -i maxtime
-
-# 2. Run the setup script (Task 2) if not already done
-bash ~/ledgerql-bridges2/ledgerql/scripts/bridges2/setup_env.sh
-# (first run: the repo doesn't exist yet --
-#   mkdir -p ~/ledgerql-bridges2 && cd ~/ledgerql-bridges2
-#   git clone https://github.com/Moulik04/LedgerQL.git ledgerql
-#   bash ledgerql/scripts/bridges2/setup_env.sh)
-
-# 3. Smoke-test vLLM + the AWQ quant actually work on a real H100
-#    allocation, before committing a full ~103-case run to it. This is
-#    a short interactive allocation, not a batch job. H100 (Hopper,
-#    compute 9.0) is a much safer bet for AWQ kernel support than the
-#    originally-planned V100, but still not assumed without this test.
-srun --partition=GPU-shared --gres=gpu:h100-80:1 --time=00:15:00 --pty bash
+srun --partition=GPU-shared --gres=gpu:h100-80:1 --time=00:30:00 --pty bash
 # (once the allocation starts, inside it:)
+export HF_HOME="$LOCAL/hf_cache"
+mkdir -p "$HF_HOME"
 cd ~/ledgerql-bridges2/vllm-env
 .venv/bin/vllm serve Qwen/Qwen2.5-Coder-32B-Instruct-AWQ --port 8000 &
 VLLM_SMOKE_PID=$!
-sleep 60   # give it real time to load ~20GB of weights before polling
-for i in $(seq 1 30); do
+echo "Downloading + loading -- this can take several minutes, not just seconds."
+for i in $(seq 1 120); do
     curl -sf http://localhost:8000/health && break
     sleep 10
 done

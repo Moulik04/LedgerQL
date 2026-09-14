@@ -1,14 +1,23 @@
 #!/bin/bash
 # One-time (idempotent) environment setup for the Phase 5 remote model
 # comparison on PSC Bridges-2. Run from a Bridges-2 LOGIN node (OnDemand
-# web shell or `ssh bridges2`) -- never inside an sbatch job, since
-# whether compute nodes have outbound internet to huggingface.co/PyPI is
-# unverified and this script needs both.
+# web shell or `ssh bridges2`) -- compute-node internet access is now
+# confirmed (see below), but PyPI/git access from a login node is simpler
+# to reason about for this one-time setup than doing it inside a job.
 #
-# Everything lives under $HOME (confirmed ~347T on /jet, effectively
-# unconstrained), not /ocean/projects/<alloc>/<user>/ -- that project
-# allocation is only 10GB total and the two model checkpoints alone
-# (~20GB AWQ + ~60GB fp16) would not fit there.
+# $HOME (/jet) is NOT "effectively unconstrained" as first assumed --
+# real testing found a hard 25GiB **project quota** on this allocation
+# (`lfs quota -p <projid> /jet`; the ~347T figure is the whole
+# filesystem's total size, not a per-project cap). /ocean/projects is
+# only a 10GB allocation. Neither fits the two model checkpoints
+# (~20GB AWQ + ~60GB fp16, ~80GB combined) -- so unlike the original
+# design, model weights are NOT pre-downloaded here. This script only
+# installs vLLM itself (~10GB, fits the 25GB quota); run_model_eval.sh
+# downloads each job's model checkpoint fresh into that job's node-local
+# $LOCAL scratch instead (confirmed real: 28T on a real H100 node,
+# wiped after the job, not subject to the $HOME quota at all -- and
+# compute nodes were confirmed to have real internet access to
+# huggingface.co during this same investigation).
 #
 # vLLM (not Ollama -- LEDGERQL_MASTER_PROMPT.md explicitly prefers it for
 # Bridges-2) lives in its OWN venv here, entirely separate from the main
@@ -81,16 +90,9 @@ fi
 
 echo "vLLM version: $("$VLLM_ENV_DIR/.venv/bin/vllm" --version)"
 
-# --- Pre-download both model checkpoints (large -- do this here, on the
-# login node, not inside the GPU job) ---
-for repo_id in \
-    "Qwen/Qwen2.5-Coder-32B-Instruct-AWQ" \
-    "Qwen/Qwen3-Coder-30B-A3B-Instruct"; do
-    echo "Downloading $repo_id (skips already-cached files automatically)..."
-    "$VLLM_ENV_DIR/.venv/bin/huggingface-cli" download "$repo_id"
-done
-
 echo ""
-echo "Setup complete. Verify with:"
+echo "Setup complete (model checkpoints are downloaded per-job into"
+echo "node-local \$LOCAL scratch by run_model_eval.sh, not here -- see"
+echo "that script and docs/bridges2.md for why). Verify with:"
 echo "  $VLLM_ENV_DIR/.venv/bin/vllm --version"
 echo "  cd $REPO_DIR && uv run pytest -q"

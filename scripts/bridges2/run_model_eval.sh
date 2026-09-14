@@ -20,6 +20,11 @@ SANITIZED_MODEL="$(echo "$REPO_ID" | tr ':/' '-')"
 ROOT="$HOME/ledgerql-bridges2"
 VLLM_PYTHON="$ROOT/vllm-env/.venv/bin"
 
+if [ -z "${LOCAL:-}" ]; then
+    echo "\$LOCAL is not set -- this must run inside a real SLURM GPU allocation, not a login node." >&2
+    exit 1
+fi
+
 cd "$ROOT/ledgerql"
 
 if [ ! -f data/ledgerql.duckdb ]; then
@@ -27,7 +32,18 @@ if [ ! -f data/ledgerql.duckdb ]; then
     exit 1
 fi
 
+# Model weights (~20-80GB) are downloaded fresh into this job's node-local
+# scratch, not pre-staged on $HOME -- $HOME/jet has a hard 25GiB project
+# quota (confirmed real, too small for these checkpoints), while $LOCAL is
+# node-local NVMe scratch (confirmed real: 28T on a real H100 node),
+# outside that quota entirely, and wiped after the job -- fine since each
+# model is only run once. HF_HOME redirects huggingface_hub's (and so
+# vLLM's) cache there instead of the default ~/.cache/huggingface.
+export HF_HOME="$LOCAL/hf_cache"
+mkdir -p "$HF_HOME"
+
 echo "Starting vllm serve for $REPO_ID (tensor-parallel-size=$TP_SIZE)..."
+echo "First run downloads the checkpoint into \$LOCAL ($LOCAL) -- this can take a while on top of model-load time."
 "$VLLM_PYTHON/vllm" serve "$REPO_ID" \
     --port 8000 \
     --tensor-parallel-size "$TP_SIZE" \
@@ -35,14 +51,14 @@ echo "Starting vllm serve for $REPO_ID (tensor-parallel-size=$TP_SIZE)..."
 VLLM_PID=$!
 trap 'kill "$VLLM_PID" 2>/dev/null || true' EXIT
 
-echo "Waiting for vllm to be ready (large checkpoints can take several minutes to load)..."
-for i in $(seq 1 120); do
+echo "Waiting for vllm to be ready (checkpoint download + load can take well over 10 minutes)..."
+for i in $(seq 1 360); do
     if curl -sf http://localhost:8000/health >/dev/null 2>&1; then
         echo "vllm is ready."
         break
     fi
-    if [ "$i" -eq 120 ]; then
-        echo "vllm did not become ready after 120 attempts (10 min) -- aborting." >&2
+    if [ "$i" -eq 360 ]; then
+        echo "vllm did not become ready after 360 attempts (30 min) -- aborting." >&2
         echo "--- vllm_server.err (tail) ---" >&2
         tail -n 50 vllm_server.err >&2 || true
         exit 1
