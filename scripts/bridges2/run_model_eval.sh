@@ -30,6 +30,14 @@ module load pytorch/26.05-2.11-py3
 unset VIRTUAL_ENV
 module load cuda-h100/13.3.1
 
+# The same JIT-compile step also shells out to a bare `ninja` (not a full
+# path) -- installed into the vllm venv (see setup_env.sh) but invisible to
+# that subprocess unless the venv's own bin/ is actually on PATH, which
+# invoking "$VLLM_PYTHON/vllm" by full path alone does not provide. Found
+# via a real first job submission failing with FileNotFoundError: 'ninja'
+# even after the CUDA module fix above.
+export PATH="$VLLM_PYTHON:$PATH"
+
 if [ -z "${LOCAL:-}" ]; then
     echo "\$LOCAL is not set -- this must run inside a real SLURM GPU allocation, not a login node." >&2
     exit 1
@@ -63,14 +71,27 @@ trap 'kill "$VLLM_PID" 2>/dev/null || true' EXIT
 
 echo "Waiting for vllm to be ready (checkpoint download + load can take well over 10 minutes)..."
 for i in $(seq 1 360); do
+    # Fail fast on an early crash instead of silently polling a dead
+    # server for the full 30-minute timeout -- found for real on the
+    # first job submission, where vllm crashed within ~1 minute but the
+    # loop (checking only curl) burned the whole 30 minutes anyway.
+    if ! kill -0 "$VLLM_PID" 2>/dev/null; then
+        echo "vllm process exited after attempt $i -- see vllm_server.err below." >&2
+        echo "--- vllm_server.err (full) ---" >&2
+        cat vllm_server.err >&2 || true
+        exit 1
+    fi
     if curl -sf http://localhost:8000/health >/dev/null 2>&1; then
         echo "vllm is ready."
         break
     fi
     if [ "$i" -eq 360 ]; then
         echo "vllm did not become ready after 360 attempts (30 min) -- aborting." >&2
-        echo "--- vllm_server.err (tail) ---" >&2
-        tail -n 50 vllm_server.err >&2 || true
+        # Full file, not a tail -- vllm's own wrapper exceptions say "See
+        # root cause above," and a short tail has twice now cut off the
+        # actual error, costing a full debugging round-trip each time.
+        echo "--- vllm_server.err (full) ---" >&2
+        cat vllm_server.err >&2 || true
         exit 1
     fi
     sleep 5

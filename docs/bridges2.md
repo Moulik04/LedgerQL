@@ -137,12 +137,24 @@ switched both jobs to `--gres=gpu:h100-80:1` on the strength of this
 
 - First smoke-test attempt on a real H100 (`w001`) failed immediately: `flashinfer` (vLLM's fast top-k/top-p sampler) JIT-compiles a CUDA kernel at model-load time via `nvcc`, and no CUDA toolkit was on `PATH` at all (`module load pytorch/26.05-2.11-py3` alone doesn't provide `nvcc`).
 - Loading `module load cuda-h100/13.3.1` (or the default `cuda/12.6.1`) provides `nvcc`, but then `ninja` (the build tool `flashinfer` shells out to) was missing entirely -- installed via `uv pip install --python .venv/bin/python ninja` into the vLLM venv.
-- Next failure: `ninja` was installed but not found -- `.venv/bin` wasn't on `PATH` since `vllm serve` was invoked via its full path rather than an activated venv. Fixed by exporting `PATH="$PWD/.venv/bin:$PATH"` (the real job script already does this correctly via `$VLLM_PYTHON`).
+- Next failure: `ninja` was installed but not found -- `.venv/bin` wasn't on `PATH` since `vllm serve` was invoked via its full path rather than an activated venv. Fixed interactively via `export PATH="$PWD/.venv/bin:$PATH"` -- **not** propagated to `run_model_eval.sh` at the time (an oversight caught by Task 4's first real job failure, see below).
 - Real root cause, found only after capturing full output to a file (not trusting a `tail` of the final wrapper exception, which just says "See root cause above"): `cuda/12.6.1`'s `nvcc` is incompatible with the bundled CUDA Core Compute Library headers `flashinfer` ships (`error: "CUDA compiler and CUDA toolkit headers are incompatible, please check your include paths"`) -- a real version mismatch between the loaded toolkit and whatever CUDA version the installed `torch`/`vllm`/`flashinfer` wheels were built against.
 - **Fixed and confirmed working**: `module load cuda-h100/13.3.1` (PSC's own H100-specific CUDA module, marked preproduction but real and available) instead of the default `cuda/12.6.1`. A full real run on a fresh H100 allocation reached `READY after 21` (attempts, ~3.5 min) -- the AWQ model loaded and vLLM's `/health` endpoint responded. `run_model_eval.sh` now loads this module before starting `vllm serve`.
 - Operational notes for future sessions, not really about this project's storage: `/tmp` is node-local (compute node and login node each have their own, and different login nodes in the round-robin aren't even shared with each other) -- redirect any output meant to survive past a single `srun` allocation to somewhere under `$HOME` instead. `scp`'s default SFTP-protocol transfer isn't available on this cluster (`subsystem request failed`) and the legacy `-O` fallback isn't either (`scp: command not found` -- the remote host has no `scp` binary at all); `ssh bridges2 'cat <path>' > local-file` works as a substitute for pulling a single file back.
 
 Task 3 is complete. Tasks 4-6 (the real comparison runs and the final report) follow.
+
+### 2026-09-13/14 — Task 4, first real submission (job 45918244): the `ninja` PATH fix hadn't actually landed in the script
+
+The DB copy (`data/ledgerql.duckdb`, gitignored, ~194MB) was moved to Bridges-2 via `ssh bridges2 'cat > <path>' < data/ledgerql.duckdb` -- `scp`'s default SFTP transfer isn't available on this cluster (`subsystem request failed`) and the legacy `-O` fallback isn't either (no `scp` binary on the remote host at all); this `ssh ... cat` pattern is the working substitute for a single-file copy in both directions on this cluster. Byte size confirmed identical both sides (194260992) before submitting.
+
+First real job (`sbatch scripts/bridges2/run_qwen25_coder_32b_awq.sbatch`, job 45918244) failed: the exact `ninja`-not-on-`PATH` error diagnosed during Task 3's interactive smoke test had only been fixed in that interactive shell, never actually committed to `run_model_eval.sh` -- an oversight, caught by this real run rather than by re-reading the script. Also found: the job's wait loop only checked `curl`'s health endpoint, so when `vllm` crashed within ~1 minute, the loop still polled uselessly for the full 30-minute timeout before reporting failure, and the failure report itself `tail -n 50`'d `vllm_server.err`, cutting off the actual root cause a second time (vLLM's own wrapper exception unhelpfully says "See root cause above").
+
+**Fixed in `run_model_eval.sh`:** `export PATH="$VLLM_PYTHON:$PATH"` right after the CUDA module loads (so `ninja` and `vllm` are both found the same way the smoke test's `.venv/bin` did); the wait loop now checks `kill -0 "$VLLM_PID"` every iteration and fails immediately (with the *full* `vllm_server.err`, not a tail) if the process has already died, instead of waiting out a timeout against a server that's already gone.
+
+Also noted for future file transfers, since the wrong node's `/tmp` cost real debugging time twice in Task 3: never write anything meant to survive past a single `srun`/`ssh` session to `/tmp` -- use a path under `$HOME` (shared across every node) instead.
+
+Re-submitting job 45918244's model with the fix.
 
 <!-- Further entries appended by Tasks 4-6 as real commands are run and
      real output comes back. -->
