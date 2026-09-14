@@ -124,7 +124,9 @@ EOF
 
 ---
 
-### Task 4: Real run — `Qwen2.5-Coder-32B-Instruct-AWQ`
+### Task 4: Real run — `Qwen2.5-Coder-32B-Instruct-AWQ` — COMPLETE
+
+Real numbers (job 45935285, full detail in `docs/bridges2.md`): 52.0% execution accuracy, 0.0% hallucinated-number rate, 27.5% abstain precision -- all essentially flat vs. the 7B baseline (54.0% / 0.0% / 27.1%). The one real-looking regression (adversarial guardrail catch rate 88.9% → 55.6%) was investigated via real per-case records and found to be a benign metric artifact, not a safety issue -- see `docs/bridges2.md` for the full breakdown. Proceed to Task 5.
 
 **Files:** none created/modified except `docs/bridges2.md`'s Status section.
 
