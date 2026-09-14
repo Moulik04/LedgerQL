@@ -70,7 +70,7 @@ This task is a verification gate, not code — its "test" is real command output
 
 **Steps 1b-1c also done, with a real detour recorded in `docs/bridges2.md`:** `scontrol show partition GPU-shared | grep -i maxtime` → `MaxTime=UNLIMITED`. `setup_env.sh` hit a real `Disk quota exceeded` during `uv pip install vllm` — investigated (not retried blindly): `$HOME`/`/jet` has a hard **25GiB project quota** (`lfs quota -p <projid> /jet`), not "effectively unconstrained" as first assumed, and nowhere near enough for the ~80GB of model checkpoints. Resolved by confirming (via a live `srun` H100 allocation) that compute nodes have real internet access and `$LOCAL` node-local scratch has 28T — `setup_env.sh` and `run_model_eval.sh` were both revised so model checkpoints download fresh into `$LOCAL` per-job (via `HF_HOME=$LOCAL/hf_cache`) instead of being pre-staged on the quota-constrained `$HOME`. `setup_env.sh` (installing vLLM into its own venv, no longer pre-downloading models) has been re-run successfully after these fixes.
 
-- [ ] **Step 1d: Hand off the smoke test**
+- [x] **Step 1d: Hand off the smoke test**
 
 This is the one remaining verification before a full job submission — does vLLM actually serve the AWQ quant on a real H100, downloading into `$LOCAL` as redesigned. Short interactive allocation, not a batch job:
 
@@ -95,16 +95,16 @@ kill $VLLM_SMOKE_PID
 exit  # ends the interactive allocation
 ```
 
-- [ ] **Step 2: Record the real output**
+- [x] **Step 2: Record the real output**
 
 Wait for the human partner to paste back the real output of all three commands above. Do not proceed to Task 4 on assumed output.
 
-- [ ] **Step 3: Reconcile against Global Constraints and fix any mismatch**
+- [x] **Step 3: Reconcile against Global Constraints and fix any mismatch**
 
 - If `scontrol`'s maxtime is less than either `.sbatch` file's `--time`, lower it to fit and flag whether this fits the workload.
 - If the vLLM smoke test fails (AWQ kernel unsupported, CUDA/driver mismatch, out-of-memory, etc.), do not proceed to a full job submission — debug it here, in a cheap 15-minute interactive allocation, not inside a 2-hour batch job. Surface any real failure to the human partner rather than deciding unilaterally how to route around it.
 
-- [ ] **Step 4: Append the confirmed facts to `docs/bridges2.md`**
+- [x] **Step 4: Append the confirmed facts to `docs/bridges2.md`**
 
 Append a further dated entry to the Status section (below the sinfo entry already there) with the real findings from Steps 1-3 (exact maxtime, confirmation the vLLM/AWQ smoke test passed and what it showed). Tasks 4-6 each add their own further dated entry below this one. Then commit:
 
@@ -134,7 +134,7 @@ Real numbers (job 45935285, full detail in `docs/bridges2.md`): 52.0% execution 
 - Consumes: the verified sbatch script from Task 2/3, `data/ledgerql.duckdb` (copied by the human partner).
 - Produces: `reports/eval_bridges2_Qwen-Qwen2.5-Coder-32B-Instruct-AWQ.md` and its dated jsonl, on Bridges-2, then copied to this laptop.
 
-- [ ] **Step 1: Hand off the submission commands**
+- [x] **Step 1: Hand off the submission commands**
 
 ```bash
 # From this laptop, copy the DB over (gitignored, not part of the clone):
@@ -146,14 +146,14 @@ sbatch scripts/bridges2/run_qwen25_coder_32b_awq.sbatch
 squeue -u $USER   # note the job ID, wait for it to clear
 ```
 
-- [ ] **Step 2: Wait for the job, then hand off the log-retrieval commands**
+- [x] **Step 2: Wait for the job, then hand off the log-retrieval commands**
 
 ```bash
 cat ledgerql-eval-32b_<jobid>.out
 cat ledgerql-eval-32b_<jobid>.err
 ```
 
-- [ ] **Step 3: Record the real output**
+- [x] **Step 3: Record the real output**
 
 Wait for the human partner to paste back both log files. Before treating the run as successful:
 - Confirm the `.err` file has no unhandled traceback.
@@ -162,7 +162,7 @@ Wait for the human partner to paste back both log files. Before treating the run
 
 If the job failed or the GPU wasn't used, debug from the real error before re-submitting — do not guess at a fix.
 
-- [ ] **Step 4: Bring the results back**
+- [x] **Step 4: Bring the results back**
 
 ```bash
 # From this laptop:
@@ -170,11 +170,11 @@ scp bridges2:~/ledgerql-bridges2/ledgerql/reports/eval_bridges2_Qwen-Qwen2.5-Cod
 scp "bridges2:~/ledgerql-bridges2/ledgerql/reports/eval_bridges2_Qwen-Qwen2.5-Coder-32B-Instruct-AWQ_*.jsonl" reports/
 ```
 
-- [ ] **Step 5: Read the real report and sanity-check it**
+- [x] **Step 5: Read the real report and sanity-check it**
 
 Read the report. Pull 3-5 real per-case records from the jsonl the same way Phase 4's Task 7 did — spot-check that the hallucinated-number rate and execution accuracy are internally consistent with the actual answers/rows shown, not just trusted as an aggregate. A different inference backend (CUDA H100 via vLLM vs. this laptop's Metal via Ollama) is a new variable that hasn't been exercised in this project before; do not skip this step even if the numbers look plausible.
 
-- [ ] **Step 6: Record the real numbers in `docs/bridges2.md` and commit**
+- [x] **Step 6: Record the real numbers in `docs/bridges2.md` and commit**
 
 ```bash
 git add docs/bridges2.md reports/eval_bridges2_Qwen-Qwen2.5-Coder-32B-Instruct-AWQ.md
@@ -205,22 +205,24 @@ Real numbers (job 45938446, full detail in `docs/bridges2.md`): 62.0% execution 
 - Consumes: same as Task 4.
 - Produces: `reports/eval_bridges2_Qwen-Qwen3-Coder-30B-A3B-Instruct.md` and its dated jsonl.
 
-- [ ] **Step 0: Check the remaining SU balance before spending more of it**
+- [x] **Step 0: Check the remaining SU balance before spending more of it**
 
 Hand off: check the OnDemand portal's balance banner (or `sacctmgr`/equivalent if the human partner prefers a command). The design spec's account had ~481/500 SU before this phase started — confirm there's still a reasonable balance left after Task 4's run before committing to a second job (H100 SU rates are unconfirmed and may be higher per hour than V100; the fp16 model likely also takes longer per-token than the 4-bit AWQ run). Note from the sibling project's own verified experience: the balance banner shows SU **remaining**, not used.
 
 Repeat Task 4's Steps 1-6 exactly, substituting `Qwen/Qwen3-Coder-30B-A3B-Instruct` / `run_qwen3_coder_30b_fp16.sbatch` / `ledgerql-eval-30b_<jobid>` for `Qwen2.5-Coder-32B-Instruct-AWQ` / `run_qwen25_coder_32b_awq.sbatch` / `ledgerql-eval-32b_<jobid>` everywhere (the report filenames, the `docs/bridges2.md`/commit content — append a further dated entry to the Status section, same as Task 4 did, not a replacement of it). Do not skip Step 5's spot-check just because Task 4's already passed — a different model, and a different GPU count/precision, can fail in different ways.
 
-- [ ] **Step 1: Hand off submission commands** (the DB is already copied from Task 4, no need to re-`scp` it)
-- [ ] **Step 2: Wait, hand off log-retrieval commands**
-- [ ] **Step 3: Record and verify real output** (single H100-80 job — confirm `nvidia-smi` shows real memory usage as usual; no multi-GPU check needed now that both models fit one GPU)
-- [ ] **Step 4: Bring results back**
-- [ ] **Step 5: Sanity-check real per-case records**
-- [ ] **Step 6: Record real numbers in `docs/bridges2.md`, commit**
+- [x] **Step 1: Hand off submission commands** (the DB is already copied from Task 4, no need to re-`scp` it)
+- [x] **Step 2: Wait, hand off log-retrieval commands**
+- [x] **Step 3: Record and verify real output** (single H100-80 job — confirm `nvidia-smi` shows real memory usage as usual; no multi-GPU check needed now that both models fit one GPU)
+- [x] **Step 4: Bring results back**
+- [x] **Step 5: Sanity-check real per-case records**
+- [x] **Step 6: Record real numbers in `docs/bridges2.md`, commit**
 
 ---
 
-### Task 6: Comparison report and recommendation
+### Task 6: Comparison report and recommendation — COMPLETE
+
+Real finding: same-family scale alone (32B AWQ) didn't help; a newer full-precision model (30B fp16) reached 62.0% execution accuracy (from 54.0%) at 0.0% hallucinated-number rate, but abstain precision barely moved (27-29% across all three models, target ≥80%). Recorded in `reports/phase5_model_comparison.md`, `DECISIONS.md` (2026-09-14 entry), and `README.md`. This completes the plan's full six-task scope.
 
 **Files:**
 - Create: `reports/phase5_model_comparison.md`
@@ -232,7 +234,7 @@ Repeat Task 4's Steps 1-6 exactly, substituting `Qwen/Qwen3-Coder-30B-A3B-Instru
 - Consumes: the three real report sets — the existing local `qwen2.5-coder:7b` baseline (`reports/eval.md`, already committed) and the two Bridges-2 reports from Tasks 4-5.
 - Produces: a durable, committed comparison and a clear recommendation for whether Phase 6 (fine-tuning) or a bigger default model is worth pursuing next — this is the deliverable the whole phase exists to produce.
 
-- [ ] **Step 1: Whitelist the new report in `.gitignore`**
+- [x] **Step 1: Whitelist the new report in `.gitignore`**
 
 Find the existing block:
 ```
@@ -257,7 +259,7 @@ reports/*.jsonl
 
 (The per-model `eval_bridges2_*.md` files from Tasks 4-5 stay gitignored under `reports/*.md` — they're raw per-run snapshots already folded into this one comparison doc.)
 
-- [ ] **Step 2: Write the comparison report**
+- [x] **Step 2: Write the comparison report**
 
 Pull the real numbers from Tasks 4-5's `docs/bridges2.md` entries and the existing `reports/eval.md` — do not re-derive or re-type numbers by memory; copy them from the committed source.
 
@@ -305,7 +307,7 @@ advance:
 EOF
 ```
 
-- [ ] **Step 3: Add the `DECISIONS.md` entry**
+- [x] **Step 3: Add the `DECISIONS.md` entry**
 
 Read the existing entries first (e.g. the 2026-09-11 entries from Phase 4's final review) to match voice/structure exactly — Context / Options / Decision / Consequence. Append (do not overwrite existing content):
 
@@ -330,16 +332,16 @@ pipeline's default model going forward>
 EOF
 ```
 
-- [ ] **Step 4: Update the top-level `README.md` roadmap line for Phase 5**
+- [x] **Step 4: Update the top-level `README.md` roadmap line for Phase 5**
 
 Find the Phase 5 line (currently `- [ ] **Phase 5 — Scale-out evals.** Larger model comparison on GPU infrastructure, expanded gold set.`) and check it off with the real one-line finding, matching the exact style already used for Phases 1-4's roadmap lines. Note this is only the model-comparison half of Phase 5 — the master prompt's full Phase 5 acceptance criteria also requires ≥50 new reviewed gold cases via log-mining, planned separately as "Phase 5 part 2." Phrase the roadmap line to reflect that this is a completed sub-part, not full Phase 5 completion, unless the human partner has decided otherwise by this point.
 
-- [ ] **Step 5: Run the full local test suite one more time**
+- [x] **Step 5: Run the full local test suite one more time**
 
 Run: `uv run pytest -q`
 Expected: all tests still passing (this task touched no `ledgerql/` code beyond Task 1's already-committed and tested `llm_backends.py`; only docs/reports/gitignore change here — run it anyway rather than assume).
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add reports/phase5_model_comparison.md .gitignore DECISIONS.md README.md
@@ -353,7 +355,7 @@ EOF
 )"
 ```
 
-- [ ] **Step 7: Push**
+- [x] **Step 7: Push**
 
 ```bash
 git push

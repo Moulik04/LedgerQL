@@ -37,6 +37,7 @@ logs/
 reports/*.md
 !reports/baseline.md
 !reports/eval.md
+!reports/phase5_model_comparison.md
 reports/*.jsonl
 !reports/.gitkeep
 
