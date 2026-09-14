@@ -195,7 +195,9 @@ EOF
 
 ---
 
-### Task 5: Real run — `Qwen3-Coder-30B-A3B-Instruct` (fp16, single H100)
+### Task 5: Real run — `Qwen3-Coder-30B-A3B-Instruct` (fp16, single H100) — COMPLETE
+
+Real numbers (job 45938446, full detail in `docs/bridges2.md`): 62.0% execution accuracy, 0.0% hallucinated-number rate, 29.0% abstain precision -- a real improvement over both the 7B baseline (54.0%) and the 32B AWQ model (52.0%). First submission failed on a KV-cache sizing issue (model's default 256K context needs more KV cache than fits after fp16 weights); fixed with `--max-model-len 8192` (real prompts are ~1-1.5K tokens). Adversarial guardrail catch rate again 55.6%, checked and confirmed the same benign non-regression pattern as Task 4. Proceed to Task 6.
 
 **Files:** none created/modified except `docs/bridges2.md`'s Status section.
 
