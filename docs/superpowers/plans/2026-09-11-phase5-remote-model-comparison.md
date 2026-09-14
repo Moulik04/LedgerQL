@@ -54,7 +54,9 @@ Commit: `245abf7` — `feat(bridges2): rewrite Bridges-2 scripts for vLLM instea
 
 ---
 
-### Task 3: Verify cluster facts before the first real submission
+### Task 3: Verify cluster facts before the first real submission — COMPLETE
+
+Real, hard-won findings (full detail in `docs/bridges2.md`'s Status section, commits on `main`): `MaxTime=UNLIMITED`; a real 25GiB `$HOME` project quota forced a storage redesign (models download into `$LOCAL` per-job instead of pre-staging on `$HOME`); a real CUDA-toolkit/flashinfer version mismatch required `module load cuda-h100/13.3.1` (not the default `cuda/12.6.1`) before `vllm serve` — now baked into `run_model_eval.sh`. Smoke test succeeded on a real H100 allocation (`READY after 21` attempts). Proceed to Task 4.
 
 **Files:** none created/modified in this task except `docs/bridges2.md`'s Status section (append, don't rewrite the whole file).
 

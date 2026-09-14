@@ -20,6 +20,16 @@ SANITIZED_MODEL="$(echo "$REPO_ID" | tr ':/' '-')"
 ROOT="$HOME/ledgerql-bridges2"
 VLLM_PYTHON="$ROOT/vllm-env/.venv/bin"
 
+# A real smoke test found vLLM's flashinfer sampler JIT-compiles a CUDA
+# kernel at model-load time and fails ("CUDA compiler and CUDA toolkit
+# headers are incompatible") against the default cuda/12.6.1 module --
+# cuda-h100/13.3.1 (a preproduction module PSC specifically aliases for
+# H100 nodes) matches what the installed torch/vllm/flashinfer wheels were
+# built against and resolved it, confirmed on a real H100 allocation.
+module load pytorch/26.05-2.11-py3
+unset VIRTUAL_ENV
+module load cuda-h100/13.3.1
+
 if [ -z "${LOCAL:-}" ]; then
     echo "\$LOCAL is not set -- this must run inside a real SLURM GPU allocation, not a login node." >&2
     exit 1

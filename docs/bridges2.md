@@ -133,5 +133,16 @@ switched both jobs to `--gres=gpu:h100-80:1` on the strength of this
 - Bumped both `.sbatch` files' `--time` (32B AWQ job: 2h → 2.5h; 30B fp16 job: 3h → 4h) to account for checkpoint download time now happening inside the job itself, not before it.
 - Still to confirm: the vLLM + AWQ smoke test itself (server actually starts and answers a real request) on a real H100 allocation, now using the corrected `HF_HOME`-redirected download path.
 
-<!-- Further entries appended by Task 3's remaining step, then Tasks 4-6,
-     as real commands are run and real output comes back. -->
+### 2026-09-13 — Task 3 complete: the AWQ smoke test, a real CUDA-toolkit-version mismatch, and confirmation
+
+- First smoke-test attempt on a real H100 (`w001`) failed immediately: `flashinfer` (vLLM's fast top-k/top-p sampler) JIT-compiles a CUDA kernel at model-load time via `nvcc`, and no CUDA toolkit was on `PATH` at all (`module load pytorch/26.05-2.11-py3` alone doesn't provide `nvcc`).
+- Loading `module load cuda-h100/13.3.1` (or the default `cuda/12.6.1`) provides `nvcc`, but then `ninja` (the build tool `flashinfer` shells out to) was missing entirely -- installed via `uv pip install --python .venv/bin/python ninja` into the vLLM venv.
+- Next failure: `ninja` was installed but not found -- `.venv/bin` wasn't on `PATH` since `vllm serve` was invoked via its full path rather than an activated venv. Fixed by exporting `PATH="$PWD/.venv/bin:$PATH"` (the real job script already does this correctly via `$VLLM_PYTHON`).
+- Real root cause, found only after capturing full output to a file (not trusting a `tail` of the final wrapper exception, which just says "See root cause above"): `cuda/12.6.1`'s `nvcc` is incompatible with the bundled CUDA Core Compute Library headers `flashinfer` ships (`error: "CUDA compiler and CUDA toolkit headers are incompatible, please check your include paths"`) -- a real version mismatch between the loaded toolkit and whatever CUDA version the installed `torch`/`vllm`/`flashinfer` wheels were built against.
+- **Fixed and confirmed working**: `module load cuda-h100/13.3.1` (PSC's own H100-specific CUDA module, marked preproduction but real and available) instead of the default `cuda/12.6.1`. A full real run on a fresh H100 allocation reached `READY after 21` (attempts, ~3.5 min) -- the AWQ model loaded and vLLM's `/health` endpoint responded. `run_model_eval.sh` now loads this module before starting `vllm serve`.
+- Operational notes for future sessions, not really about this project's storage: `/tmp` is node-local (compute node and login node each have their own, and different login nodes in the round-robin aren't even shared with each other) -- redirect any output meant to survive past a single `srun` allocation to somewhere under `$HOME` instead. `scp`'s default SFTP-protocol transfer isn't available on this cluster (`subsystem request failed`) and the legacy `-O` fallback isn't either (`scp: command not found` -- the remote host has no `scp` binary at all); `ssh bridges2 'cat <path>' > local-file` works as a substitute for pulling a single file back.
+
+Task 3 is complete. Tasks 4-6 (the real comparison runs and the final report) follow.
+
+<!-- Further entries appended by Tasks 4-6 as real commands are run and
+     real output comes back. -->
