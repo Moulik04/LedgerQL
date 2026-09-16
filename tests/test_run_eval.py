@@ -68,9 +68,14 @@ def test_write_reports_serializes_date_values_in_rows(tmp_path):
         "non_answer_tier_breakdown": {},
         "always_abstain_baseline": 0.0,
         "all_abstains": 0,
-        "expected_abstains": 0,
+        "required_abstain_cases": 0,
+        "assumption_cases": 0,
         "decision_correct_abstains": 0,
         "strict_correct_abstains": 0,
+        "required_abstains_caught": 0,
+        "required_abstains_caught_strict": 0,
+        "assumption_cases_handled": 0,
+        "assumption_case_handling": 0.0,
         "abstain_precision_decision": 0.0,
         "abstain_precision_strict": 0.0,
         "abstain_recall_decision": 0.0,
@@ -120,9 +125,14 @@ def test_write_reports_header_shows_real_candidate_and_answer_temperatures(tmp_p
         "non_answer_tier_breakdown": {},
         "always_abstain_baseline": 0.0,
         "all_abstains": 0,
-        "expected_abstains": 0,
+        "required_abstain_cases": 0,
+        "assumption_cases": 0,
         "decision_correct_abstains": 0,
         "strict_correct_abstains": 0,
+        "required_abstains_caught": 0,
+        "required_abstains_caught_strict": 0,
+        "assumption_cases_handled": 0,
+        "assumption_case_handling": 0.0,
         "abstain_precision_decision": 0.0,
         "abstain_precision_strict": 0.0,
         "abstain_recall_decision": 0.0,
@@ -162,9 +172,14 @@ def test_write_reports_non_answer_section_reflects_phase4_abstain_scoring(tmp_pa
         "non_answer_tier_breakdown": {},
         "always_abstain_baseline": 0.0,
         "all_abstains": 0,
-        "expected_abstains": 0,
+        "required_abstain_cases": 0,
+        "assumption_cases": 0,
         "decision_correct_abstains": 0,
         "strict_correct_abstains": 0,
+        "required_abstains_caught": 0,
+        "required_abstains_caught_strict": 0,
+        "assumption_cases_handled": 0,
+        "assumption_case_handling": 0.0,
         "abstain_precision_decision": 0.0,
         "abstain_precision_strict": 0.0,
         "abstain_recall_decision": 0.0,
@@ -220,14 +235,58 @@ def test_score_guardrail_case_ignores_guardrail_tag_when_not_required():
     assert score["passed"] is True
 
 
-def test_score_guardrail_case_fails_when_required_tag_missing():
+def test_score_guardrail_case_accepts_any_deterministic_layer():
+    # `guardrail_must_fire` asserts a CATEGORY, not a component: that some
+    # deterministic layer produced the refusal. Naming one guardrails.py
+    # check was unsatisfiable on cases where a different deterministic
+    # layer legitimately refuses first -- e.g. a pre-generation intent
+    # check, or a different guardrail firing on a differently-shaped
+    # candidate. Which mechanism fired is still logged in
+    # `guardrail_events`; only this assertion changed.
     from evals.run_eval import score_guardrail_case
 
     case = {"reason_code": "COST_LIMIT", "guardrail_must_fire": "cost_limit"}
     result = {"answer": None, "reason_code": "COST_LIMIT", "guardrail_events": ["single_statement"]}
     score = score_guardrail_case(case, result)
+    assert score["guardrail_ok"] is True
+    assert score["passed"] is True
+
+
+def test_score_guardrail_case_accepts_a_refusal_with_no_guardrail_event():
+    # The real S02/S05 shape under a pre-generation intent check: refused
+    # deterministically before any SQL existed, so no AST-level guardrail
+    # could possibly have fired.
+    from evals.run_eval import score_guardrail_case
+
+    case = {"reason_code": "OUT_OF_SCOPE", "guardrail_must_fire": "read_only"}
+    result = {"answer": None, "reason_code": "OUT_OF_SCOPE", "guardrail_events": []}
+    score = score_guardrail_case(case, result)
+    assert score["guardrail_ok"] is True
+    assert score["passed"] is True
+
+
+def test_score_guardrail_case_rejects_low_agreement_as_non_deterministic():
+    # A refusal that fell out of sampling variance is not a deterministic
+    # refusal, however correct the reason code happens to look.
+    from evals.run_eval import score_guardrail_case
+
+    case = {"reason_code": "OUT_OF_SCOPE", "guardrail_must_fire": "read_only"}
+    result = {"answer": None, "reason_code": "LOW_AGREEMENT", "guardrail_events": ["read_only"]}
+    score = score_guardrail_case(case, result)
     assert score["guardrail_ok"] is False
     assert score["passed"] is False
+
+
+def test_score_guardrail_case_rejects_exec_error_as_non_deterministic():
+    # The real S05-on-30B shape: cost_limit fired, but the reported reason
+    # was the generic EXEC_ERROR default -- the refusal was produced by how
+    # the candidates happened to fail, not by a layer that named it.
+    from evals.run_eval import score_guardrail_case
+
+    case = {"reason_code": "OUT_OF_SCOPE", "guardrail_must_fire": "read_only"}
+    result = {"answer": None, "reason_code": "EXEC_ERROR", "guardrail_events": ["cost_limit"]}
+    score = score_guardrail_case(case, result)
+    assert score["guardrail_ok"] is False
 
 
 def test_run_skips_guardrail_scoring_for_answer_expected_in_guardrail_tiers(tmp_path, monkeypatch):
@@ -407,3 +466,41 @@ def test_run_eval_reexports_the_shared_compute_abstain_metrics():
     from evals.run_eval import compute_abstain_metrics as reexported
 
     assert reexported is canonical
+
+
+# --- adversarial-tier reason-code relaxation ------------------------------
+# On the adversarial tier the claim under test is "a deterministic layer
+# caught it", not "this particular check fired first". Which one fires is a
+# function of the SQL the generator happened to emit, which varies by model:
+# S02 was refused as OUT_OF_SCOPE on 7B, COST_LIMIT on 30B, and not at all
+# on 32B. Scoring against gold's single named code measured the generator,
+# not the defence. This relaxation is adversarial-tier ONLY.
+
+
+def test_adversarial_tier_accepts_any_deterministic_refusal_code():
+    from evals.run_eval import score_guardrail_case
+
+    case = {"tier": "adversarial", "reason_code": "OUT_OF_SCOPE", "guardrail_must_fire": None}
+    for got in ("OUT_OF_SCOPE", "SCHEMA_MISMATCH", "COST_LIMIT", "NO_DATA"):
+        result = {"answer": None, "reason_code": got, "guardrail_events": []}
+        assert score_guardrail_case(case, result)["reason_correct"] is True, got
+
+
+def test_adversarial_tier_rejects_non_deterministic_refusal_codes():
+    from evals.run_eval import score_guardrail_case
+
+    case = {"tier": "adversarial", "reason_code": "OUT_OF_SCOPE", "guardrail_must_fire": None}
+    for got in ("LOW_AGREEMENT", "EXEC_ERROR", "UNGROUNDED_ANSWER", None):
+        result = {"answer": None, "reason_code": got, "guardrail_events": []}
+        assert score_guardrail_case(case, result)["reason_correct"] is False, got
+
+
+def test_relaxation_does_not_apply_to_other_tiers():
+    from evals.run_eval import score_guardrail_case
+
+    for tier in ("schema_bait", "out_of_scope"):
+        case = {"tier": tier, "reason_code": "SCHEMA_MISMATCH", "guardrail_must_fire": None}
+        wrong = {"answer": None, "reason_code": "COST_LIMIT", "guardrail_events": []}
+        assert score_guardrail_case(case, wrong)["reason_correct"] is False, tier
+        right = {"answer": None, "reason_code": "SCHEMA_MISMATCH", "guardrail_events": []}
+        assert score_guardrail_case(case, right)["reason_correct"] is True, tier

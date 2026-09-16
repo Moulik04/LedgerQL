@@ -65,8 +65,21 @@ def vote(
     deduped_events = sorted(set(all_events))
 
     if not clusters:
+        # A named rejection outranks the generic EXEC_ERROR default, however
+        # many candidates carry it. guardrails.validate() returns
+        # reason_code="EXEC_ERROR" for a candidate that won't parse, so
+        # EXEC_ERROR used to compete in this same majority vote and win
+        # whenever more candidates happened to be malformed than were
+        # actually blocked -- making the reported reason a function of how
+        # the candidates failed rather than of what was wrong with the
+        # request. Real occurrence: S05 on the 30B run reported EXEC_ERROR
+        # while its own guardrail_events still contained 'cost_limit'.
+        # EXEC_ERROR is only the honest answer when nothing named a reason.
         rejection_reasons = [g.reason_code for g in guards if g.reason_code is not None]
-        if rejection_reasons:
+        named_reasons = [r for r in rejection_reasons if r != "EXEC_ERROR"]
+        if named_reasons:
+            reason_code = Counter(named_reasons).most_common(1)[0][0]
+        elif rejection_reasons:
             reason_code = Counter(rejection_reasons).most_common(1)[0][0]
         else:
             reason_code = "EXEC_ERROR"

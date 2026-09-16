@@ -188,3 +188,54 @@ def test_vote_clusters_by_row_values_not_column_names():
 
     assert result.agreement == 4 / 5
     assert result.rows == same_values
+
+
+def test_vote_prefers_a_named_guardrail_reason_over_the_generic_exec_error():
+    # guardrails.validate() itself returns reason_code="EXEC_ERROR" when a
+    # candidate won't parse, so EXEC_ERROR competes in the same majority
+    # vote as real, named rejections -- and wins whenever more candidates
+    # happened to be malformed than were actually blocked. That makes the
+    # reported reason a function of how the candidates failed rather than
+    # of what was wrong with the request.
+    #
+    # Real occurrence: S05 on the 30B run reported EXEC_ERROR while its own
+    # guardrail_events still contained 'cost_limit'.
+    guards = [
+        _guard("junk", ok=False, reason_code="EXEC_ERROR"),
+        _guard("junk", ok=False, reason_code="EXEC_ERROR"),
+        _guard("junk", ok=False, reason_code="EXEC_ERROR"),
+        _guard("UPDATE x", ok=False, events=["read_only"], reason_code="OUT_OF_SCOPE"),
+        _guard("UPDATE x", ok=False, events=["read_only"], reason_code="OUT_OF_SCOPE"),
+    ]
+    execs = [None] * 5
+
+    result = consensus.vote(guards, execs)
+
+    assert result.reason_code == "OUT_OF_SCOPE"
+    assert result.events == ["read_only"]
+
+
+def test_vote_still_majority_votes_among_named_reasons():
+    guards = [
+        _guard("a", ok=False, events=["schema_allowlist"], reason_code="SCHEMA_MISMATCH"),
+        _guard("b", ok=False, events=["schema_allowlist"], reason_code="SCHEMA_MISMATCH"),
+        _guard("c", ok=False, events=["cost_limit"], reason_code="COST_LIMIT"),
+        _guard("junk", ok=False, reason_code="EXEC_ERROR"),
+    ]
+    result = consensus.vote(guards, [None] * 4)
+    assert result.reason_code == "SCHEMA_MISMATCH"
+
+
+def test_vote_falls_back_to_exec_error_only_when_nothing_named_it():
+    guards = [_guard("junk", ok=False, reason_code="EXEC_ERROR") for _ in range(3)]
+    result = consensus.vote(guards, [None] * 3)
+    assert result.reason_code == "EXEC_ERROR"
+
+
+def test_vote_falls_back_to_exec_error_when_guards_passed_but_execution_failed():
+    # Every guard passed, so nothing named a reason at all; the executions
+    # are what failed. EXEC_ERROR is the honest answer here.
+    guards = [_guard("SELECT 1") for _ in range(3)]
+    execs = [ExecutionResult(columns=[], rows=[], error="boom") for _ in range(3)]
+    result = consensus.vote(guards, execs)
+    assert result.reason_code == "EXEC_ERROR"

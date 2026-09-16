@@ -115,8 +115,12 @@ def test_main_reproduces_the_real_committed_30b_report_exactly(capsys):
     # PHASE_5_5_AMENDMENT_1.md's decision/strict split: run the
     # diagnostic against the real, already-scored 30B report and
     # confirm its printed metrics match the amendment's own
-    # independently-verified numbers (71.0% / 29.0% / 41.5% / 17.0% /
-    # 40.9% / 33.0% baseline) exactly.
+    # independently-verified numbers exactly. Precision, reason-code
+    # accuracy and the baseline (71.0% / 29.0% / 40.9% / 33.0%) are
+    # unchanged by the recall-denominator correction; recall now divides
+    # by the 34 required-abstain cases rather than the 53-case union, so
+    # the pair Amendment 1 cited (41.5% / 17.0%) is superseded by
+    # 58.8% / 26.5%.
     from pathlib import Path
 
     from evals.abstain_scoring import compute_abstain_metrics
@@ -133,7 +137,8 @@ def test_main_reproduces_the_real_committed_30b_report_exactly(capsys):
     metrics = compute_abstain_metrics(records, gold)
 
     assert metrics["all_abstains"] == 31
-    assert metrics["expected_abstains"] == 53
+    assert metrics["required_abstain_cases"] == 34
+    assert metrics["assumption_cases"] == 19
     assert metrics["decision_correct_abstains"] == 22
     assert metrics["strict_correct_abstains"] == 9
 
@@ -143,7 +148,7 @@ def test_main_reproduces_the_real_committed_30b_report_exactly(capsys):
     out = capsys.readouterr().out
     assert "abstain precision (decision)           71.0%" in out
     assert "abstain precision (strict)             29.0%" in out
-    assert "abstain recall (decision)              41.5%" in out
-    assert "abstain recall (strict)                17.0%" in out
+    assert "abstain recall (decision)              58.8%" in out
+    assert "abstain recall (strict)                26.5%" in out
     assert "reason-code accuracy                   40.9%" in out
     assert "always-abstain baseline precision      33.0%" in out

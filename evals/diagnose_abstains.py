@@ -33,11 +33,14 @@ abstaining the right decision; was the reason code also right); this
 tool reports both ("decision" and "strict"), plus `accept_alternatives`-
 aware reason-code accuracy, never a single bare number again.
 
-The union set (53 cases: ABSTAIN + ANSWER_WITH_ASSUMPTION) used for
-`abstain_recall_*`'s denominator is NOT the same thing as the "34
-pure-ABSTAIN cases" used for the always-abstain baseline below -- see
-that section's own comment for why they're deliberately different
-denominators for different questions.
+Abstain *precision* is asked of every abstain, on both populations
+(refusing is required on the 34 ABSTAIN cases and an accepted
+alternative on the 19 ANSWER_WITH_ASSUMPTION ones). Abstain *recall* is
+asked only of the 34, where refusing is required -- it used to divide by
+the 53-case union, which scored the ideal outcome on an assumption case
+(answering it correctly with the assumption stated) as a missed abstain
+and so rewarded over-abstention. The 19 are reported separately as
+`assumption_case_handling`.
 """
 
 from __future__ import annotations
@@ -57,6 +60,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from evals.abstain_scoring import (  # noqa: E402
     ABSTAIN_EXPECTED_BEHAVIORS,
+    REQUIRED_ABSTAIN_BEHAVIOR,
     acceptable_reason_codes,
     compute_abstain_metrics,
 )
@@ -197,8 +201,16 @@ def main(argv: list[str] | None = None) -> int:
     # `answer`/`reason_code` fields directly (not the _observed/_reason
     # display aliases this script builds for its own tables below), since
     # that's the interface compute_abstain_metrics expects.
+    # `execution_correct` is carried through because it is the answer-side
+    # half of assumption_case_handling -- dropping it here would make this
+    # diagnostic under-report that metric relative to the committed report.
     per_case = [
-        {"id": r.get("id"), "answer": r.get("answer"), "reason_code": r.get("reason_code")}
+        {
+            "id": r.get("id"),
+            "answer": r.get("answer"),
+            "reason_code": r.get("reason_code"),
+            "execution_correct": r.get("execution_correct"),
+        }
         for r in recs
     ]
     metrics = compute_abstain_metrics(per_case, gold)
@@ -220,9 +232,9 @@ def main(argv: list[str] | None = None) -> int:
     # non-None reason_code, and gold's own reason_code for
     # ANSWER_WITH_ASSUMPTION cases is (with one exception) None -- see
     # DECISIONS.md's 2026-09-11 entry, "structurally unreachable" cases.
-    # Mixing this 34-based ceiling into the 53-based recall denominator
-    # above would silently change what "abstain recall" means from what
-    # the committed report already states.
+    # Recall's denominator is now this same set of 34, but for a separate
+    # reason (refusing is *required* there), so the two agreeing in size
+    # is a coincidence of this gold set, not one denominator reused.
     pure_abstain_recs = [r for r in recs if r["_expected"] == "ABSTAIN"]
     baseline = len(pure_abstain_recs) / n
     coverage = 1 - len(did_abstain) / n
@@ -239,6 +251,16 @@ def main(argv: list[str] | None = None) -> int:
     print(f"   abstain recall (decision)             {metrics['abstain_recall_decision']:6.1%}")
     print(f"   abstain recall (strict)               {metrics['abstain_recall_strict']:6.1%}")
     print(f"   reason-code accuracy                  {metrics['reason_code_accuracy']:6.1%}")
+    print(
+        f"   (recall is over the {metrics['required_abstain_cases']} cases that MUST refuse; "
+        f"the {metrics['assumption_cases']} assumption cases are scored separately)"
+    )
+    print(
+        f"   assumption-case handling              "
+        f"{metrics['assumption_case_handling']:6.1%}   "
+        f"({metrics['assumption_cases_handled']}/{metrics['assumption_cases']} did either "
+        "acceptable thing)"
+    )
     print(f"   always-abstain baseline precision     {baseline:6.1%}   <-- must beat this")
     if metrics["abstain_precision_strict"] <= baseline:
         print("   *** strict precision is AT OR BELOW the trivial baseline: the")
@@ -295,10 +317,13 @@ def main(argv: list[str] | None = None) -> int:
     print()
 
     # ---- 3b. missed abstains ----------------------------------------------
+    # Only the required-abstain cases can be "missed": answering an
+    # assumption case is a legitimate outcome there, not a recall failure,
+    # so counting it here would contradict recall's own denominator.
     missed = [
         r
         for r in recs
-        if r["_expected"] in ABSTAIN_EXPECTED_BEHAVIORS
+        if r["_expected"] == REQUIRED_ABSTAIN_BEHAVIOR
         and r["_observed"]
         and r["_observed"] != "ABSTAIN"
     ]
