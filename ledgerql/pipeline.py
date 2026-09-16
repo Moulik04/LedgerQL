@@ -1,6 +1,13 @@
-"""Orchestrates the Phase 4 pipeline: classify -> schema -> generate N
-candidates -> guardrails validate each -> execute each survivor ->
-consensus vote -> answer (question hidden) -> verify -> audit.
+"""Orchestrates the Phase 4 pipeline: intent -> classify -> schema ->
+generate N candidates -> guardrails validate each -> execute each
+survivor -> consensus vote -> answer (question hidden) -> verify ->
+audit.
+
+Stage 0 (intent) is a deterministic, regex-based check on the raw
+question text, ahead of the LLM classifier. It owns the one category
+neither other layer can: a request whose malicious clause the generator
+silently discards, so that guardrails.py -- which only ever sees
+generated SQL -- has nothing left to reject. See ledgerql/intent.py.
 
 Two independent abstain triggers sit between consensus and the answer
 stage: no candidate produced a usable result at all (consensus.py sets
@@ -20,6 +27,7 @@ from ledgerql import consensus as consensus_module
 from ledgerql import execute as execute_module
 from ledgerql import generate as generate_module
 from ledgerql import guardrails as guardrails_module
+from ledgerql import intent as intent_module
 from ledgerql import schema_index
 from ledgerql import verify as verify_module
 from ledgerql.execute import ExecutionResult
@@ -32,6 +40,24 @@ def ask(question: str, db_path: str | None = None) -> dict:
     start = time.monotonic()
 
     try:
+        # Stage 0, before classify: a deterministic check on the question
+        # text. It runs first precisely because it must not depend on an
+        # LLM call -- classify.py is a sampled judgment and varies by
+        # model, which is how S02 came to be refused for three different
+        # reasons on three different models. See ledgerql/intent.py.
+        intent_result = intent_module.check(question)
+        if not intent_result.ok:
+            return _finish(
+                question,
+                start,
+                classify_module.ClassifyResult(
+                    verdict=intent_result.reason_code, explanation=intent_result.detail or ""
+                ),
+                guardrail_events=intent_result.events,
+                reason_code=intent_result.reason_code,
+                error=intent_result.detail,
+            )
+
         classify_result = classify_module.classify(question)
         if classify_result.verdict != "IN_SCOPE":
             return _finish(question, start, classify_result, reason_code=classify_result.verdict)

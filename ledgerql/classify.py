@@ -44,6 +44,18 @@ qwen2.5-coder:7b calls, not assumed:
    and produced a reason code the eval scorer correctly treats as wrong.
    The scope was narrowed to match: only genuinely non-SQL-shaped
    requests are classified here now.
+
+   Amended 2026-09-15: `guardrail_must_fire` no longer names a specific
+   check -- it now asserts only that *some* deterministic layer
+   refused, because naming one check was unsatisfiable whenever a
+   different deterministic layer legitimately caught the case first.
+   That removes one of this correction's two supporting arguments. The
+   narrowing nevertheless stands, on the other one, which is #3's: a
+   wrong call here short-circuits before generation with no recovery
+   path. The requests this paragraph is about are now caught *earlier*
+   still, by ledgerql/intent.py -- deterministically, on the question
+   text, with no model judgment involved -- which is the thing this
+   layer could not safely do.
 3. The same argument applies to SCHEMA_MISMATCH, which this module
    used to also actively teach and produce. guardrails.py's live-
    column check already emits SCHEMA_MISMATCH deterministically and
