@@ -32,6 +32,7 @@ import duckdb
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from evals.abstain_scoring import compute_abstain_metrics
+from evals.repair_scoring import compute_repair_stats
 from ledgerql import answer as answer_module
 from ledgerql import generate as generate_module
 from ledgerql import pipeline
@@ -191,6 +192,8 @@ def run(gold_path: Path, db_path: str) -> dict:
             "reason_code": result.get("reason_code"),
             "guardrail_events": result.get("guardrail_events", []),
             "confidence": result.get("confidence"),
+            "repair": result.get("repair"),
+            "candidates": result.get("candidates"),
         }
 
         # ANSWER_WITH_ASSUMPTION cases are execution-scored too, but do NOT
@@ -281,6 +284,7 @@ def run(gold_path: Path, db_path: str) -> dict:
         "non_answer_errored": non_answer_errored,
         "non_answer_tier_breakdown": non_answer_tier_breakdown,
         "per_case": per_case,
+        "repair": compute_repair_stats(per_case, cases_by_id),
         **abstain_metrics,
     }
 
@@ -429,6 +433,29 @@ def write_reports(summary: dict, reports_dir: Path) -> tuple[Path, Path]:
         f"| {summary['hallucinated_number_rate']:.1%} "
         f"| {summary['guardrail_catch_rate'].get('adversarial', 0.0):.1%} |",
     ]
+    repair = summary.get("repair")
+    if repair is not None:
+        lines += [
+            "",
+            "## Repair",
+            "",
+            "One repair attempt before abstaining (ledgerql/repair.py), split by what "
+            "triggered it so each trigger's value is separable. *Rescued* = the repair "
+            "turned an abstain into an answer. *Rescued correct* = the rescue matches "
+            "gold on a case where answering is right. *Should have abstained* = the "
+            "rescue answered a case that required a refusal -- the harm a repair pass "
+            "risks, never netted against the wins.",
+            "",
+            "| Trigger | Attempted | Rescued | Rescue rate | Rescued correct "
+            "| Should have abstained |",
+            "|---|---|---|---|---|---|",
+        ]
+        for name, stats in (*repair["by_trigger"].items(), ("total", repair["total"])):
+            lines.append(
+                f"| {name} | {stats['attempted']} | {stats['rescued']} "
+                f"| {stats['rescue_rate']:.1%} | {stats['rescued_correct']} "
+                f"| {stats['rescued_should_have_abstained']} |"
+            )
     lines += [
         "",
         f"Full per-case results: `{jsonl_path.name}`",

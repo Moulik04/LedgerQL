@@ -61,3 +61,36 @@ def generate_candidates(
         )
         candidates.append(_strip_fences(response.response))
     return candidates
+
+
+_REPAIR_TEMPLATE = (
+    "Schema:\n{schema}\n\nQuestion: {question}\n\n"
+    "This query failed:\n{sql}\n\nError: {error}\n\n"
+    "Output one corrected DuckDB SELECT statement.\n\nSQL:"
+)
+
+
+def repair_candidate(
+    question: str,
+    schema_context: str,
+    failing_sql: str,
+    error_text: str,
+    client: ollama.Client | llm_backends.VLLMClient | None = None,
+) -> str:
+    """One repair attempt at the single-shot temperature. The caller re-runs
+    guardrails and execution on the result; this only produces the SQL.
+
+    Only failures that carry an error message are repairable (see
+    ledgerql/repair.py): an empty result has no message, so it is not handed
+    to this function."""
+    client = client or llm_backends.default_client()
+    prompt = _REPAIR_TEMPLATE.format(
+        schema=schema_context, question=question, sql=failing_sql, error=error_text
+    )
+    response = client.generate(
+        model=OLLAMA_MODEL,
+        system=SYSTEM_PROMPT,
+        prompt=prompt,
+        options={"temperature": OLLAMA_TEMPERATURE, "seed": OLLAMA_SEED},
+    )
+    return _strip_fences(response.response)

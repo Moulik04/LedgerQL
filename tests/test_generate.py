@@ -86,3 +86,20 @@ def test_generate_candidates_accepts_explicit_temperature_override():
     )
     for call in client.calls:
         assert call["options"]["temperature"] == generate.OLLAMA_CONSENSUS_TEMPERATURE
+
+
+def test_repair_candidate_shows_the_failing_sql_and_the_error_and_strips_fences():
+    client = _FakeClient("```sql\nSELECT 2;\n```")
+    sql = generate.repair_candidate(
+        "the question",
+        "the schema",
+        failing_sql="SELECT nope FROM t",
+        error_text="column nope not found",
+        client=client,
+    )
+    assert sql == "SELECT 2;"
+    prompt = client.last_call["prompt"]
+    assert "the question" in prompt and "the schema" in prompt
+    assert "SELECT nope FROM t" in prompt and "column nope not found" in prompt
+    # single-shot temperature, not the consensus temperature
+    assert client.last_call["options"]["temperature"] == generate.OLLAMA_TEMPERATURE

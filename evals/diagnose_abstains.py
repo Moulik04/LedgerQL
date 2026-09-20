@@ -250,7 +250,11 @@ def main(argv: list[str] | None = None) -> int:
     print(f"   abstain precision (strict)            {metrics['abstain_precision_strict']:6.1%}")
     print(f"   abstain recall (decision)             {metrics['abstain_recall_decision']:6.1%}")
     print(f"   abstain recall (strict)               {metrics['abstain_recall_strict']:6.1%}")
-    print(f"   reason-code accuracy                  {metrics['reason_code_accuracy']:6.1%}")
+    print(
+        f"   reason-code accuracy                  {metrics['reason_code_accuracy']:6.1%}  "
+        f"({metrics['strict_correct_abstains']}/{metrics['decision_correct_abstains']} "
+        "abstains that were the right call named the right reason)"
+    )
     print(
         f"   (recall is over the {metrics['required_abstain_cases']} cases that MUST refuse; "
         f"the {metrics['assumption_cases']} assumption cases are scored separately)"
