@@ -294,6 +294,29 @@ expected-abstain side partitions over the 34 required-abstain cases
 only: `correct + wrong reason code + missed = 34`, counting just the
 required-abstain members of the first two categories.
 
+**Read reason-code accuracy as a count and a rate together, never the rate
+alone.** Its denominator is the abstains that were the right call, and that
+denominator grows whenever recall improves: each newly caught case that
+carries a placeholder reason enters the denominator without entering the
+numerator. On the derived 30B numbers the count of correctly-reasoned
+abstains went 13 -> 19 while the rate went 56.5% -> 54.3%. Behaviour
+improved; the rate fell. Optimising the rate rewards abstaining less. Both
+the report and this script print `correct/decision-correct` beside it.
+
+## 6b. Repair scoring (`evals/repair_scoring.py`)
+
+`ledgerql/repair.py` makes one repair attempt before abstaining, from three
+triggers (`exec_error`, `schema_mismatch`; only `exec_error` is enabled, and an
+empty result is never repaired -- it carries no error to feed back). The report's
+`## Repair` table is split by trigger so each one's value is separable.
+*Rescued* means the repair turned an abstain into an answer; *rescued
+correct* means the answer matches gold on a case where answering is right;
+*should have abstained* means it answered a case that required a refusal.
+That last column is the harm a repair pass risks and is never netted against
+the wins. Repair needs generation, so it cannot be replayed from committed
+per-case records: derived Bridges-2 figures assume it leaves their `NO_DATA`
+targets alone.
+
 **Two denominators that now coincide at 34, for unrelated reasons:**
 - **Abstain recall's denominator is the 34 `ABSTAIN` cases** — the ones
   where refusing is *required*. (Before the Task-6 corrections it was
@@ -353,3 +376,15 @@ and expect several current `ABSTAIN` cases (`T06`, parts of `M04`,
 `U06`, and any SIC-based case you add) to correctly flip to `ANSWER`
 once the underlying data exists. That is the validator doing its job,
 not a sign this file was wrong before.
+
+## 6c. Replaying reports (`evals/replay_derived.py`)
+
+`python -m evals.replay_derived reports/eval_bridges2_qwen3_30b.jsonl` regenerates
+every *derived* figure quoted in DECISIONS.md and the Task 6b spec, by substituting
+a hypothetical rule's outcome into a prior run's per-case records. Derived is not
+measured: exact where the rule's inputs are in the record (`intent.check()` reads
+only the question), a bound where they are not (survivor unanimity, on reports
+written before per-candidate logging), and impossible where generation is needed
+(repair). Reports written after per-candidate logging carry `candidates` and their
+figures are measured. The Bridges-2 reports must be tracked in git for any of this
+to be reproducible from a fresh clone.

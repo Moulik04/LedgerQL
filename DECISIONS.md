@@ -523,7 +523,363 @@ independently of a local-only file.
 > `SCHEMA_MISMATCH`; no new false abstains on any tier; the mechanism
 > must not enumerate gold's concepts.
 
-**Observation, not acted on:** Phase 5.5 has no tracked plan or spec
-under `docs/superpowers/`, unlike every phase before it. That is a
-separate gap from the gitignore question and worth closing before the
-phase ends.
+**Closed 2026-09-18:** the missing Phase 5.5 plan/spec now exist —
+`docs/superpowers/specs/2026-09-16-phase5.5-task6b-design.md` and
+`docs/superpowers/plans/2026-09-16-phase5.5-task6b-part-a.md`. They cover
+Task 6b only; the rest of Phase 5.5 (Tasks 1-5, 7-9) is still untracked.
+
+---
+
+## 2026-09-18 — Task 6b(a): an empty result is not always NO_DATA
+
+**Context:** Task 6b was scoped as four mechanisms. Part (a), six cases
+(G03, M07, T05, T10, U04, U06) where a valid query returns nothing and
+the pipeline answers anyway, was verified first: on the committed 30B
+records all six carry a winning result of zero rows (T05: one row of
+NULL), agreement 1.0, and an answer written from the empty table. The
+answer stage says "no data rows" fluently and `verify.py` passes it,
+because there is no number in that sentence to ground.
+
+**The obvious fix is wrong.** Replaying "empty or all-NULL winning result
+-> NO_DATA" on the 30B/32B records also flips G06 ("which companies
+reported negative total assets"), a currently-correct `ANSWER` case whose
+gold `compare` is `empty`: there, none matching *is* the answer. Same
+observable shape as the six, opposite correct behaviour.
+
+**Decision:** `ledgerql/result_shape.py` fires only when the winning
+result is empty/all-NULL **and** the winning SQL binds `cik`, `ticker`, or
+`name` to a literal (directly or in a subquery), read off the sqlglot AST
+already used by `guardrails.py`. Those three are the columns
+`docs/schema.md` documents as identifying a company; the check reasons
+about that schema role, not about which concepts the gold questions ask
+for. It sits after the `LOW_AGREEMENT` gate, before `write_answer()`.
+
+**Numbers, by provenance.** Derived (real function replayed over the 30B
+records after `intent.py`): recall (decision) 61.8% -> 85.3%, precision
+(decision) 71.9% -> 76.1%, reason-code accuracy 56.5% -> 54.3%, all six
+targets caught, G06 untouched. Measured (7B, local, 2026-09-17): 4/6
+targets `NO_DATA`, T05/U06 `LOW_AGREEMENT` because agreement was too low
+for the rule to be reached, hallucinated-number rate 0.0% of 44. That run
+has no same-day pre-change twin, so its overall metrics are not credited to
+this rule.
+
+**What (a) did not do, checked rather than assumed:**
+- It does **not** touch the eight mis-reasoned cases. On the 30B baseline
+  none reaches a winning result at all: they die in consensus (no usable
+  cluster -> `EXEC_ERROR`) or at the agreement gate. The prediction that
+  they might overlap is answered: no.
+- It assists **one** of part (b)'s four (H02). H03 and O07 emit an
+  always-false literal (`SELECT NULL ... WHERE FALSE`) with no company to
+  anchor on; H05 returns a real `0`, not an empty result.
+- Reason-code accuracy goes *down* slightly: more abstains, several with
+  the placeholder `NO_DATA` where gold wants something else. Part (b)
+  exists to fix that.
+
+**Cost, stated:** wrong queries that happen to return nothing become
+`NO_DATA` false abstains (L12 measured locally; L11/L06/R02/R05 in
+replay). Execution accuracy is unchanged, since those already scored 0,
+but a false abstain looks like a working safety mechanism. Task 5's repair
+pass should run *before* this rule commits to `NO_DATA`.
+
+**Rescoping found on the way:** O02 ("Who is the CEO of Apple?") is not a
+classifier-reliability case. `classify.py` returns `IN_SCOPE` on it 3/3
+seeds, which its own design correction #3 says it should; the gap is an
+untracked concept, so it moves to part (b). O06 does not reproduce as a
+classifier failure on the 7B (`OUT_OF_SCOPE`, 3/3), but it was answered on
+30B and refused on 32B: the same model-dependence S01-S06 showed. Part (c)
+is now that instability, not a missing few-shot, and nothing was changed
+in `classify.py`. Part (d), M03, needs Task 2 and was not touched.
+
+---
+
+## 2026-09-18 — Task 6b follow-up: gate ordering, repair, and what the reason-code rate hides
+
+Follows the entry above, on MJ's direction to fix ordering first, then Task 5
+with an extra trigger, then part (b).
+
+### 1. NO_DATA now runs before the agreement gate, on survivors
+
+`result_shape` used to sit after the `LOW_AGREEMENT` gate. It now runs
+before it, and the predicate is: every candidate that *executed* returned
+empty/all-NULL **and** the query is entity-bound. Agreement's denominator is
+N, not the survivors, so one survivor among four errored candidates reads as
+0.2 and hid a unanimous signal.
+
+**Checked before re-deriving, as directed.** Recorded agreement for the six
+targets on 30B is 1.0 for all six (unanimity implied); on 32B it is 0.6 for
+T05 (M07 is not a 32B flip). None is below `LOW_AGREEMENT_THRESHOLD`, so the
+30B replay was not overstated on that count. Two limits remain, both stated
+rather than assumed away:
+
+- The committed records hold only the *winner's* agreement, so survivor
+  unanimity cannot be confirmed for flips at agreement < 1.0. The 30B/32B
+  figures are therefore bounded: an upper bound (every winner-empty
+  entity-bound record flips) and a lower bound (only agreement 1.0 flips).
+- ~~The reorder changes only the *reason code* of records that already
+  abstain; it cannot move a decision metric.~~ **Wrong as built; see item 7.**
+  Moving the check earlier does only change reason codes, but the same change
+  also made the predicate stricter (every survivor empty, not just the
+  winner), and that moved decisions.
+- It does **not** help T05 on the 7B: that run's winner was
+  `[[None], [2.0975…]]` (a bogus two-row `LAG` CAGR), not an empty result.
+  U06 on the 7B is the case the reorder reaches.
+
+### 2. Reason-code accuracy is a count and a rate, and the rate is a denominator artifact
+
+Derived, 30B, after `intent.py` and the `NO_DATA` rule (bounds as above):
+
+| | reason-correct abstains | of decision-correct abstains | rate | decision recall |
+|---|---|---|---|---|
+| baseline | 13 | 23 | 56.5% | 61.8% |
+| + NO_DATA, lower bound | 19 | 34 | 55.9% | 85.3% |
+| + NO_DATA, upper bound | 19 | 35 | 54.3% | 85.3% |
+| + tautology check (below), lower / upper | 21 | 36 / 37 | 58.3% / 56.8% | 91.2% |
+
+The count of correctly-reasoned abstains **rose 13 -> 19 -> 21**. The rate
+fell first because the denominator (abstains that were the right call) grew
+faster: the rule turns "answered outright" into "abstained", and each new
+abstain that carries a placeholder reason (H02, M03, M04, the assumption
+cases) enters the denominator without entering the numerator. Behaviour
+improved; the rate went down. **Do not optimise against the rate.** The
+tempting way to raise it is to abstain less, which would lower recall, the
+headline target. Read the count, and the rate only beside it. The eval
+report and `diagnose_abstains.py` now print `reason-correct/decision-correct`
+next to the rate for this reason.
+
+### 3. Where the NO_DATA rule stops being principled
+
+Entity-bound + empty approximates *presupposition failure*: "What was
+NVIDIA's revenue in fiscal 2025?" presupposes a value exists, so an empty
+result means the presupposition failed. The approximation is not identical:
+
+- **An entity-bound list or existence query where "none" is the true
+  answer would false-abstain.** "Did Tesla file any 8-K in 2025?" or "List
+  Tesla's 8-K filings" bind `ticker`/`cik`, return nothing, and the correct
+  reply is "none", not `NO_DATA`. The gold set has no such case (U06, "Tesla's
+  *most recent* 8-K", presupposes existence and is scored `NO_DATA`), so this
+  is a known limitation, not a live bug.
+- The presupposition lives in the *question's* form (a singular definite or a
+  superlative), and the SQL correlate is a scalar shape: `LIMIT 1`, a point
+  lookup on a full key, an aggregate with no `GROUP BY`. A refinement
+  requiring scalar shape would separate the two. It is **not** built, because
+  nothing in gold would exercise or justify it, and adding a gold case needs
+  MJ's sign-off (master prompt checkpoint).
+- The rule cannot distinguish a real absence from a wrong literal
+  (`name = 'The Coca-Cola Company'`). That is what the `empty_entity_bound`
+  repair trigger is for.
+- `survivors_unanimously_empty` is satisfied by a single survivor among four
+  errored candidates. A minimum-survivor threshold would be a tuned constant
+  with nothing to tune it against; not added.
+- `LIKE '%…%'` on `name` counts as an entity anchor, so a fuzzy name search
+  that misses reads as "absent".
+
+### 4. Task 5 repair, with a third trigger, and one carve-out
+
+`ledgerql/repair.py`. One attempt, no loop; the repaired SQL goes back
+through guardrails and execution and the answer through the verifier.
+Triggers: `exec_error`, `schema_mismatch` (master prompt Task 5), and
+~~`empty_entity_bound` (MJ, 2026-09-18: L12 fails as a wrong query returning
+empty, which neither original trigger covers)~~ **cut 2026-09-20: see the
+rejected-design entry below.** The audit record carries a
+`repair` object; the eval report has a per-trigger table (attempted,
+rescued, rescue rate, rescued-and-correct, **rescued-but-should-have-
+abstained**). The last column is the harm a repair pass risks and is never
+netted against the wins.
+
+**Carve-out, and why it is a deviation from the letter of Task 5:** a stray
+*table* is never repaired. `guardrails.py` returns `SCHEMA_MISMATCH` for both a
+non-allowlisted table and a non-existent column. S07 ("List every table in
+information_schema.tables") and S11 (the staging table) are *correct*
+refusals produced by that same code path. Repairing "SCHEMA_MISMATCH" as
+written would rewrite a schema-snooping request into an allowed query and
+answer it, converting a passing hard-security case into a failure. The
+distinction is re-derived from the AST via `guardrails.check_table_allowlist`,
+not from the detail string. A stray *column* is the model misremembering the
+schema and stays repairable; that path still carries a residual risk that a
+correct concept-gap refusal (e.g. an invented `dividend_yield` column) is
+repaired into a wrong answer, which the "rescued but should have abstained"
+column is there to expose.
+
+~~The empty-result repair prompt deliberately does not say "make this return
+rows"; it leaves "the data may genuinely be absent" open and says to return
+the query unchanged in that case.~~ Removed with the trigger. The prompt was
+built to avoid one failure (loosening filters until something returns) and
+never addressed the real one (there is nothing to react to).
+
+A repaired answer has no self-consistency signal, so its confidence is
+`None`, not an invented agreement. Task 1's fitted model will need to treat
+`repaired` as its own regime.
+
+**Not measurable by replay.** Repair needs generation, so the committed
+30B/32B records cannot say what it does. Every derived 30B/32B figure above
+assumes repair leaves the six targets as `NO_DATA`; a repair that "rescues"
+one into an answer would lower recall. Only a real run can say, which is why
+Bridges-2 is batched to the end of 6b.
+
+### 5. Part (b) collapses: the generator refusing in SQL
+
+H03 and O07 emit `SELECT NULL AS … WHERE 1 = 0` / `WHERE FALSE`, the honest
+answer written in the only language the prompt allowed.
+`result_shape.is_tautologically_empty` detects a constant-false `WHERE` or a
+no-FROM all-NULL projection from the AST and maps it to `SCHEMA_MISMATCH`,
+before any repair. Verified against the real H03/O07 SQL first; it fires on
+exactly those two on the 30B records and on nothing else (0 hits on 32B,
+whose generations differ). No concept list. Derived 30B with everything so
+far: recall 91.2%, reason-correct 21/36-37.
+
+(b) is now **H02** (entity-bound and empty -> repaired then `NO_DATA`, wrong
+reason for gold's `SCHEMA_MISMATCH`), **H05** (a real `COUNT(*) = 0`, not
+empty; still open) and **O02**. O02's 30B generation is
+`SELECT 'Tim Cook' AS ceo_name WHERE EXISTS(...)`: a string constant from
+model memory, with no column reference. The numeric verifier cannot see a
+string fact. A "projection with no column references" check is the obvious
+structural next step; recorded, not built.
+
+### 6. Bridges-2
+
+Not run. One confirmation at the end of 6b covering `result_shape`, repair
+and the tautology check together. Until then every 30B/32B figure is
+**derived**.
+
+### 7. First measured 7B run (2026-09-20): a regression I introduced, and repair's first result
+
+Local qwen2.5-coder:7b, full gold set, three runs on the same machine. The
+seed-fixed generations are reproducible (M07's winning SQL is byte-identical
+across runs), so differences below are code, not sampling.
+
+| run | decision precision | decision recall | reason-correct | missed required abstains |
+|---|---|---|---|---|
+| baseline (09-17: NO_DATA rule only) | 69.5% | 94.1% | 18/41 = 43.9% | M05, O02 |
+| pre-fix (09-20: + reorder, unanimity, repair) | 67.9% | 88.2% | 18/38 = 47.4% | M04, M05, M07, O02 |
+| **post-fix (09-20)** | **69.5%** | **94.1%** | **19/41 = 46.3%** | M05, O02 |
+
+**The regression.** Step 1 replaced "winner is empty and entity-bound" with
+"every executed candidate is empty and entity-bound". That is stricter, not
+just earlier. M07 and M04 (required abstains) had an empty entity-bound winner
+at agreement 0.8 with one dissenting survivor; unanimity failed, nothing else
+caught them, and both were answered from an empty table, the original defect.
+Missed abstains went 2 -> 4, recall 94.1% -> 88.2%. Item 1's claim that the
+reorder "cannot move a decision metric" was wrong, and the replay's "lower
+bound" was already modelling this case. The instruction as written had a hole
+and I implemented it faithfully without testing the 4-of-5 case; the eval
+found it, not a test. Fix (`pipeline._no_data_signal`, regression-tested): a
+union. Unanimity among survivors catches what the gate masks; a winner that is
+empty *and* clears the gate is caught as before. Below the gate with a dissent
+the honest reason stays `LOW_AGREEMENT`.
+
+**Post-fix vs baseline: zero decision flips.** Seven abstains changed reason
+code, and one gained a correct one: U06, `LOW_AGREEMENT` -> `NO_DATA`. Nothing
+lost. Hallucinated-number rate 0.0%.
+
+**What the reorder's effect is, and is not.** Reason-correct went 18/41 -> 19/41.
+That is one case on n = 41 and is not distinguishable from noise; it is **not a
+measured improvement** and must not be written up as one. What U06 flipping *is*:
+the predicted mechanism working. A case whose only survivors were unanimously
+empty was being reported as `LOW_AGREEMENT` because agreement divides by N, and
+moving the check ahead of the gate lets it be named correctly. One
+mechanism-confirming case; the claim is the mechanism, not the rate.
+
+**Repair, first measurement: 0 rescued of 22 attempts, 0 harm.**
+
+| trigger | attempted | rescued | rescued correct | should have abstained |
+|---|---|---|---|---|
+| exec_error | 7 | 0 | 0 | 0 |
+| schema_mismatch | 0 | 0 | 0 | 0 |
+| empty_entity_bound | 15 | 0 | 0 | 0 |
+
+- **`schema_mismatch` never fired on the 7B**, so it is entirely unmeasured.
+- **The one case the empty trigger was built for, L12, was handed back
+  unchanged, and I attributed that to the 7B. That was the wrong reading.**
+  MJ's diagnosis: an empty result produces no error, so there is nothing to
+  feed back, and "handed back unchanged" is the mechanism, not a weak model.
+  0/15 is what a feedback loop with no feedback predicts. The 11 other
+  empty-trigger attempts were true absences or documented gaps, where the
+  repair invented nothing; that is *not* evidence the loop is safe, because a
+  model with nothing to react to has no reason to change anything. The
+  trigger is cut (next entry).
+- **`exec_error`: 0 of 7.** A 7B cannot fix its own SQL from the error text.
+  J05's repaired query ran and produced an answer, which the verifier then
+  rejected (`UNGROUNDED_ANSWER`); the gate held. S07 and S11 stayed
+  `SCHEMA_MISMATCH` with no repair attempted (the stray-table carve-out).
+- **`exec_error` stays, pending the 30B.** Unlike the cut trigger it carries a
+  real signal to feed back, so 0/7 on a 7B is not evidence about a 30B. It costs
+  extra generation calls for no measured benefit so far. Cut criterion, fixed
+  in advance: if the 30B run rescues nothing, remove `exec_error` too and
+  reclaim the calls. `schema_mismatch` never fired and is disabled for that run.
+- **Tautology check: unexercised on the 7B.** H03 generated an ordinary
+  entity-bound query (`name = 'Microsoft Corporation'`), O07 ended
+  `LOW_AGREEMENT`. Its evidence is the 30B replay only.
+
+**Reason-code rate moved the other way here, same artifact.** Pre-fix, the
+count stayed 18 while the denominator fell 41 -> 38 (rate up 43.9% -> 47.4%)
+purely because two correct abstains were lost. A rate that rises when
+recall falls is the denominator artifact from item 2 in reverse.
+
+---
+
+## 2026-09-20 — Rejected design: repair on an empty result
+
+**Proposal (2026-09-18, MJ's spec):** add `empty_entity_bound` as a third repair
+trigger: when every executed candidate returns nothing on an entity-bound
+query, make one repair attempt before committing to `NO_DATA`. Motivation:
+L12 ("Coca-Cola's ticker") fails as a wrong query, `name = 'The Coca-Cola
+Company'` against a stored name that differs, which returns empty and is
+indistinguishable from a real absence.
+
+**Rejected, 2026-09-20, and removed from the code.** Repair works by feeding an
+error message back to the generator. An empty result produces no error: the
+query succeeded and the schema was valid. The generator was told "this
+returned no rows" and had nothing to act on but its own guess. The mechanism
+cannot work; **no model size fixes a feedback loop with no feedback.** MJ
+identified this; I had read the same result as a 7B weakness.
+
+**Evidence, consistent with the mechanism (not the reason for the decision):**
+0 rescued of 15 attempts on the 7B, and L12, the motivating case, came back
+unchanged. The decision rests on the mechanism, so it does not wait for a 30B
+run and would not be reversed by one.
+
+**What it costs to keep this rejected:** a wrong exact-match literal on an
+entity-bound query is reported `NO_DATA`. L12 is an accepted false abstain. It
+already scored 0 on execution accuracy, so accuracy is unchanged; it is a false
+abstain that looks like a working safety mechanism. That is a known
+limitation, recorded here and in `result_shape.py`, not a bug to chase.
+
+**Do not re-propose without a new kind of signal.** A repair on an empty result
+would need feedback that separates a wrong literal from a real absence (for
+instance that no company by that name exists). Nothing in the pipeline produces
+one, and "retry with a different prompt" is not one.
+
+**What remains of Task 5:** `exec_error` only (message-bearing), pending the
+30B, with the cut criterion above. `schema_mismatch` is built, tested and
+disabled (`repair.ENABLED_TRIGGERS`); re-enabling is one line. An empty
+entity-bound result now goes straight to `NO_DATA` with no generation call.
+
+### Reproducibility corrections found on the way
+
+- The Bridges-2 per-case reports were **gitignored and untracked**, though this
+  file, the spec and the tests called them "committed". Tests claiming to
+  reproduce them exactly silently skipped on a fresh clone. `.gitignore` now
+  excepts `reports/eval_bridges2_*`; they still need committing.
+- The derived figures came from a throwaway scratch script that did not survive
+  a reboot. It is now `evals/replay_derived.py`, tested, and pinned to the
+  spec's 1b/1f numbers. Every figure it produces is **derived**, and the
+  Bridges-2 batch below replaces them with measured ones.
+
+### Bridges-2 batch (approved 2026-09-20)
+
+One submission round, both models (30B fp16, 32B AWQ; the AWQ-vs-fp16 confound
+from Phase 5 is unchanged and unaddressed here). It measures, replacing every
+derived figure:
+
+- the NO_DATA rule on 30B and 32B (was replay-derived);
+- the union predicate (was 7B only);
+- the tautology check (no evidence at any size; never fired on the 7B);
+- repair on `exec_error` only;
+- all five headline metrics (decision/strict precision, decision/strict recall,
+  reason-code accuracy) as count and rate, plus coverage and hallucinated rate;
+- **per-candidate guardrail reasons** and per-candidate result shape in every
+  record, so 6c is replayable and the "excludes 6c" caveat on derived figures
+  can be dropped, and survivor unanimity is checked, not bounded.
+
+After it lands: label each resulting figure **measured**, and strike the derived
+rows (do not delete them: `evals/replay_derived.py` remains their provenance).

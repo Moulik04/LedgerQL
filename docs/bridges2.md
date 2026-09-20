@@ -198,3 +198,48 @@ Task 5 complete. Proceed to Task 6 (consolidated comparison report and recommend
 
 <!-- Further entries appended by Task 6 as real commands are run and
      real output comes back. -->
+
+## Phase 5.5 measurement batch (approved 2026-09-20)
+
+One submission round, both models. Everything below is run by the human
+partner (password-only SSH; re-verified 2026-09-20: non-interactive `ssh -o
+BatchMode=yes bridges2` returns `Permission denied`).
+
+What it measures, replacing derived figures: the NO_DATA rule (30B and 32B),
+the union predicate, the tautology check, repair on `exec_error` only, all five
+headline abstain metrics, and per-candidate guardrail reasons and result shape
+(`candidates` in every per-case record). See DECISIONS.md, "Bridges-2 batch".
+
+**Why a sync step.** The cluster checkout clones from GitHub; local `main` is
+ahead of `origin` and the Phase 5.5 work is uncommitted, so the job would run
+stale code. `sync_code.sh` overlays the working tree and verifies checksums.
+
+```bash
+# on the laptop, from the repo root (one password prompt)
+scripts/bridges2/sync_code.sh --dry-run   # optional: list the 41 files
+scripts/bridges2/sync_code.sh             # send + verify; must print "OK: N files identical"
+
+# then on the cluster
+ssh bridges2
+cd ~/ledgerql-bridges2/ledgerql
+sbatch scripts/bridges2/run_qwen3_coder_30b_fp16.sbatch
+sbatch scripts/bridges2/run_qwen25_coder_32b_awq.sbatch
+squeue -u $USER
+```
+
+Pull results back with the `ssh ... cat` pattern (no `scp`). **Do not overwrite
+the existing `reports/eval_bridges2_qwen3_30b.*` / `..._qwen25_32b.*`**: they are
+the source `evals/replay_derived.py` reproduces every derived figure from. Save
+the new ones beside them:
+
+```bash
+ssh bridges2 'cat ~/ledgerql-bridges2/ledgerql/reports/eval_bridges2_Qwen-Qwen3-Coder-30B-A3B-Instruct_<DATE>.jsonl' \
+  > reports/eval_bridges2_qwen3_30b_measured.jsonl
+ssh bridges2 'cat ~/ledgerql-bridges2/ledgerql/reports/eval_bridges2_Qwen-Qwen3-Coder-30B-A3B-Instruct.md' \
+  > reports/eval_bridges2_qwen3_30b_measured.md
+# likewise for Qwen-Qwen2.5-Coder-32B-Instruct-AWQ -> ..._qwen25_32b_measured.*
+```
+
+The `.gitignore` now excepts `reports/eval_bridges2_*` so these can be tracked.
+Nothing here has been run on the cluster yet; the sbatch scripts are unchanged
+and were last verified in Phase 5.
