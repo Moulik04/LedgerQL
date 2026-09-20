@@ -8,6 +8,7 @@ from evals.diagnose_abstains import (
     main,
     norm_behaviour,
 )
+from tests.support import require_fixture
 
 
 def test_norm_behaviour_recognizes_each_canonical_value():
@@ -127,10 +128,7 @@ def test_main_reproduces_the_real_committed_30b_report_exactly(capsys):
 
     report_path = Path("reports/eval_bridges2_qwen3_30b.jsonl")
     gold_path = Path("evals/gold.jsonl")
-    if not report_path.exists():
-        import pytest
-
-        pytest.skip("local-only Bridges-2 report not present in this checkout")
+    require_fixture(report_path)
 
     records = load_jsonl(report_path)
     gold = {c["id"]: c for c in load_jsonl(gold_path)}
@@ -151,4 +149,9 @@ def test_main_reproduces_the_real_committed_30b_report_exactly(capsys):
     assert "abstain recall (decision)              58.8%" in out
     assert "abstain recall (strict)                26.5%" in out
     assert "reason-code accuracy                   40.9%" in out
+    # The rate alone is a denominator artifact: catching more required
+    # abstains with a placeholder reason grows the denominator and can push
+    # the rate down while the count of correctly-reasoned abstains rises.
+    # Always print the count beside it.
+    assert "(9/22 abstains that were the right call named the right reason)" in out
     assert "always-abstain baseline precision      33.0%" in out
