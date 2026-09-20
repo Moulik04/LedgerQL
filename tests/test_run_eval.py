@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 
 from evals.run_eval import results_match
@@ -504,3 +506,29 @@ def test_relaxation_does_not_apply_to_other_tiers():
         assert score_guardrail_case(case, wrong)["reason_correct"] is False, tier
         right = {"answer": None, "reason_code": "SCHEMA_MISMATCH", "guardrail_events": []}
         assert score_guardrail_case(case, right)["reason_correct"] is True, tier
+
+
+def test_main_writes_reports_to_the_requested_directory_and_defaults_to_reports(
+    tmp_path, monkeypatch
+):
+    # Cluster runs write to a job-specific, gitignored directory so they never
+    # modify the tracked reports/eval.md (which blocked a `git pull` and let two
+    # jobs run the wrong commit). Local `make eval` keeps the default.
+    from evals import run_eval
+
+    seen = []
+    monkeypatch.setattr(
+        run_eval,
+        "run",
+        lambda gold, db: {"overall_execution_accuracy": 0.5, "hallucinated_number_rate": 0.0},
+    )
+    monkeypatch.setattr(
+        run_eval,
+        "write_reports",
+        lambda summary, reports_dir: seen.append(reports_dir) or (Path("a.md"), Path("b.jsonl")),
+    )
+
+    run_eval.main(["--reports-dir", str(tmp_path / "runs" / "123")])
+    run_eval.main([])
+
+    assert seen == [tmp_path / "runs" / "123", Path("reports")]

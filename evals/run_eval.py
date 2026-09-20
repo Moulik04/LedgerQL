@@ -465,14 +465,21 @@ def write_reports(summary: dict, reports_dir: Path) -> tuple[Path, Path]:
     return md_path, jsonl_path
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--gold", default="evals/gold.jsonl")
     ap.add_argument("--db", default="data/ledgerql.duckdb")
-    args = ap.parse_args()
+    ap.add_argument(
+        "--reports-dir",
+        default="reports",
+        help="where to write eval.md and eval_<date>.jsonl. Cluster runs pass a "
+        "job-specific, gitignored directory so they never modify the tracked "
+        "reports/eval.md.",
+    )
+    args = ap.parse_args(argv)
 
     summary = run(Path(args.gold), args.db)
-    md_path, jsonl_path = write_reports(summary, Path("reports"))
+    md_path, jsonl_path = write_reports(summary, Path(args.reports_dir))
     print(f"Wrote {md_path} and {jsonl_path}")
     print(f"Overall execution accuracy: {summary['overall_execution_accuracy']:.1%}")
     print(f"Hallucinated-number rate: {summary['hallucinated_number_rate']:.1%}")

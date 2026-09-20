@@ -20,6 +20,14 @@ SANITIZED_MODEL="$(echo "$REPO_ID" | tr ':/' '-')"
 ROOT="$HOME/ledgerql-bridges2"
 VLLM_PYTHON="$ROOT/vllm-env/.venv/bin"
 
+# HARD STOP, before any module load or GPU work: the job runs only on the exact
+# commit its figures will be attributed to. EXPECTED_COMMIT is mandatory, so a
+# hand-typed `sbatch` that skips scripts/bridges2/submit.sh cannot skip this.
+# (Incident 2026-09-20: a pull aborted, HEAD stayed on an old commit, the
+# mismatch was printed, and both jobs ran the wrong code anyway.)
+: "${EXPECTED_COMMIT:?EXPECTED_COMMIT is required -- submit with scripts/bridges2/submit.sh <full-commit-hash>}"
+bash "$ROOT/ledgerql/scripts/bridges2/assert_commit.sh" "$EXPECTED_COMMIT" "$ROOT/ledgerql"
+
 # A real smoke test found vLLM's flashinfer sampler JIT-compiles a CUDA
 # kernel at model-load time and fails ("CUDA compiler and CUDA toolkit
 # headers are incompatible") against the default cuda/12.6.1 module --
@@ -108,14 +116,30 @@ done
 echo "Confirming GPU(s) are actually being used (not silently falling back to CPU)..."
 nvidia-smi --query-gpu=index,name,memory.used,memory.total --format=csv
 
-echo "Running eval with LLM_BACKEND=vllm OLLAMA_MODEL=$REPO_ID ..."
-LLM_BACKEND=vllm OLLAMA_MODEL="$REPO_ID" uv run python evals/run_eval.py --db data/ledgerql.duckdb
+# Results go to a job-specific, gitignored directory -- NOT reports/eval.md, which
+# is tracked: an old run left it modified, which made `git pull` abort. Nothing
+# a run writes may touch a tracked file.
+OUT="reports/runs/${SLURM_JOB_ID:-manual-$(date +%s)}"
+mkdir -p "$OUT"
 
-DATE_STAMP="$(date +%Y-%m-%d)"
-cp reports/eval.md "reports/eval_bridges2_${SANITIZED_MODEL}.md"
-cp "reports/eval_${DATE_STAMP}.jsonl" "reports/eval_bridges2_${SANITIZED_MODEL}_${DATE_STAMP}.jsonl"
+echo "Running eval with LLM_BACKEND=vllm OLLAMA_MODEL=$REPO_ID -> $OUT ..."
+LLM_BACKEND=vllm OLLAMA_MODEL="$REPO_ID" uv run python evals/run_eval.py --db data/ledgerql.duckdb --reports-dir "$OUT"
+
+# Provenance: what ran, on which commit, so every figure is attributable.
+cat > "$OUT/run_meta.json" <<META
+{
+  "commit": "$(git rev-parse HEAD)",
+  "expected_commit": "$EXPECTED_COMMIT",
+  "model": "$REPO_ID",
+  "tensor_parallel_size": $TP_SIZE,
+  "slurm_job_id": "${SLURM_JOB_ID:-}",
+  "host": "$(hostname)",
+  "finished_utc": "$(date -u +%FT%TZ)"
+}
+META
 
 echo ""
-echo "Done. Results at:"
-echo "  $ROOT/ledgerql/reports/eval_bridges2_${SANITIZED_MODEL}.md"
-echo "  $ROOT/ledgerql/reports/eval_bridges2_${SANITIZED_MODEL}_${DATE_STAMP}.jsonl"
+echo "Done. Results at (pull back with: ssh bridges2 'cat <path>' > local-file):"
+echo "  $ROOT/ledgerql/$OUT/eval.md"
+echo "  $ROOT/ledgerql/$OUT/eval_$(date +%Y-%m-%d).jsonl"
+echo "  $ROOT/ledgerql/$OUT/run_meta.json"

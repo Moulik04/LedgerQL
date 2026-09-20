@@ -1,8 +1,12 @@
 #!/usr/bin/env bash
+# FALLBACK ONLY. Prefer committing, pushing, and running submit.sh on the
+# cluster (a git pull, then a verified commit). Use this only for work you
+# cannot push. After a sync, `git rev-parse HEAD` on the cluster still names the
+# OLD commit, so the checksum comparison below is the only attribution check.
+#
 # Run on your LAPTOP, from the repo root. Sends the WORKING TREE's source to
-# Bridges-2, because the cluster's checkout is stale (it clones from GitHub;
-# local main has commits origin lacks, and Phase 5.5 work is uncommitted) and
-# the job runs whatever is in ~/ledgerql-bridges2/ledgerql.
+# Bridges-2, because the cluster's checkout clones from GitHub and may be behind
+# the work; the job runs whatever is in ~/ledgerql-bridges2/ledgerql.
 #
 # One password prompt: SSH connection sharing carries all three steps. Verifies
 # by checksum that the cluster now holds byte-identical source.
