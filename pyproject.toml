@@ -36,6 +36,10 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["ledgerql"]
 
+# Ruff is the linter only. Black is the authoritative formatter: `make lint`,
+# pre-commit and CI all run `black --check`. `ruff format` is advisory and is not
+# run anywhere; it disagrees with black on some constructs (e.g. how a long
+# `assert ..., message` is wrapped), so do not run it over the tree.
 [tool.ruff]
 line-length = 100
 target-version = "py311"
