@@ -11,24 +11,22 @@ from pathlib import Path
 import duckdb
 import pytest
 
+from tests.support import require_fixture
+
 # Mirror ledgerql/data/build.py's default-path resolution exactly, so these
-# acceptance tests verify whatever database `make data` actually built --
-# rather than silently skipping (via pytestmark below) when LEDGERQL_DB_PATH
-# points somewhere else.
+# acceptance tests verify whatever database `make data` actually built.
 DB_PATH = Path(
     os.environ.get(
         "LEDGERQL_DB_PATH", str(Path(__file__).parent.parent / "data" / "ledgerql.duckdb")
     )
 )
 
-pytestmark = pytest.mark.skipif(
-    not DB_PATH.exists(),
-    reason="data/ledgerql.duckdb not found — run `make data` first",
-)
-
 
 @pytest.fixture(scope="module")
 def con():
+    # A missing database FAILS these tests (it used to skip them, which reported
+    # green on a fresh clone without verifying a single figure).
+    require_fixture(DB_PATH, hint="Build it with `make data` first.")
     connection = duckdb.connect(str(DB_PATH), read_only=True)
     yield connection
     connection.close()

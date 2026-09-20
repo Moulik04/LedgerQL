@@ -3,7 +3,7 @@ from evals.abstain_scoring import (
     acceptable_reason_codes,
     compute_abstain_metrics,
 )
-from tests.support import require_fixture
+from tests.support import BRIDGES2_HINT, require_fixture
 
 
 def test_acceptable_reason_codes_includes_gold_reason_code():
@@ -149,7 +149,7 @@ def test_compute_abstain_metrics_reproduces_the_real_30b_report_numbers():
 
     report_path = Path("reports/eval_bridges2_qwen3_30b.jsonl")
     gold_path = Path("evals/gold.jsonl")
-    require_fixture(report_path)
+    require_fixture(report_path, hint=BRIDGES2_HINT)
 
     per_case = [json.loads(line) for line in report_path.read_text().splitlines() if line.strip()]
     cases_by_id = {
@@ -254,7 +254,7 @@ def test_recall_correction_on_the_real_30b_report():
 
     report_path = Path("reports/eval_bridges2_qwen3_30b.jsonl")
     gold_path = Path("evals/gold.jsonl")
-    require_fixture(report_path)
+    require_fixture(report_path, hint=BRIDGES2_HINT)
 
     per_case = [json.loads(line) for line in report_path.read_text().splitlines() if line.strip()]
     cases_by_id = {

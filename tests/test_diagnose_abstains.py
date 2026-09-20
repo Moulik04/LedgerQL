@@ -8,7 +8,7 @@ from evals.diagnose_abstains import (
     main,
     norm_behaviour,
 )
-from tests.support import require_fixture
+from tests.support import BRIDGES2_HINT, require_fixture
 
 
 def test_norm_behaviour_recognizes_each_canonical_value():
@@ -128,7 +128,7 @@ def test_main_reproduces_the_real_committed_30b_report_exactly(capsys):
 
     report_path = Path("reports/eval_bridges2_qwen3_30b.jsonl")
     gold_path = Path("evals/gold.jsonl")
-    require_fixture(report_path)
+    require_fixture(report_path, hint=BRIDGES2_HINT)
 
     records = load_jsonl(report_path)
     gold = {c["id"]: c for c in load_jsonl(gold_path)}

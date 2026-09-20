@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 
 from evals import replay_derived as rd
-from tests.support import require_fixture
+from tests.support import BRIDGES2_HINT, require_fixture
 
 GOLD = {
     "A": {"id": "A", "expected": "ABSTAIN", "reason_code": "NO_DATA", "question": "q a"},
@@ -15,9 +15,13 @@ SET_SQL = "SELECT name FROM v_total_assets WHERE fiscal_year = 2024 AND value < 
 
 def rec(i, sql, rows, *, answered=True, reason=None, conf=1.0):
     return {
-        "id": i, "generated_sql": sql, "rows": rows, "confidence": conf,
-        "answer": "x" if answered else None, "reason_code": reason,
-    }  # fmt: skip
+        "id": i,
+        "generated_sql": sql,
+        "rows": rows,
+        "confidence": conf,
+        "answer": "x" if answered else None,
+        "reason_code": reason,
+    }
 
 
 def test_naive_rule_flips_every_empty_answer_including_the_one_that_is_a_valid_answer():
@@ -72,7 +76,7 @@ def _gold():
 
 
 def test_spec_1b_and_1f_figures_reproduce_on_the_real_30b_report():
-    require_fixture(REPORT)
+    require_fixture(REPORT, hint=BRIDGES2_HINT)
     rows = {r["label"]: r for r in rd.derive_table(REPORT, _gold())}
     base = rows["baseline (+intent)"]
     assert (round(base["precision_decision"], 3), round(base["recall_decision"], 3)) == (
