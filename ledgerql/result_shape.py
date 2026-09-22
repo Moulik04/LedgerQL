@@ -169,6 +169,20 @@ def is_tautologically_empty(sql: str | None) -> bool:
     1 = 0`` rather than invent a column -- the honest answer written in the only
     language the prompt allowed. It is read off the AST, so it needs no list of
     concepts and holds for any concept a held-out question might ask about.
+
+    **This check is inherently model-dependent, unlike `intent.py`'s regex on
+    the question text.** It detects a specific *generator behaviour* -- writing
+    a degenerate, provably-empty query instead of inventing a column -- not a
+    property of the question or the schema. A model that never writes SQL
+    shaped this way will never trip it, refusal-worthy question or not; the
+    fallback for that model is whatever else classifies the case (NO_DATA,
+    SCHEMA_MISMATCH via a stray column, or an abstain further downstream), not
+    this check under another name. Measured 2026-09-20 (Bridges-2, DECISIONS.md):
+    fired on exactly two cases (H03, O07) on Qwen3-Coder-30B and on zero cases
+    on Qwen2.5-Coder-32B, whose generations for the same questions took a
+    different, non-tautological shape. Do not read "it fired" on one model as
+    evidence it would fire, or that the underlying refusal is caught some other
+    way, on a different one.
     """
     if not sql:
         return False

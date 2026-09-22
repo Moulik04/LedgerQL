@@ -305,10 +305,17 @@ the report and this script print `correct/decision-correct` beside it.
 
 ## 6b. Repair scoring (`evals/repair_scoring.py`)
 
-`ledgerql/repair.py` makes one repair attempt before abstaining, from three
-triggers (`exec_error`, `schema_mismatch`; only `exec_error` is enabled, and an
-empty result is never repaired -- it carries no error to feed back). The report's
-`## Repair` table is split by trigger so each one's value is separable.
+`ledgerql/repair.py` makes one repair attempt before abstaining, from two
+triggers (`exec_error`, `schema_mismatch`; an empty result is never repaired --
+it carries no error to feed back). **Neither trigger is enabled by default as
+of 2026-09-21** (`ENABLED_TRIGGERS` is empty): `schema_mismatch` was never
+measured, and `exec_error` was measured on Bridges-2 and cut -- 5 rescues on
+the 30B, 3 of them converting a required abstain into a wrong answer against 1
+correct, net negative. See DECISIONS.md, "exec_error cut, criterion
+corrected," and `evals/replay_repair_off.py` for the counterfactual replay
+under the shipped (repair-off) config. Re-enabling either is one line. The
+report's `## Repair` table is split by trigger so each one's value is
+separable.
 *Rescued* means the repair turned an abstain into an answer; *rescued
 correct* means the answer matches gold on a case where answering is right;
 *should have abstained* means it answered a case that required a refusal.
@@ -403,3 +410,66 @@ actually produced. Because `consensus.vote()` decides by majority, a
 corrupted reason on a candidate that shares its group's majority vote changes
 nothing this script recomputes, so a clean run is evidence the recorded
 routing follows from the log, not evidence the log itself is accurate.
+
+## 6e. Bridges-2: derived vs measured (2026-09-20 run, retrieved 2026-09-21)
+
+The point of labelling a figure **derived** was always to make this
+comparison possible once a real run landed. It has, with a mixed verdict:
+**recall's derived upper bound correctly bracketed the measured figure on
+both models** (a real methodology check, not just a hope stated in advance);
+**reason-code accuracy's gap did not close** even under the fullest derived
+row, for a reason that turns out to be mechanical rather than a missing
+pipeline feature -- see below.
+
+The exact three figures DECISIONS.md §2 struck (`intent.py`-only substitution
+into the old committed reports, `evals/replay_derived.py`'s `baseline
+(+intent)` row -- the narrowest derivation, assuming nothing else about the
+pipeline changes):
+
+| metric | 30B derived | 30B measured | Δ | 32B derived | 32B measured | Δ |
+|---|---|---|---|---|---|---|
+| reason-code accuracy | 56.5% | 63.6% | +7.1pp | 53.3% | 52.5% | −0.8pp |
+| abstain recall (decision) | 61.8% | 82.4% | +20.6pp | 73.5% | 85.3% | +11.8pp |
+| adversarial catch rate | 100% | 100% | 0pp | 100% | 100% | 0pp |
+
+Recall's gap is expected, not a methodology miss: this derived row replays
+*only* `intent.py`'s pre-generation refusals into the old reports. It
+predates the NO_DATA rule, the tautology check and repair -- all of which the
+real run also has live and all of which raise recall further. The fuller
+derived rows (`entity-bound NO_DATA` + `tautology check`, upper bound --
+`evals/replay_derived.py`'s closest approximation to the full pipeline)
+bracket measured recall much more tightly: 91.2% (30B) and 91.2% (32B)
+against measured 82.4% / 85.3% -- correctly an *upper* bound (it assumes
+every winner-empty entity-bound record flips; a real run's survivor-unanimity
+check is stricter), and correctly above measured on both.
+
+**Reason-code accuracy at the fuller derived row (`+ tautology check, upper
+bound`) is mechanical, not a repair effect -- checked, not assumed:** it
+reads 56.8% (30B, 21/37) and 48.8% (32B, 21/43) against measured 63.6%
+(21/33) and 52.5% (21/40). The *numerator* (strict-correct abstains) is
+identical on both models; only the *denominator* (decision-correct abstains)
+differs, and it's smaller in the measured run. That is exactly what an upper
+bound predicts: it assumes every winner-empty entity-bound record is NO_DATA,
+which over-counts decision-correct abstains relative to the real
+survivor-unanimity check, diluting the ratio. It is not evidence that repair
+(or anything else) added correct reason codes -- and it can't be read as one
+either way, since the derived row replays a *different, earlier* (09-14) set
+of real generations than the one measured (09-20); the two were never the
+same run scored two ways. `evals/replay_repair_off.py` replays the shipped
+(repair-off) config exactly, from the measured run's own logs, which is the
+comparison to use for what cutting `exec_error` changes (DECISIONS.md,
+"exec_error cut, criterion corrected") -- not this one.
+
+**Hallucinated-number rate: measured 0.0% on both models**, the same as
+every prior run. This is the project's headline safety number (§5), so it is
+reported here even though it did not move: the pipeline's own verifier
+already routes anything it cannot ground to `UNGROUNDED_ANSWER` before an
+answer is recorded, so a wrong-but-*grounded* answer (a number that is real,
+just from the wrong result set) scores 0% hallucinated by design -- see
+DECISIONS.md for which of the `exec_error` rescues were exactly that.
+
+**The tautology check's 100%-vs-0% split between models is not itself
+evidence of anything model-general.** It detects a specific generator
+behaviour (writing a degenerate, provably-empty query), not a property of the
+question -- see `ledgerql/result_shape.py`'s `is_tautologically_empty`
+docstring and DECISIONS.md.
