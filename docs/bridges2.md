@@ -256,11 +256,15 @@ squeue -u $USER
 
 **Do not `git pull` on the cluster while jobs are running.** `run_model_eval.sh`
 is read by bash incrementally, and the eval imports code lazily; changing either
-under a running job can produce a torn run. This matters right now: jobs
-46583436 (30B) and 46583437 (32B) are running on `85d38a9`, which predates
-`submit.sh`, `assert_commit.sh` and the `reports/runs/` layout. Those two jobs
-will still write `reports/eval.md` and `reports/eval_bridges2_*` in the old
-layout; after they finish, `git checkout -- reports/eval.md` before the next pull.
+under a running job can produce a torn run. This mattered for the first
+correct-commit submission: jobs 46584652 (30B) and 46584653 (32B) ran on
+`85d38a9`, which predates `submit.sh`, `assert_commit.sh` and the `reports/runs/`
+layout. Those two jobs wrote `reports/eval.md` and `reports/eval_bridges2_*` in
+the old layout; they finished 2026-09-20 and results were retrieved and
+verified 2026-09-21 (see DECISIONS.md for the retrieval entry, including a
+job-ID correction: an earlier note here and in DECISIONS.md misnamed these as
+46583436/46583437, which were actually the cancelled wrong-commit jobs from the
+entry above). `git checkout -- reports/eval.md` before the next pull.
 
 **Why `sync_code.sh` is no longer the default.** It overlaid the working tree
 because the cluster clones from GitHub and local `main` was ahead of `origin`

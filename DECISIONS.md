@@ -893,7 +893,7 @@ rows (do not delete them: `evals/replay_derived.py` remains their provenance).
 run. HEAD stayed at `5af786c`. The hash check printed the mismatch, and the
 `sbatch` lines ran anyway, so both jobs ran the wrong code. They were cancelled,
 `eval.md` discarded, the pull re-run, the hash confirmed, and both resubmitted on
-`85d38a9` (jobs 46583436 and 46583437). No figure was produced from the wrong
+`85d38a9` (jobs 46584652 and 46584653). No figure was produced from the wrong
 commit.
 
 **The class of failure.** A check that only works when someone is reading its
@@ -921,7 +921,7 @@ including the exact incident):**
 **Operational rule found while doing this:** never `git pull` on the cluster
 while jobs run. `run_model_eval.sh` is read incrementally by bash and the eval
 imports code lazily; changing either under a running job can produce a torn run.
-The fix above therefore cannot reach the cluster until jobs 46583436/7 finish; those
+The fix above therefore cannot reach the cluster until jobs 46584652/3 finish; those
 two jobs predate it and will write the old layout.
 
 **Also closed: `tests/test_data.py` no longer skips** when the built DuckDB is
@@ -935,3 +935,87 @@ the pipeline's post-consensus routing (tautology, NO_DATA, LOW_AGREEMENT, answer
 is reproducible from the log, and (3) that the derived-replay bounds contain the
 exact answer. It is what lets the "excludes 6c" caveat be dropped with evidence
 rather than by assertion, and it exits non-zero if any check fails.
+
+---
+
+## 2026-09-21 — Bridges-2 results retrieved: job-ID correction and provenance
+
+**Job-ID correction.** The correct-commit jobs from the 2026-09-20 resubmission
+are **46584652 (30B) and 46584653 (32B)**, not 46583436/46583437. Those latter
+IDs belonged to the *cancelled wrong-commit* run described in the entry above;
+a stale pair got carried forward and recorded here and in `docs/bridges2.md` as
+if they were the resubmission. Every place that named 46583436/46583437 as a
+measurement run has been corrected to 46584652/46584653 (`reports/` had no
+occurrence of either ID). One consequence, harmless but worth recording: the
+"never `git pull` ... until jobs 46583436/7 finish" guard note was keyed to job
+IDs that were already dead (the cancelled run) rather than the jobs actually
+writing to the checkout. It caused no harm because no pull happened between
+submission and retrieval regardless (see provenance below), but it was
+checking the wrong thing.
+
+**Completion verified before anything was used** — this was not checked on the
+cluster; the retrieval `tail` commands there used the same wrong job IDs above,
+so they tailed nothing meaningful. Verified here instead, from
+`ledgerql_measured_2026-09-20.tgz` extracted to a staging directory
+(`/tmp/bridges2_measured`, not the repo root, so the undated `.md` filenames
+could not collide with the tracked `reports/eval_bridges2_qwen{3_30b,25_32b}.*`
+baseline):
+- Both `.out` logs end with the pipeline's own `Done.` message and a printed
+  accuracy (30B: 62.0%, 32B: 58.0%); both `.err` logs contain no traceback,
+  exception, or CUDA/OOM/kill message.
+- Both per-case `.jsonl` files have exactly 103 records with 103 unique `id`s,
+  matching `evals/gold.jsonl`'s 103 unique case IDs exactly (no missing, no
+  extra, no duplicates) — one record per gold case, checked by set comparison,
+  not just line count.
+
+Neither run is partial; both were used.
+
+**Provenance.** HEAD was verified by hand as
+`85d38a9e597ea389010750ce1d556ef31363e18b` immediately before `sbatch`. It was
+**not** re-verified at retrieval time — stated plainly, that check rests on the
+manual verification before submission, not on anything re-checked now. No
+`git pull` occurred on the cluster between submission and retrieval (the
+operational rule from the entry above), so the checkout could not have moved
+in between; that is the basis for trusting the manual check still holds, not a
+fresh check. These two jobs predate `submit.sh`'s `EXPECTED_COMMIT` assert and
+`run_meta.json` stamping, so neither job wrote a `run_meta.json` — this run's
+attribution is the manual HEAD check plus the no-pull argument, nothing more.
+
+**The tracked-file oddity, resolved.** On the cluster, every `eval_bridges2_*`
+file in `reports/`, including ones from the 2026-09-14 run, shows as untracked
+(`??`). This is not a bug: `run_eval.py` writes output under the full HF model
+name (`eval_bridges2_Qwen-Qwen3-Coder-30B-A3B-Instruct.md` /
+`..._2026-09-20.jsonl`, as seen in this tarball), and no run has ever committed
+files under those names — only hand-copied files under the short convention
+(`eval_bridges2_qwen3_30b.*`, `eval_bridges2_qwen25_32b.*`) get committed. Those
+short-name files are what's actually tracked (confirmed via `git ls-files`) and
+clean at HEAD; they were added in `ea7397c` ("A job keeps its receipts"), the
+commit immediately *before* `85d38a9` ("A job gets its paperwork in order") in
+the same session — not "at 85d38a9" as assumed going in. `85d38a9` touched only
+`DECISIONS.md`, `docs/bridges2.md`, plans/specs, `evals/README.md` and
+`scripts/bridges2/sync_code.sh`; it added no report files. Confirmed which
+filenames the replay script and reproduction tests actually read:
+`evals/replay_derived.py`, `tests/test_abstain_scoring.py`,
+`tests/test_diagnose_abstains.py` and `tests/test_replay_derived.py` all
+hardcode `reports/eval_bridges2_qwen3_30b.jsonl` — the tracked short name.
+**Nothing in `evals/` or `tests/` currently reads the tracked
+`eval_bridges2_qwen25_32b.jsonl` at all**; it sits in git as the 32B baseline
+counterpart with no reader (follow-up: either give it a reader and a pinning
+test, or record why it's unneeded and stop tracking it).
+
+Per `docs/bridges2.md`'s existing instruction (do not overwrite the tracked
+baseline, which `evals/replay_derived.py` reproduces every derived figure
+from), the new per-case files were saved beside it, not over it:
+`reports/eval_bridges2_qwen3_30b_measured.jsonl` (from
+`eval_bridges2_Qwen-Qwen3-Coder-30B-A3B-Instruct_2026-09-20.jsonl`) and
+`reports/eval_bridges2_qwen25_32b_measured.jsonl` (from
+`eval_bridges2_Qwen-Qwen2.5-Coder-32B-Instruct-AWQ_2026-09-20.jsonl`), both
+dated 2026-09-20. The matching `.md` reports from the tarball were read for
+their headline numbers but not copied into `reports/` (only the
+`_measured.jsonl` naming was asked for, and the `.md` filenames are the ones
+that collide with the tracked baseline).
+
+**Analysis of these two files — check_replay results, the tautology-check and
+`exec_error`-cut findings, and the measured headline figures — is in the
+follow-up entries below, not here:** this entry is the provenance record only,
+committed with the raw data before any of that analysis was done.
