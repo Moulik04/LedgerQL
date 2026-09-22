@@ -66,9 +66,10 @@ def test_rules_do_not_mutate_their_input():
     assert recs[0]["answer"] == "x" and recs[0]["reason_code"] is None
 
 
-# --- pinned against the real Bridges-2 report. If the file is absent the test
+# --- pinned against the real Bridges-2 reports. If a file is absent the test
 # FAILS (tests.support.require_fixture): it is evidence and must be tracked.
 REPORT = Path("reports/eval_bridges2_qwen3_30b.jsonl")
+REPORT_32B = Path("reports/eval_bridges2_qwen25_32b.jsonl")
 
 
 def _gold():
@@ -109,3 +110,31 @@ def test_spec_1b_and_1f_figures_reproduce_on_the_real_30b_report():
         taut["reason_correct"],
         taut["reason_denominator"],
     ) == (0.912, 21, 37)
+
+
+def test_spec_1b_and_1f_figures_reproduce_on_the_real_32b_report():
+    # The 32B tracked baseline had no reader or pinning test until this one --
+    # its DECISIONS.md §2 derived figures (53.3%/73.5%) were checked once and
+    # never regression-protected, the class of gap "reproducibility
+    # corrections found on the way" exists to close. Mirrors the 30B test
+    # above; the two reports are separate models and not expected to agree.
+    require_fixture(REPORT_32B, hint=BRIDGES2_HINT)
+    rows = {r["label"]: r for r in rd.derive_table(REPORT_32B, _gold())}
+    base = rows["baseline (+intent)"]
+    assert (
+        round(base["recall_decision"], 3),
+        base["reason_correct"],
+        base["reason_denominator"],
+    ) == (
+        0.735,
+        16,
+        30,
+    )
+    assert round(base["reason_code_accuracy"], 3) == 0.533
+    naive = rows["naive: any empty/all-NULL -> NO_DATA"]
+    assert naive["g06_answered"] is False  # the finding holds on this model too
+    upper = rows["entity-bound NO_DATA (upper bound)"]
+    lower = rows["entity-bound NO_DATA (lower bound)"]
+    assert round(upper["recall_decision"], 3) == 0.912
+    assert round(lower["recall_decision"], 3) == 0.882
+    assert upper["g06_answered"] is True and lower["g06_answered"] is True
