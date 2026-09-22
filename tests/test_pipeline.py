@@ -572,6 +572,11 @@ def _patch_pipeline_db(
 
 
 def test_ask_repairs_once_after_exec_error_and_answers(monkeypatch):
+    # exec_error is disabled by default (cut 2026-09-21, DECISIONS.md); this
+    # test exercises the mechanism with it explicitly re-enabled, same as
+    # test_ask_repairs_schema_mismatch_when_explicitly_enabled does for
+    # schema_mismatch.
+    monkeypatch.setattr(pipeline.repair_module, "ENABLED_TRIGGERS", pipeline.repair_module.TRIGGERS)
     records = _patch_audit(monkeypatch)
     _patch_classify_in_scope(monkeypatch)
     _patch_generate(monkeypatch, sqls=["SELEC BAD"] * pipeline.N_CANDIDATES)
@@ -593,6 +598,7 @@ def test_ask_repairs_once_after_exec_error_and_answers(monkeypatch):
 
 
 def test_ask_abstains_with_the_original_reason_when_the_repair_also_fails(monkeypatch):
+    monkeypatch.setattr(pipeline.repair_module, "ENABLED_TRIGGERS", pipeline.repair_module.TRIGGERS)
     records = _patch_audit(monkeypatch)
     _patch_classify_in_scope(monkeypatch)
     _patch_generate(monkeypatch, sqls=["SELEC BAD"] * pipeline.N_CANDIDATES)
@@ -623,6 +629,24 @@ def test_ask_never_repairs_a_stray_table_request(monkeypatch):
     assert result["answer"] is None
     assert result["reason_code"] == "SCHEMA_MISMATCH"
     assert calls == []
+    assert result.get("repair") is None
+    assert len(records) == 1
+
+
+def test_ask_does_not_repair_exec_error_by_default(monkeypatch, repair_calls):
+    # Measured on Bridges-2 and cut 2026-09-21 (DECISIONS.md): net-negative,
+    # more required abstains converted to wrong answers than answers rescued
+    # correctly. Mirrors test_ask_does_not_repair_schema_mismatch_by_default.
+    records = _patch_audit(monkeypatch)
+    _patch_classify_in_scope(monkeypatch)
+    _patch_generate(monkeypatch, sqls=["SELEC BAD"] * pipeline.N_CANDIDATES)
+    _patch_pipeline_db(monkeypatch, guard_fail_sqls={"SELEC BAD"})
+
+    result = pipeline.ask("What was Nvidia's revenue in fiscal 2026?")
+
+    assert result["answer"] is None
+    assert result["reason_code"] == "EXEC_ERROR"
+    assert repair_calls == []
     assert result.get("repair") is None
     assert len(records) == 1
 
@@ -668,6 +692,7 @@ def test_ask_does_not_repair_an_empty_set_query(monkeypatch):
 
 
 def test_ask_still_verifies_a_repaired_answer(monkeypatch):
+    monkeypatch.setattr(pipeline.repair_module, "ENABLED_TRIGGERS", pipeline.repair_module.TRIGGERS)
     _patch_audit(monkeypatch)
     _patch_classify_in_scope(monkeypatch)
     _patch_generate(monkeypatch, sqls=["SELEC BAD"] * pipeline.N_CANDIDATES)
@@ -683,6 +708,7 @@ def test_ask_still_verifies_a_repaired_answer(monkeypatch):
 
 
 def test_ask_caps_repair_at_one_attempt_even_if_the_repair_lands_empty(monkeypatch):
+    monkeypatch.setattr(pipeline.repair_module, "ENABLED_TRIGGERS", pipeline.repair_module.TRIGGERS)
     _patch_audit(monkeypatch)
     _patch_classify_in_scope(monkeypatch)
     _patch_generate(monkeypatch, sqls=["SELEC BAD"] * pipeline.N_CANDIDATES)

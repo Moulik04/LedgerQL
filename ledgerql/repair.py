@@ -6,11 +6,27 @@ carry a message.
 
 - ``exec_error``: every candidate failed to parse or execute, and none was
   refused for a named reason. The error text is real signal. PHASE_5_5 Task 5.
+  Measured on Bridges-2 (2026-09-20) and **cut 2026-09-21**: see below.
 - ``schema_mismatch``: every candidate referenced a column that does not
   exist. Same task. Built and tested but **disabled** (``ENABLED_TRIGGERS``)
-  for the Bridges-2 measurement, which is scoped to ``exec_error`` only: it is
+  for the Bridges-2 measurement, which was scoped to ``exec_error`` only: it is
   the path where a correct concept-gap refusal (an invented ``dividend_yield``
-  column) could be repaired into a wrong answer, and it has no measurement.
+  column) could be repaired into a wrong answer, and it had no measurement.
+
+**``exec_error``, cut 2026-09-21: converting a correct refusal into a wrong
+answer is strictly worse than an unrescued abstain, and it did that more often
+than it helped.** This is the same principle ``schema_mismatch`` was scoped
+out under, applied to a trigger that was actually measured rather than merely
+suspected. On the 30B Bridges-2 run: 7 attempts, 5 rescues (a rescue = the
+repair turned an abstain into an answer, ``evals/repair_scoring.py``), of
+which only 1 was correct and 3 converted a required abstain into a wrong
+answer -- at most 2 helpful against 3 harmful, net negative under any
+weighting that doesn't discount the harm column to zero. See DECISIONS.md,
+"exec_error cut, criterion corrected" for the criterion that was originally
+used (which missed this because it counted a rescue as a win regardless of
+correctness), the full counts on both models, and the counterfactual replay.
+Both triggers are disabled by default now; re-enabling either for a future
+measurement is one line (``ENABLED_TRIGGERS``), same as before.
 
 **An empty result is not a repair trigger, and this was tried and cut.**
 ``empty_entity_bound`` (an entity-bound query returning nothing, aimed at a
@@ -49,8 +65,9 @@ EXEC_ERROR_TRIGGER = "exec_error"
 SCHEMA_MISMATCH_TRIGGER = "schema_mismatch"
 TRIGGERS = (EXEC_ERROR_TRIGGER, SCHEMA_MISMATCH_TRIGGER)
 
-# What actually fires. Narrower than TRIGGERS on purpose; see the module docstring.
-ENABLED_TRIGGERS = frozenset({EXEC_ERROR_TRIGGER})
+# What actually fires. Empty: both triggers are measured-or-suspected harmful
+# (see the module docstring) and disabled. Re-enabling either is one line.
+ENABLED_TRIGGERS: frozenset[str] = frozenset()
 
 _FAILURE_TRIGGERS = {
     "EXEC_ERROR": EXEC_ERROR_TRIGGER,

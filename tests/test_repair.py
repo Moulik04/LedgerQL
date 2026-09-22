@@ -11,7 +11,7 @@ def _failed(sql, reason_code, detail="boom", events=None):
 
 def test_exec_error_with_no_usable_cluster_triggers_a_repair():
     guards = [_failed("SELEC 1", "EXEC_ERROR")] * 5
-    assert repair.failure_trigger("EXEC_ERROR", guards) == "exec_error"
+    assert repair.failure_trigger("EXEC_ERROR", guards, enabled=repair.TRIGGERS) == "exec_error"
 
 
 def test_schema_mismatch_on_a_stray_column_triggers_a_repair():
@@ -67,15 +67,15 @@ def test_is_unchanged_ignores_case_whitespace_and_trailing_semicolon():
     assert repair.is_unchanged(a, "SELECT value FROM v_revenue WHERE ticker = 'Y'") is False
 
 
-def test_only_exec_error_is_enabled_by_default():
-    # schema_mismatch is built and tested but disabled for the Bridges-2
-    # measurement: "repair on exec_error only".
+def test_no_trigger_is_enabled_by_default():
+    # schema_mismatch was disabled for the Bridges-2 measurement, never
+    # measured; exec_error was measured and cut 2026-09-21 (net-negative
+    # rescues, DECISIONS.md). Both are built and tested, neither fires by
+    # default -- re-enabling either is one line (ENABLED_TRIGGERS).
     sql = "SELECT nope FROM v_revenue WHERE ticker = 'AAPL'"
     stray_column = [_failed(sql, "SCHEMA_MISMATCH")] * 5
     assert repair.failure_trigger("SCHEMA_MISMATCH", stray_column) is None
-    assert repair.failure_trigger("EXEC_ERROR", [_failed("SELEC 1", "EXEC_ERROR")] * 5) == (
-        "exec_error"
-    )
+    assert repair.failure_trigger("EXEC_ERROR", [_failed("SELEC 1", "EXEC_ERROR")] * 5) is None
 
 
 def test_there_is_no_repair_trigger_for_an_empty_result():

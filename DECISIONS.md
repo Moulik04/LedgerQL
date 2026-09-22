@@ -1019,3 +1019,120 @@ that collide with the tracked baseline).
 `exec_error`-cut findings, and the measured headline figures — is in the
 follow-up entries below, not here:** this entry is the provenance record only,
 committed with the raw data before any of that analysis was done.
+
+---
+
+## 2026-09-21 — `exec_error` repair cut, criterion corrected
+
+**The criterion as originally stated (§7, 2026-09-20 7B entry), verbatim:**
+"Cut criterion, fixed in advance: if the 30B run rescues nothing, remove
+`exec_error` too and reclaim the calls." This was wrong, and not because the
+30B happened to rescue something — because of what it counts as a rescue. It
+treats every abstain-turned-answer as a win, with no discount for a rescue
+that turns a *correct required refusal* into a *wrong answer*. Measured: it
+didn't just fail to discount that harm, it under-counted it to zero, because
+"rescued" alone says nothing about which rescues were which.
+
+**This is not a post-hoc override chosen because the result came out
+unfavourable; the governing principle predates the result.** `schema_mismatch`
+was scoped out of the Bridges-2 measurement precisely because it is the path
+where a correct concept-gap refusal could be repaired into a wrong answer
+(`ledgerql/repair.py`'s original docstring, `DECISIONS.md` §Task-5). Made
+explicit, the principle underneath that decision is: **converting a correct
+refusal into a wrong answer is strictly worse than leaving an unrescued
+abstain in place.** The `exec_error` cut criterion should have been written
+in those terms from the start — a rescue count net of harm, not a rescue
+count — and wasn't. This entry corrects that, using the measurement that
+already existed; it does not wait for a new one.
+
+**The count, on the 30B (`evals/repair_scoring.py`, against `evals/gold.jsonl`
+— not the `repair` object's own fields, which carry no rescue verdict):**
+
+| trigger | model | attempted | rescued | rescued correct | should have abstained |
+|---|---|---|---|---|---|
+| exec_error | 30B | 7 | 5 | 1 | 3 |
+| exec_error | 32B | 10 | 6 | 4 | 2 |
+
+Five rescues on the 30B: one turned a wrong-answer-required case into a
+*correct* answer (helpful), three turned a *required abstain* into a wrong
+answer (harmful, the failure mode the principle above names), and one turned
+a wrong-answer-required case into a *different* wrong answer (neither —
+J05, still wrong either way, not a harm in the required-abstain sense and not
+a win). **At most 2 helpful (crediting J05, generously) against 3 harmful:
+net negative under any weighting that doesn't discount the harm column to
+zero.** The 32B's count (4 correct, 2 harmful) is net positive on its own,
+but the criterion was written against the 30B and does not switch per model;
+disabling a trigger per-model would need its own justification this entry
+doesn't make.
+
+**Decision: `exec_error` is cut.** `ledgerql/repair.py`'s `ENABLED_TRIGGERS`
+is now empty — both triggers are disabled (`schema_mismatch` was already
+disabled, never measured). Re-enabling either is one line, unchanged from
+before. `pipeline.ask()`'s trigger-check/repair-attempt branch is dead code
+under the default config now (`repair_module.failure_trigger` always returns
+`None`), so no repair generation call executes by default; four
+`tests/test_pipeline.py` cases that exercised the `exec_error` mechanism by
+default now do so via explicit `monkeypatch.setattr(..., ENABLED_TRIGGERS,
+...)`, mirroring how the `schema_mismatch` mechanism was already tested, and
+a new `test_ask_does_not_repair_exec_error_by_default` pins the off-by-default
+behaviour the same way `test_ask_does_not_repair_schema_mismatch_by_default`
+already did.
+
+**Counterfactual: the shipped config (repair off), replayed exactly from the
+measured logs, no GPU needed** (`evals/replay_repair_off.py`, new — reverts
+every `exec_error`-triggered record to what `pipeline.ask()`'s own
+`trigger is None` branch produces, since that is the code path every such
+record now takes):
+
+| metric | 30B shipped | 30B measured (repair on) | 32B shipped | 32B measured (repair on) |
+|---|---|---|---|---|
+| execution accuracy | 62.0% | 62.0% | 52.0% | 58.0% |
+| hallucinated-number rate | 0.0% | 0.0% | 0.0% | 0.0% |
+| abstain precision, decision | 77.1% | 76.7% | 72.9% | 75.5% |
+| abstain precision, strict | 43.8% | 48.8% | 35.6% | 39.6% |
+| abstain recall, decision | 91.2% | 82.4% | 91.2% | 85.3% |
+| abstain recall, strict | 61.8% | 61.8% | 61.8% | 61.8% |
+| reason-code accuracy | 56.8% | 63.6% | 48.8% | 52.5% |
+
+Read plainly, not just as a win: on the 30B, recall goes up (91.2% vs 82.4%,
+the direct effect of no longer converting required abstains to wrong
+answers) and decision precision goes up slightly, but reason-code accuracy
+goes *down* (56.8% vs 63.6%) and strict precision goes down (43.8% vs 48.8%)
+— cutting the trigger adds abstains with no discount for whether their
+reason code happens to be right, and `EXEC_ERROR` (the reason code every
+reverted record carries) is rarely gold's acceptable code. **On the 32B,
+execution accuracy drops six points (58.0% -> 52.0%)**: three of its four
+correct rescues (A11, J01, J07) are ANSWER-expected cases, and cutting the
+trigger reverts them to a wrong abstain too, at a real cost that isn't
+visible in the abstain-only metrics above. The decision is made on the
+harm/help asymmetry stated above, not because every number moved the same
+direction — most did not.
+
+**The 3 harmful conversions on the 30B, and whether verify.py could have
+caught them: it could not, and that's expected, not a verify.py gap.**
+T06, O04 and H08 (the `should-have-abstained` rescues) all show
+`hallucinated_numbers: []` — every number each states really is present in
+its own (wrong) executed result. O04 and H08 both answer with the identical
+text ("Apple Inc. (AAPL) has a market capitalization of $14,773,260,000.0"),
+from what the repaired SQL actually executed to; T06 states a real value from
+its own wrong result set. `verify.py` checks an answer against its own
+query's result, never against gold — a wrong-but-self-consistent query
+scores 0% hallucinated by construction (`evals/README.md` §5's own caveat on
+this metric). **A 0.0% hallucinated-number rate does not mean these three
+answers were safe; it means hallucination and wrongness are different
+failure modes, and this metric only ever measured the first.** The 32B's two
+harmful conversions (M03, H02) are the same shape: both `hallucinated_numbers:
+[]`, both wrong-but-grounded.
+
+**Measured hallucinated-number rate, both models, for the record (the
+project's headline safety number, absent from the earlier retrieval entry):
+0.0% on the 30B, 0.0% on the 32B** — unchanged from every prior run. See
+`evals/README.md` §6e for why this rate structurally cannot fall below 0% by
+design (the pipeline's own verifier already routes anything ungrounded to
+`UNGROUNDED_ANSWER` before an answer is ever recorded) and is therefore not,
+on its own, evidence that an answered case is *correct* — only that it isn't
+inventing numbers.
+
+**Derived-vs-measured comparison and the tautology check's model-dependence:
+`evals/README.md` §6e, `ledgerql/result_shape.py`'s `is_tautologically_empty`
+docstring.** Not duplicated here.

@@ -21,12 +21,13 @@ fourth trigger, UNGROUNDED_ANSWER, sits after the answer is written, if
 verify.py finds a stated number with nothing backing it in the winning
 result.
 
-Before a no-usable-result abstain commits, one repair attempt is made when the
-failure carries an error message (repair.py, exec_error only for now, never a
-loop); its output goes back through guardrails, execution and the verifier. An
-empty result is never repaired (no message to feed back): it is NO_DATA. A generator that refuses
-in SQL (`SELECT NULL ... WHERE 1 = 0`) is mapped to SCHEMA_MISMATCH
-structurally and is not repaired.
+Before a no-usable-result abstain commits, one repair attempt would be made
+when the failure carries an error message (repair.py; never a loop) -- but as
+of 2026-09-21 both repair triggers are disabled (`repair.ENABLED_TRIGGERS` is
+empty), so this path is never taken by default; see repair.py and
+DECISIONS.md for why. An empty result is never repaired (no message to feed
+back): it is NO_DATA. A generator that refuses in SQL (`SELECT NULL ... WHERE
+1 = 0`) is mapped to SCHEMA_MISMATCH structurally and is not repaired.
 """
 
 import functools
