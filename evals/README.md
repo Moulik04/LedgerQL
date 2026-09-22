@@ -388,3 +388,18 @@ written before per-candidate logging), and impossible where generation is needed
 (repair). Reports written after per-candidate logging carry `candidates` and their
 figures are measured. The Bridges-2 reports must be tracked in git for any of this
 to be reproducible from a fresh clone.
+
+## 6d. Checking a report's routing consistency (`evals/check_replay.py`)
+
+`python -m evals.check_replay reports/<measured>.jsonl` checks **routing
+consistency**: that the reason code recorded for each case follows from that
+case's logged `candidates`, by recomputing 6c's named-rejection choice, the
+post-consensus routing decision, and the derived-replay bounds, and comparing
+each against what the report recorded. It exits non-zero on any mismatch.
+
+It does **not** check candidate-log integrity -- it never verifies that a
+logged candidate's guardrail reason or result shape is the one the pipeline
+actually produced. Because `consensus.vote()` decides by majority, a
+corrupted reason on a candidate that shares its group's majority vote changes
+nothing this script recomputes, so a clean run is evidence the recorded
+routing follows from the log, not evidence the log itself is accurate.

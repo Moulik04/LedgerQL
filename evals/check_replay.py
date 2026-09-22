@@ -1,4 +1,4 @@
-"""Check a MEASURED run's per-candidate log against the pipeline's own logic.
+"""Check a MEASURED run's ROUTING CONSISTENCY against its per-candidate log.
 
 A report written after per-candidate logging carries a ``candidates`` list per
 case (each candidate's guardrail verdict and result shape). That turns three
@@ -16,6 +16,17 @@ things that were derived-with-caveats into things that can be *checked*:
    winner's agreement, so it reported an upper bound (every winner-empty
    entity-bound record flips) and a lower bound (agreement 1.0 only). With
    survivors logged the exact answer exists, and it must sit between them.
+
+**What this does NOT check: candidate-log integrity.** Every check here
+recomputes a decision from the logged candidates and compares it with the
+recorded reason code; none of it verifies that a logged candidate's guardrail
+reason or result shape is itself the one the pipeline actually produced. A
+corrupted reason on one of several candidates that share the same majority
+vote is invisible by design -- consensus.vote() picks a reason code by
+majority, so changing one dissenting entry, or one entry within an
+already-unanimous group, changes nothing it recomputes. A clean run of this
+script is evidence that the recorded routing follows from the log; it is not
+evidence that the log itself is accurate.
 
 Usage: ``python -m evals.check_replay reports/<measured>.jsonl``; exits non-zero
 if any check fails.
@@ -72,7 +83,14 @@ def exact_no_data_signal(record: dict) -> bool | None:
 
 
 def check_bounds(records: list[dict]) -> dict:
-    """Does lower <= exact <= upper hold, and how loose were the bounds?"""
+    """Does lower <= exact <= upper hold, and how loose were the bounds?
+
+    The lower bound is currently dormant on any real data: it equals the upper
+    bound wherever confidence is exactly 1.0, which is the only case it fires
+    on, and that equivalence is a tested invariant of LOW_AGREEMENT_THRESHOLD
+    (see the comment at `lower = ...` below), not an assumption. If that
+    invariant's test ever fails, this branch has gone live and needs a second
+    look, not just a passing suite."""
     violations, upper_minus_exact, exact_minus_lower, n = [], [], [], 0
     for r in records:
         exact = exact_no_data_signal(r)
@@ -80,6 +98,11 @@ def check_bounds(records: list[dict]) -> dict:
             continue
         n += 1
         upper = is_identity_anchored_empty(r.get("generated_sql"), _winner_rows(r))
+        # confidence == 1.0 always clears LOW_AGREEMENT_THRESHOLD (asserted by
+        # test_full_agreement_always_clears_the_low_agreement_threshold in
+        # tests/test_check_replay.py), so `lower` is currently equivalent to
+        # `upper`: this branch has never been observed to differ from `upper`
+        # on real data. Kept, not removed -- see check_bounds's docstring.
         lower = upper and r.get("confidence") == 1.0
         if lower and not exact:
             violations.append((r["id"], "lower bound flips a record the exact rule does not"))

@@ -1,6 +1,7 @@
 import json
 
 from evals import check_replay as cr
+from ledgerql.pipeline import LOW_AGREEMENT_THRESHOLD
 
 ANCHORED = "SELECT value FROM v_revenue WHERE ticker = 'NVDA' AND fiscal_year = 2025"
 SET_SQL = "SELECT name FROM v_total_assets WHERE fiscal_year = 2024 AND value < 0"
@@ -104,6 +105,16 @@ def test_a_violated_bound_is_reported_not_swallowed():
     bad["candidates"] = five(sql=ANCHORED)
     out = cr.check_bounds([bad])
     assert out["n_checked"] == 1  # it was compared, whatever the verdict
+
+
+def test_full_agreement_always_clears_the_low_agreement_threshold():
+    # check_bounds's lower bound (`lower = upper and confidence == 1.0`) has
+    # never been observed to differ from the upper bound on real data, because
+    # this holds: a query nothing dissented on can never itself be flagged
+    # LOW_AGREEMENT. If LOW_AGREEMENT_THRESHOLD is ever raised above 1.0 (or
+    # confidence stops being a 0..1 fraction), this fails and says so -- the
+    # lower-bound branch has gone live and needs a second look, not silence.
+    assert 1.0 >= LOW_AGREEMENT_THRESHOLD
 
 
 # ---- routing replays from candidates ------------------------------------------------
