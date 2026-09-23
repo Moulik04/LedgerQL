@@ -1136,3 +1136,39 @@ inventing numbers.
 **Derived-vs-measured comparison and the tautology check's model-dependence:
 `evals/README.md` §6e, `ledgerql/result_shape.py`'s `is_tautologically_empty`
 docstring.** Not duplicated here.
+
+---
+
+## 2026-09-23 — Confidently-wrong rate: the hallucination metric's complement, measured
+
+**Why this metric exists.** `verify.py` grounds an answer against the SQL
+query that *produced* it, not against gold — it can only ever confirm that a
+stated number appears somewhere in that query's own result set. A query that
+answers the wrong question entirely still passes: every number the answer
+states is genuinely present in its own (wrong) result, so nothing is
+"hallucinated" by this check's definition. The 2026-09-21 "exec_error repair
+cut" entry above found exactly this pattern on real runs, case by case; this
+entry turns that finding into a standing metric (`evals/confidently_wrong.py`,
+wired into both `evals/run_eval.py` and `evals/replay_repair_off.py`) so it
+is reported beside `hallucinated_number_rate` on every run from now on,
+rather than rediscovered by hand each time. **Confidently-wrong rate**: among
+cases the system answered (did not abstain), the fraction whose result
+doesn't match gold. With hallucination held at 0.0%, every case counted here
+is wrong-but-grounded — a self-consistent answer to the wrong question, not
+an invented number.
+
+**Measured against the committed reports** (`evals/replay_repair_off.py`,
+which needs no GPU — it replays already-logged per-case records):
+
+| metric | 30B shipped | 30B measured (repair on) | 32B shipped | 32B measured (repair on) |
+|---|---|---|---|---|
+| confidently-wrong rate | 41.8% | 45.0% | 40.9% | 40.0% |
+| hallucinated-number rate | 0.0% | 0.0% | 0.0% | 0.0% |
+
+Read side by side, these two rows are the point: a flat 0.0% on the second
+row was, and remains, true and simultaneously uninformative about whether an
+answered case is *correct* — on both models, in both configurations, roughly
+two in every five answered cases are wrong despite being perfectly grounded.
+
+This reproduces the same cases already named in the entry above by ID, not
+re-derived here: T06, O04 and H08 on the 30B; M03 and H02 on the 32B.

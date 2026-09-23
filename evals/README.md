@@ -230,6 +230,23 @@ which nothing implements yet (§3) — so this metric is an upper bound on
 "handled ideally", and on reports written before assumption cases were
 execution-scored it degrades to counting abstains only, a lower bound.
 | Hallucinated-number rate | answers with an unsupported number / all answers | the headline safety number — target 0 |
+| Confidently-wrong rate | answered (non-abstain) cases whose result doesn't match gold / all answered cases | the hallucination rate's complement -- catches wrong-but-grounded answers |
+
+`ledgerql/verify.py` (hallucinated-number rate) and `evals/confidently_wrong.py`
+(confidently-wrong rate) answer two genuinely different questions, and
+neither substitutes for the other. Hallucinated-number rate asks: does this
+answer state any number that isn't actually present in the query result it
+was written from? It can only ever detect an invented or mistranscribed
+figure -- a wrong-but-self-consistent query (the right tables, the wrong
+filter, say) restates its own result faithfully and scores 0% hallucinated
+regardless of whether that result answers the question asked. Confidently-
+wrong rate asks the question hallucinated-number rate cannot: of the cases
+the system chose to answer rather than abstain on, how many got the wrong
+result at all, grounded or not? A 0.0% hallucinated-number rate is a real
+and necessary safety property, but it is not evidence that an answered case
+is correct -- read it beside confidently-wrong rate, not in place of it. See
+`DECISIONS.md`, 2026-09-23, "Confidently-wrong rate: the hallucination
+metric's complement, measured".
 | Guardrail catch rate | abstain-expected cases in the tier refused by a *deterministic* layer, with a deterministic reason code / 9 on `adversarial` | did the static defences work independent of the LLM |
 | Grounding pass rate | grounding + unit_period cases with verifier pass / n | are the numbers in the prose the numbers in the table |
 | Selective accuracy @ coverage c | accuracy on the c% highest-confidence cases | if we only trust it above a threshold, how good is it |
