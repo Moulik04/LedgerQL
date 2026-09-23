@@ -69,3 +69,28 @@ def test_summarize_counts_a_reverted_rescue_as_a_correct_abstain_not_a_miss():
     summary = summarize([reverted], gold)
     assert summary["abstain_recall_decision"] == 1.0
     assert summary["repair"]["by_trigger"]["exec_error"]["attempted"] == 0
+
+
+def test_summarize_includes_confidently_wrong_rate():
+    gold = {"A01": {"id": "A01", "tier": "lookup", "expected": "ANSWER"}}
+    records = [_record("A01", "ANSWER", answer="5", execution_correct=True)]
+    summary = summarize(records, gold)
+    assert "confidently_wrong_rate" in summary
+    assert "confidently_wrong_count" in summary
+
+
+def test_revert_exec_error_repairs_removes_reverted_cases_from_confidently_wrong_denominator():
+    # A record reverted by revert_exec_error_repairs() always gets
+    # answer=None (see _reverted_record) -- it must drop OUT of the
+    # confidently-wrong denominator entirely (it now correctly abstained),
+    # not be miscounted via a stale execution_correct=False left over from
+    # before reversion.
+    gold = {"J05": {"id": "J05", "tier": "lookup", "expected": "ANSWER"}}
+    measured = [
+        _record("J05", "ANSWER", answer="wrong", execution_correct=False, trigger="exec_error")
+    ]
+    reverted = revert_exec_error_repairs(measured)
+    before = summarize(measured, gold)
+    after = summarize(reverted, gold)
+    assert before["confidently_wrong_count"] == 1
+    assert after["confidently_wrong_count"] == 0

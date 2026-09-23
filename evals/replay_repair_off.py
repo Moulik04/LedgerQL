@@ -27,6 +27,7 @@ from collections import defaultdict
 from pathlib import Path
 
 from evals.abstain_scoring import compute_abstain_metrics
+from evals.confidently_wrong import compute_confidently_wrong_rate
 from evals.repair_scoring import compute_repair_stats
 from ledgerql.repair import EXEC_ERROR_TRIGGER
 
@@ -93,6 +94,7 @@ def summarize(per_case: list[dict], cases_by_id: dict) -> dict:
         "hallucinated_number_rate": hallucinated / answered if answered else 0.0,
         "answered_count": answered,
         "repair": compute_repair_stats(per_case, cases_by_id),
+        **compute_confidently_wrong_rate(per_case, cases_by_id),
         **compute_abstain_metrics(per_case, cases_by_id),
     }
 
@@ -117,6 +119,7 @@ def main(argv: list[str] | None = None) -> int:
     rows = [
         ("execution accuracy", "overall_execution_accuracy"),
         ("hallucinated-number rate", "hallucinated_number_rate"),
+        ("confidently-wrong rate", "confidently_wrong_rate"),
         ("abstain precision, decision", "abstain_precision_decision"),
         ("abstain precision, strict", "abstain_precision_strict"),
         ("abstain recall, decision", "abstain_recall_decision"),
