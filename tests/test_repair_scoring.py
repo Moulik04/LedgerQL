@@ -96,6 +96,9 @@ def test_report_renders_a_repair_section_per_trigger(tmp_path):
         "abstain_recall_decision": 0.0,
         "abstain_recall_strict": 0.0,
         "reason_code_accuracy": 0.0,
+        "confidently_wrong_count": 0,
+        "confidently_wrong_rate": 0.0,
+        "confidently_wrong_by_tier": {},
         "per_case": [],
         "repair": stats,
     }

@@ -83,6 +83,9 @@ def test_write_reports_serializes_date_values_in_rows(tmp_path):
         "abstain_recall_decision": 0.0,
         "abstain_recall_strict": 0.0,
         "reason_code_accuracy": 0.0,
+        "confidently_wrong_count": 0,
+        "confidently_wrong_rate": 0.0,
+        "confidently_wrong_by_tier": {},
         "per_case": [
             {
                 "id": "L01",
@@ -140,6 +143,9 @@ def test_write_reports_header_shows_real_candidate_and_answer_temperatures(tmp_p
         "abstain_recall_decision": 0.0,
         "abstain_recall_strict": 0.0,
         "reason_code_accuracy": 0.0,
+        "confidently_wrong_count": 0,
+        "confidently_wrong_rate": 0.0,
+        "confidently_wrong_by_tier": {},
         "per_case": [],
     }
 
@@ -187,6 +193,9 @@ def test_write_reports_non_answer_section_reflects_phase4_abstain_scoring(tmp_pa
         "abstain_recall_decision": 0.0,
         "abstain_recall_strict": 0.0,
         "reason_code_accuracy": 0.0,
+        "confidently_wrong_count": 0,
+        "confidently_wrong_rate": 0.0,
+        "confidently_wrong_by_tier": {},
         "per_case": [],
     }
 
@@ -196,6 +205,51 @@ def test_write_reports_non_answer_section_reflects_phase4_abstain_scoring(tmp_pa
     assert "Phase 2 has no abstain logic" not in text
     non_answer_section = text.split("## Non-ANSWER cases")[1].split("## Confidence & abstain")[0]
     assert "not scored" not in non_answer_section
+
+
+def test_write_reports_includes_confidently_wrong_section(tmp_path):
+    from evals.run_eval import write_reports
+
+    summary = {
+        "overall_execution_accuracy": 0.5,
+        "always_abstain_baseline": 0.33,
+        "all_tiers": ["lookup"],
+        "per_tier_accuracy": {"lookup": 0.5},
+        "guardrail_catch_rate": {},
+        "hallucinated_number_rate": 0.0,
+        "answered_count": 2,
+        "non_answer_case_count": 0,
+        "non_answer_attempted": 0,
+        "non_answer_errored": 0,
+        "non_answer_tier_breakdown": {},
+        "per_case": [],
+        "repair": None,
+        "confidently_wrong_count": 1,
+        "confidently_wrong_rate": 0.5,
+        "confidently_wrong_by_tier": {"lookup": 0.5},
+        "all_abstains": 0,
+        "required_abstain_cases": 0,
+        "assumption_cases": 0,
+        "decision_correct_abstains": 0,
+        "strict_correct_abstains": 0,
+        "required_abstains_caught": 0,
+        "required_abstains_caught_strict": 0,
+        "assumption_cases_handled": 0,
+        "abstain_precision_decision": 0.0,
+        "abstain_precision_strict": 0.0,
+        "abstain_recall_decision": 0.0,
+        "abstain_recall_strict": 0.0,
+        "reason_code_accuracy": 0.0,
+        "assumption_case_handling": 0.0,
+    }
+    md_path, _ = write_reports(summary, tmp_path)
+    text = md_path.read_text()
+    assert "## Confidently-wrong rate" in text
+    assert "50.0%" in text
+    idx_halluc = text.index("## Hallucinated-number rate")
+    idx_wrong = text.index("## Confidently-wrong rate")
+    idx_nonanswer = text.index("## Non-ANSWER cases")
+    assert idx_halluc < idx_wrong < idx_nonanswer
 
 
 def test_score_guardrail_case_passes_when_blocked_with_correct_reason():

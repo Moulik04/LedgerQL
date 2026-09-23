@@ -32,6 +32,7 @@ import duckdb
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from evals.abstain_scoring import compute_abstain_metrics
+from evals.confidently_wrong import compute_confidently_wrong_rate
 from evals.repair_scoring import compute_repair_stats
 from ledgerql import answer as answer_module
 from ledgerql import generate as generate_module
@@ -269,6 +270,8 @@ def run(gold_path: Path, db_path: str) -> dict:
     pure_abstain_cases = [c for c in cases if c["expected"] == "ABSTAIN"]
     always_abstain_baseline = len(pure_abstain_cases) / len(cases) if cases else 0.0
 
+    confidently_wrong_metrics = compute_confidently_wrong_rate(per_case, cases_by_id)
+
     return {
         "overall_execution_accuracy": overall_accuracy,
         "always_abstain_baseline": always_abstain_baseline,
@@ -285,6 +288,7 @@ def run(gold_path: Path, db_path: str) -> dict:
         "non_answer_tier_breakdown": non_answer_tier_breakdown,
         "per_case": per_case,
         "repair": compute_repair_stats(per_case, cases_by_id),
+        **confidently_wrong_metrics,
         **abstain_metrics,
     }
 
@@ -342,6 +346,28 @@ def write_reports(summary: dict, reports_dir: Path) -> tuple[Path, Path]:
         "every number it states really is in its own result, that result "
         "is just an answer to the wrong query. That failure mode shows up "
         "in execution accuracy, not here.",
+        "",
+        "## Confidently-wrong rate",
+        "",
+        f"{summary['confidently_wrong_rate']:.1%} of "
+        f"{summary['answered_count']} answered cases (didn't abstain) "
+        "returned a result that doesn't match gold.",
+        "",
+        "This is the hallucinated-number rate's complement. verify.py "
+        "checks a stated number against its OWN executed result, never "
+        "against gold -- a wrong-but-self-consistent query scores 0% "
+        "hallucinated by construction, because every number it states "
+        "really is in its own (wrong) result. '0.0% hallucinated' means "
+        "zero UNGROUNDED numbers, not zero WRONG ones; this metric names "
+        "the wrong ones directly. See DECISIONS.md, 2026-09-21, "
+        '"exec_error repair cut".',
+        "",
+        "| Tier | Confidently-wrong rate |",
+        "|---|---|",
+    ]
+    for tier in sorted(summary["confidently_wrong_by_tier"]):
+        lines.append(f"| {tier} | {summary['confidently_wrong_by_tier'][tier]:.1%} |")
+    lines += [
         "",
         "## Non-ANSWER cases (ABSTAIN / ANSWER_WITH_ASSUMPTION)",
         "",
