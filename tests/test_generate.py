@@ -103,3 +103,12 @@ def test_repair_candidate_shows_the_failing_sql_and_the_error_and_strips_fences(
     assert "SELECT nope FROM t" in prompt and "column nope not found" in prompt
     # single-shot temperature, not the consensus temperature
     assert client.last_call["options"]["temperature"] == generate.OLLAMA_TEMPERATURE
+
+
+def test_build_prompt_is_exactly_what_generate_candidates_sends():
+    # evals/gen_only_eval.py's "current" profile calls build_prompt so the
+    # bake-off prompts the baseline model with the pipeline's own text.
+    client = _FakeClient("SELECT 1;")
+    generate.generate_candidates("the question", "the schema", n=1, client=client)
+    assert client.last_call["prompt"] == generate.build_prompt("the question", "the schema")
+    assert client.last_call["system"] == generate.SYSTEM_PROMPT

@@ -41,6 +41,10 @@ def _strip_fences(text: str) -> str:
     return _FENCE_RE.sub("", text).strip()
 
 
+def build_prompt(question: str, schema_context: str) -> str:
+    return f"Schema:\n{schema_context}\n\nQuestion: {question}\n\nSQL:"
+
+
 def generate_candidates(
     question: str,
     schema_context: str,
@@ -50,7 +54,7 @@ def generate_candidates(
 ) -> list[str]:
     client = client or llm_backends.default_client()
     effective_temperature = OLLAMA_TEMPERATURE if temperature is None else temperature
-    prompt = f"Schema:\n{schema_context}\n\nQuestion: {question}\n\nSQL:"
+    prompt = build_prompt(question, schema_context)
     candidates = []
     for i in range(n):
         response = client.generate(
