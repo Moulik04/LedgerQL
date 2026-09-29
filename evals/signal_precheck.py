@@ -40,6 +40,7 @@ import duckdb
 
 from evals.passn_scoring import GOLD_PATH, _run_candidate, load_jsonl
 from evals.replay_repair_off import revert_exec_error_repairs
+from evals.replay_year_rule import apply_year_rule
 from evals.run_eval import results_match
 
 SIGNALS = [
@@ -99,13 +100,18 @@ def rows_equivalent(a: list[tuple], b: list[tuple], rel_tol: float = 1e-6) -> bo
     return True
 
 
-def build_rows(per_case: list[dict], cases_by_id: dict, db_path: str) -> list[dict]:
+def build_rows(
+    per_case: list[dict], cases_by_id: dict, db_path: str, year_rule: bool = False
+) -> list[dict]:
     """One row per case for the shipped (repair-off) config, carrying every
-    signal plus the winner's correctness and result rows."""
+    signal plus the winner's correctness and result rows. With `year_rule`, the
+    year-grounding verifier is applied first, so an answer it rejects is an
+    abstain, not an answer, exactly as the pipeline now produces."""
     con = duckdb.connect(db_path, read_only=True, config={"enable_external_access": "false"})
     rows = []
     try:
-        for rec in revert_exec_error_repairs(per_case):
+        shipped = revert_exec_error_repairs(per_case)
+        for rec in apply_year_rule(shipped) if year_rule else shipped:
             case = cases_by_id[rec["id"]]
             cands = rec.get("candidates") or []
             n = len(cands)
@@ -244,12 +250,20 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--db", default="data/ledgerql.duckdb")
     ap.add_argument("--reports-dir", type=Path, default=Path("reports"))
     ap.add_argument("--models", nargs=2, default=["qwen3_30b", "qwen25_32b"])
+    ap.add_argument(
+        "--year-rule",
+        action="store_true",
+        help="apply the year-grounding verifier first (replay_year_rule)",
+    )
     args = ap.parse_args(argv)
 
     gold = {c["id"]: c for c in load_jsonl(GOLD_PATH)}
     rows = {
         m: build_rows(
-            load_jsonl(args.reports_dir / f"eval_bridges2_{m}_measured.jsonl"), gold, args.db
+            load_jsonl(args.reports_dir / f"eval_bridges2_{m}_measured.jsonl"),
+            gold,
+            args.db,
+            year_rule=args.year_rule,
         )
         for m in args.models
     }

@@ -132,3 +132,11 @@ def test_policy_breakdown_splits_a_models_answers_by_what_the_other_model_did():
     assert out["correct"] == 3 and out["wrong"] == 3
     # The policy "answer only where both answered and agree" keeps the agree bucket.
     assert out["policy"] == {"answered": 2, "correct": 1, "wrong": 1}
+
+
+def test_the_year_rule_moves_year_hallucinated_answers_out_of_the_answered_set(real_rows):
+    gold = {c["id"]: c for c in load_jsonl(require_fixture(GOLD))}
+    per_case = load_jsonl(require_fixture(REPORTS / "eval_bridges2_qwen3_30b_measured.jsonl"))
+    with_rule = build_rows(per_case, gold, str(require_fixture(DB)), year_rule=True)
+    assert sum(r["answered"] for r in real_rows["qwen3_30b"]) == 55
+    assert sum(r["answered"] for r in with_rule) == 38  # 17 answers now abstain

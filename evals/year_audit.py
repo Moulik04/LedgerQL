@@ -32,18 +32,8 @@ _YEAR_IN_TEXT = re.compile(r"(?<!\d)(20\d{2})(?!\d)")
 
 
 def result_years(columns: list[str], rows: list) -> set[int]:
-    """Every year the result contains: an integer-valued cell in 2000-2099, or a
-    string cell (a date) containing a standalone 20xx."""
-    years: set[int] = set()
-    for row in rows:
-        for cell in row:
-            if isinstance(cell, bool):
-                continue
-            if isinstance(cell, int | float) and cell == int(cell) and 2000 <= int(cell) <= 2099:
-                years.add(int(cell))
-            elif isinstance(cell, str):
-                years.update(int(y) for y in _YEAR_IN_TEXT.findall(cell))
-    return years
+    """Every year the result contains (see `verify.result_years`)."""
+    return verify.result_years(rows)
 
 
 def excluded_tokens(text: str) -> list[tuple[str, str]]:
