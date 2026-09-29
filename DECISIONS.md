@@ -1256,19 +1256,44 @@ those. Only answered cases can be confidently wrong.)
 
 ### 4. A signal that does separate: cross-model agreement
 
-For the 39 cases both models answered, whether the 30B's winning result matches
-the 32B's (order-insensitive, floats to 1e-6):
+Each model's answers, bucketed by what the other model did on the same case
+(the other model's winning result matches, differs, or it abstained; results
+compared order-insensitively, floats to 1e-6). `python -m evals.signal_precheck`.
 
-| model | AUROC [95% CI] | winners agree | winners differ |
+| model | other model | n | right | wrong |
+|---|---|---|---|---|
+| Qwen3-30B (55 answers) | agrees | 24 | 23 | 1 |
+| | differs | 15 | 4 | 11 |
+| | abstained | 16 | 5 | 11 |
+| Qwen2.5-32B (44 answers) | agrees | 24 | 23 | 1 |
+| | differs | 15 | 1 | 14 |
+| | abstained | 5 | 2 | 3 |
+
+AUROC for predicting each model's correctness from match/no-match, over the 39
+cases both answered: **0.884 [0.769, 0.981]** for the 30B, **0.946 [0.858, 1.000]**
+for the 32B. The other model abstaining is a separate signal from disagreeing,
+and a strong one for the 30B: 11 of the 16 answers the 32B declined were wrong.
+
+**Policy "answer only where both models answered and agree", stated in full:**
+
+| | confidently-wrong | answers | correct answers |
 |---|---|---|---|
-| Qwen3-30B | 0.884 [0.769, 0.981] | 24 cases, 1 wrong (4%) | 15 cases, 11 wrong (73%) |
-| Qwen2.5-32B | 0.946 [0.858, 1.000] | 24 cases, 1 wrong (4%) | 15 cases, 14 wrong (93%) |
+| 30B alone -> policy | 41.8% -> 4.2% (23/55 -> 1/24) | 55 -> 24 (-31, -56%) | 32 -> 23 (-9) |
+| 32B alone -> policy | 40.9% -> 4.2% (18/44 -> 1/24) | 44 -> 24 (-20, -45%) | 26 -> 23 (-3) |
 
-The one case wrong on both models and agreeing is U02. Answering only where the
-two agree keeps 24 of the 30B's 55 answers with 1 wrong (4.2%, against 41.8%),
-and retains 23 of its 32 correct answers (72%); it sacrifices four correct 30B
-answers (T04, U01, M06, M08) where the 32B was wrong. Separately, the 30B
-answered 16 cases the 32B abstained on, and 11 of those 16 were wrong.
+The 30B's nine lost correct answers are four where the models differed (T04, U01,
+M06, M08: all cases where the 32B was the wrong one) and five where the 32B
+abstained. Nothing here is free: it removes 22 of 23 wrong 30B answers by
+removing 56% of its coverage.
+
+**The limit: shared interpretation errors.** The one case wrong on both models
+and agreeing is U02 ("Apple's revenue for 2024", a fiscal-vs-calendar
+ambiguity). Both returned Apple's fiscal-2024 value with no statement that
+"2024" was read as the fiscal year, and without the `period_end_date` column the
+case requires (an `ANSWER_WITH_ASSUMPTION` case scored with `compare: set`). The
+30B's prose even says "fiscal year 2022" while `hallucinated_numbers` is `[]`.
+Cross-model agreement cannot catch an interpretation both models share; that is
+what the `ANSWER_WITH_ASSUMPTION` output state (Tasks 2 and 3) targets.
 
 **Deployment cost, stated plainly: two large models per query.** Neither runs on
 the project's M2 laptop target; both need Bridges-2-class GPUs, so this is a
@@ -1316,3 +1341,7 @@ in classify would never reach generation and would read as low pass@N. The
 harness (`evals/gen_only_eval.py`) scores `ANSWER`-expected cases only, each
 model generating N=5 candidates in its own native prompt format, then guard,
 execute and vote with the unmodified pipeline modules.
+
+Once the bake-off runs exist, cross-model agreement AUROC is computed for every
+model pair (Qwen3-30B, Qwen2.5-32B, XiYanSQL-32B, OmniSQL-32B), since models that
+differ more may disagree more usefully than two Qwen generations do.

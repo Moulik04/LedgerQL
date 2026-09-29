@@ -8,6 +8,7 @@ from evals.signal_precheck import (
     build_rows,
     cross_model_pairs,
     load_jsonl,
+    policy_breakdown,
     rows_equivalent,
     signal_report,
 )
@@ -97,3 +98,37 @@ def test_recomputed_agreement_equals_the_logged_confidence(real_rows):
         for r in rows:
             if r["logged_confidence"] is not None:
                 assert r["agreement"] == pytest.approx(r["logged_confidence"]), r["id"]
+
+
+def _row(id_, answered, correct, rows):
+    return {"id": id_, "answered": answered, "winner_correct": correct, "winner_rows": rows}
+
+
+def test_policy_breakdown_splits_a_models_answers_by_what_the_other_model_did():
+    a = [
+        _row("K1", True, True, [(1,)]),  # B agrees, right
+        _row("K2", True, False, [(2,)]),  # B agrees, wrong (a shared error)
+        _row("D1", True, True, [(3,)]),  # B differs, A right
+        _row("D2", True, False, [(4,)]),  # B differs, A wrong
+        _row("S1", True, False, [(5,)]),  # B abstained
+        _row("S2", True, True, [(6,)]),  # B abstained
+        _row("N1", False, False, None),  # A did not answer: not counted
+    ]
+    b = [
+        _row("K1", True, True, [(1,)]),
+        _row("K2", True, False, [(2,)]),
+        _row("D1", True, False, [(9,)]),
+        _row("D2", True, True, [(8,)]),
+        _row("S1", False, False, None),
+        _row("S2", False, False, None),
+        _row("N1", True, True, [(7,)]),
+    ]
+    out = policy_breakdown(a, b)
+    assert out["buckets"]["agree"] == {"n": 2, "correct": 1, "wrong": 1}
+    assert out["buckets"]["differ"] == {"n": 2, "correct": 1, "wrong": 1}
+    assert out["buckets"]["other_abstained"] == {"n": 2, "correct": 1, "wrong": 1}
+    # The buckets partition A's answers: nothing dropped, nothing double-counted.
+    assert sum(v["n"] for v in out["buckets"].values()) == out["answered"] == 6
+    assert out["correct"] == 3 and out["wrong"] == 3
+    # The policy "answer only where both answered and agree" keeps the agree bucket.
+    assert out["policy"] == {"answered": 2, "correct": 1, "wrong": 1}

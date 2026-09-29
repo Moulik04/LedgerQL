@@ -50,6 +50,7 @@ SIGNALS = [
     "guard_reject_frac",
 ]
 _SCORED = ("ANSWER", "ANSWER_WITH_ASSUMPTION")
+_BUCKETS = ("agree", "differ", "other_abstained")
 
 
 def auroc(pos: list[float], neg: list[float]) -> float | None:
@@ -203,6 +204,37 @@ def cross_model_pairs(rows_a: list[dict], rows_b: list[dict]) -> list[dict]:
     return pairs
 
 
+def policy_breakdown(rows_a: list[dict], rows_b: list[dict]) -> dict:
+    """Model A's answers, bucketed by what model B did on the same case:
+    `agree` (B answered with the same result), `differ` (B answered
+    differently), `other_abstained` (B did not answer). The buckets partition
+    A's answers. `policy` is the rule "answer only where both answered and
+    agree", i.e. the `agree` bucket. An abstention by the other model is
+    reported apart from a disagreement, because it is a separate signal."""
+    by_id_b = {r["id"]: r for r in rows_b}
+    buckets = {name: {"n": 0, "correct": 0, "wrong": 0} for name in _BUCKETS}
+    for a in rows_a:
+        if not a["answered"]:
+            continue
+        b = by_id_b.get(a["id"])
+        if b is None or not b["answered"]:
+            name = "other_abstained"
+        elif rows_equivalent(a["winner_rows"] or [], b["winner_rows"] or []):
+            name = "agree"
+        else:
+            name = "differ"
+        buckets[name]["n"] += 1
+        buckets[name]["correct" if a["winner_correct"] else "wrong"] += 1
+    return {
+        "buckets": buckets,
+        "answered": sum(v["n"] for v in buckets.values()),
+        "correct": sum(v["correct"] for v in buckets.values()),
+        "wrong": sum(v["wrong"] for v in buckets.values()),
+        "policy": {"answered": buckets["agree"]["n"], "correct": buckets["agree"]["correct"],
+                   "wrong": buckets["agree"]["wrong"]},
+    }  # fmt: skip
+
+
 def _fmt_ci(a: float | None, ci: tuple[float, float] | None) -> str:
     return "n/a" if a is None else f"{a:.3f} [{ci[0]:.3f}, {ci[1]:.3f}]"
 
@@ -250,6 +282,22 @@ def main(argv: list[str] | None = None) -> int:
             wrong_n = sum(not p[key] for p in group)
             share = f"{wrong_n / len(group):.0%}" if group else "n/a"
             print(f"    {name:<14} n={len(group):>2}  wrong={wrong_n:>2}  ({share} wrong)")
+    for own, other in ((a, b), (b, a)):
+        out = policy_breakdown(rows[own], rows[other])
+        base_rate = out["wrong"] / out["answered"]
+        pol = out["policy"]
+        print(f"\n== {own}: its {out['answered']} answers by what {other} did")
+        for name, v in out["buckets"].items():
+            print(f"  {name:<16} n={v['n']:>2}  right={v['correct']:>2}  wrong={v['wrong']:>2}")
+        print(
+            f"  policy 'answer only where both answered and agree': "
+            f"confidently-wrong {base_rate:.1%} -> {pol['wrong'] / pol['answered']:.1%}; "
+            f"answers {out['answered']} -> {pol['answered']} "
+            f"({pol['answered'] - out['answered']:+d}, "
+            f"{(pol['answered'] - out['answered']) / out['answered']:+.0%}); "
+            f"correct answers {out['correct']} -> {pol['correct']} "
+            f"({pol['correct'] - out['correct']:+d})"
+        )
     return 0
 
 
