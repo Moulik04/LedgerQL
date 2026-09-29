@@ -1417,3 +1417,134 @@ adopted before year grounding (section 1) and an `answer_must_state` check exist
 alone it would lift the 30B's assumption handling from 42% to 89% by crediting
 answers that misstate the year. This was a gold-design choice, not a pipeline
 fault.
+
+---
+
+## 2026-09-29 — The verifier covers years; headlines restated; the assumption grader scoped
+
+### 1. The rule, and what it replaced
+
+`verify.verify(answer, columns, rows, sql)`: a year in the prose must appear in
+a result cell (an integer, or a date string containing it) **or as a year/date
+literal in the executed SQL**, whose filter is what grounds the period. With a
+`fiscal_year` column the older, stricter check stands (the year must be one of
+that column's values). A digit run inside a longer number is not a year. The
+pipeline and `evals/run_eval.py` pass the executed SQL. The old test
+`test_verify_ignores_fiscal_year_check_when_column_absent` encoded the hole
+(a year "however implausible" must not be flagged) and is replaced by tests for
+the new rule.
+
+### 2. Both measured runs replayed under it (shipped config, repair off)
+
+`python -m evals.replay_year_rule <report>`; every answer the rule rejects
+becomes an `UNGROUNDED_ANSWER` abstain, as `pipeline._answer_from` now does.
+
+| Qwen3-30B | before | after |
+|---|---|---|
+| answers | 55 | **38** (-17, -31%) |
+| hallucinated-number rate, non-year numbers | 0.0% | 0.0% |
+| **hallucinated rate including years** | **30.9%** (17/55) | **0.0%** |
+| confidently-wrong rate | 41.8% (23/55) | 39.5% (15/38) |
+| execution accuracy (`ANSWER`, 50) | 62.0% | **48.0%** |
+| abstain precision, decision | 77.1% | 70.8% |
+| abstain recall, decision | 91.2% | 91.2% |
+
+| Qwen2.5-32B | before | after |
+|---|---|---|
+| answers | 44 | 44 (0 rejected) |
+| every headline | unchanged | unchanged |
+
+The rejected 17 are A02, A03, C01, C02, C06, G04, J02, L02, L03, L04, L09, M01,
+M06, M08, R01, T04, U02. None of the 30B's years is grounded by its SQL either.
+**One correction to the audit above:** the 32B's T03 states years in no result
+cell, but they are the SQL's own filter years, so under the adopted rule it is
+grounded: the 32B has 0 invented years in 44 answers, not 1. The cost on the 30B
+is real: 7 of the 17 were `ANSWER`-expected cases with a correct result and a
+misstated year, which is why execution accuracy falls 14 points; nine of the 17
+had a correct result.
+
+### 3. The cross-model agreement policy, re-scored
+
+Agreement compares results, not prose, so the year-hallucinated answers were
+sitting in the "agree" bucket and had to be re-scored: seven of the 30B's 24
+agreeing answers (six right, plus U02) are now abstains.
+`python -m evals.signal_precheck --year-rule`:
+
+| model | other model | n | right | wrong |
+|---|---|---|---|---|
+| Qwen3-30B (38 answers) | agrees | 17 | 17 | 0 |
+| | differs | 10 | 1 | 9 |
+| | abstained | 11 | 5 | 6 |
+| Qwen2.5-32B (44 answers) | agrees | 17 | 17 | 0 |
+| | differs | 10 | 0 | 10 |
+| | abstained | 17 | 9 | 8 |
+
+Policy "answer only where both answered and agree": 30B 39.5% -> 0.0%
+confidently-wrong, answers 38 -> 17 (-55%), correct answers 23 -> 17 (-6); 32B
+40.9% -> 0.0%, answers 44 -> 17 (-61%), correct answers 26 -> 17 (-9). AUROC over the
+27 shared answers: 0.972 [0.917, 1.000] (30B), 1.000 (32B). The zero-wrong result
+sits on 17 answers and the intervals are degenerate at n=27; U02, the shared
+miss, is gone only because the 30B's prose about it is now an abstain. The limit
+in the entry above stands: a shared interpretation error is invisible to this
+signal.
+
+### 4. Task 3, restated
+
+The writer fix is Task 3 and is not built. Scope: `frame_answer` (the question,
+the executed SQL and the result's shape, no values) states the period from the
+SQL's filters, and the writer is instructed never to state a period absent from
+both the result and the SQL. Measured recovery needs a GPU pipeline run of the
+30B (prepared, not submitted): `scripts/bridges2/submit.sh <hash>
+run_qwen3_coder_30b_fp16.sbatch` on a commit that has Task 3 in it, then
+`python -m evals.replay_year_rule` and `python -m evals.year_audit` on
+`reports/runs/<job>/eval_*.jsonl`. The comparison is the nine correct results
+lost above (L02, A02, A03, T04, C01, C02, C06, M06, M08): how many are answered
+again with a grounded period, against a baseline of 38 answers and 48.0%.
+
+### 5. `answer_must_state`: never built, scoped
+
+Confirmed: `evals/README.md` section 3 specified a deterministic keyword/regex
+pass, then a local judge, and neither exists (`evals/judge_prompt.md` is absent,
+`rubric_pass` is not computed, `run_eval.py` says "not implemented yet"). Twenty-three
+gold cases carry rubric items, each a free-text sentence. **It is a prerequisite
+for Tasks 2 and 3 being measurable at all**, since both exist to make an answer
+state its assumption or period.
+
+Scope: (a) add a `must_state_patterns` field per rubric item (regex
+alternatives, e.g. `fiscal year.*20\d\d` for "which fiscal year was used"), which
+edits gold and needs your sign-off; (b) a deterministic pass over those
+patterns; (c) a local-judge fallback for items no pattern expresses (the JPMorgan
+and bank-tag items), temperature 0, its vote logged apart and never able to
+override an execution mismatch; (d) `rubric_pass` in the per-case record and the
+1.0 / 0.5 scoring already written in section 3; (e) an `assumption_case_handling`
+that stops counting a bare abstain as handled: report answered-correctly,
+abstained and answered-wrong separately. A hand-labelled set of the existing 23
+answers would calibrate the judge.
+
+### 6. Assumption handling under the combined rule
+
+Adopting the year verifier, the relaxed comparator (target columns required,
+context columns optional) and an `answer_must_state` check as one change, the two
+that exist reported so far (`python -m evals.comparator_audit`), with the third
+unscored so every figure is an upper bound. `assumption_case_handling` counts any
+abstain as handled, so it is reported beside an outcome split:
+
+| `ANSWER_WITH_ASSUMPTION`, 19 cases | answered correctly | abstained | answered wrong | "handling" |
+|---|---|---|---|---|
+| 30B, strict comparator | 2 | 6 | 11 | 8/19 (42.1%) |
+| 30B, relaxed comparator alone | 11 | 6 | 2 | 17/19 (89.5%) |
+| **30B, combined** | **2** | **15** | **2** | 17/19 (89.5%) |
+| 32B, strict | 0 | 12 | 7 | 12/19 (63.2%) |
+| 32B, combined | 1 | 12 | 6 | 13/19 (68.4%) |
+
+The combined 30B row shows why the metric cannot be read alone: it scores the
+same 89.5% as the relaxed rule, but the nine wrong-year answers are now
+abstains, not answers; only U07 and U08 remain answered-correct. Read by hand
+(not by a grader), neither states its assumption: U07 says "47,941.0 millions of
+dollars" and never which fiscal year, U08 says "USD" without noting it is not
+thousands or millions, and the 32B's U02 says only "The value shown is
+391,035,000,000.0". So under the full rule, with `answer_must_state` scored, the
+count of assumption cases answered correctly with the assumption stated is about
+0 of 19 on both models today. That is what Tasks 2 and 3 have to move. The
+relaxed comparator is adopted only as part of this one change: `evals/run_eval.py`
+scoring is unchanged until the grader exists.

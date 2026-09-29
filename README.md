@@ -4,6 +4,8 @@ An auditable natural-language-to-SQL system for financial data — layered guard
 
 > Ask a plain-English question about company financials. LedgerQL returns a correct SQL query, the executed result, and a grounded answer with a confidence score — **or it refuses**, with a reason. It never returns a fabricated number.
 
+**Headline caveat (2026-09-29):** "0.0% hallucinated numbers" in the figures below excluded years. Counting them, 17 of the Qwen3-30B's 55 answers (31%) stated a fiscal year that appears nowhere in the result (all 2021-2023, against data covering fiscal 2024-2026); the verifier now covers years and the rate is 0.0% including them. See `DECISIONS.md` and `evals/README.md` section 5.
+
 **Status:** Phase 4 complete; Phase 5's model-comparison sub-goal complete (log-mined gold-set expansion still pending). A real Bridges-2 comparison found a newer full-precision model (`Qwen3-Coder-30B-A3B-Instruct`) lifts execution accuracy to 62.0% (from the local `qwen2.5-coder:7b` baseline's 54.0%) at 0.0% hallucinated-number rate, while same-family scale alone did not help — see `DECISIONS.md` and `reports/phase5_model_comparison.md`. The live pipeline's default stays `qwen2.5-coder:7b` locally via Ollama; abstain precision remains the open problem at 27-29% across every model tested (target ≥80%).
 
 ## Why

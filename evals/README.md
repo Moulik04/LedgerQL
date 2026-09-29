@@ -148,6 +148,13 @@ first; on failure, a local judge (same 7B model, temperature 0, prompt
 in `evals/judge_prompt.md`) gets one vote, logged separately and never
 allowed to override an execution mismatch.
 
+**Status (2026-09-29): this grader was never built.** Nothing scores
+`answer_must_state`; `evals/judge_prompt.md` does not exist, `rubric_pass` is not
+computed, and `assumption_case_handling` counts any abstain as handled. Twenty-three
+gold cases carry rubric items (14 `ANSWER_WITH_ASSUMPTION`, 6 `ABSTAIN`, 3 `ANSWER`), each
+a free-text sentence, not a pattern. Scoped in DECISIONS.md, 2026-09-29; it is a
+prerequisite for measuring Tasks 2 and 3.
+
 ## 4. Splits
 
 Assign each case `split = "calib" if crc32(id) % 3 == 0 else "test"`
@@ -248,20 +255,21 @@ is correct -- read it beside confidently-wrong rate, not in place of it. See
 `DECISIONS.md`, 2026-09-23, "Confidently-wrong rate: the hallucination
 metric's complement, measured".
 
-**Scope of the 0.0%: it does not cover years.** `verify.extract_numbers()`
-skips a bare 2000-2099 number (and a number followed by `-` and a capital, a
-form code like "10-K"), and the fiscal-year check that stands in for the year
-exclusion (`verify.extract_years`) only runs when the result has a
-`fiscal_year` column. The answer writer never sees the question, so a year in
-its prose that no result cell contains was not copied from anything it was shown.
-`python -m evals.year_audit <report>` counts them. Measured on the shipped
-(repair-off) config: 17 of the 30B's 55 answers state such a year (2021, 2022
-or 2023, none of which is a fiscal year the database holds, which runs
-2024-2026, and none asked for by the question), and 1 of the 32B's 44 (T03: right years,
-unsupported by anything shown). Nine of those 17 have a correct result under a
-misstated year. So "0.0% hallucinated numbers" means zero unsupported
-*non-year* numbers until the verifier covers years. See DECISIONS.md,
-2026-09-29, "Two audits".
+**Including years, 17 of the 30B's 55 answers (31%) contained an invented fiscal
+year**, all of them 2021, 2022 or 2023, outside the data's range (fiscal
+2024-2026), consistent with a pretraining-era prior; none on the 32B (44
+answers). The mechanism is the design itself: the question-blind writer
+(`ledgerql/answer.py`), built to stop the model inventing numbers, left it to
+invent the one thing it could not see, the period. `verify.py` did not catch it:
+it excluded years from the number check, and its year check only ran when the
+result had a `fiscal_year` column. **The verifier now covers years** (a year in
+the prose must appear in a result cell or as a literal in the executed SQL, whose
+filter grounds the period), so the 0.0% hallucinated-number rate now includes
+them; before, "0.0%" meant zero unsupported *non-year* numbers, and the same
+answers scored 30.9% including years. `python -m evals.year_audit <report>`
+counts them; `python -m evals.replay_year_rule <report>` restates every headline
+under the new rule. The 32B's T03 states years in no result cell, but they are
+its SQL's own filter years, so it is grounded. See DECISIONS.md, 2026-09-29.
 | Guardrail catch rate | abstain-expected cases in the tier refused by a *deterministic* layer, with a deterministic reason code / 9 on `adversarial` | did the static defences work independent of the LLM |
 | Grounding pass rate | grounding + unit_period cases with verifier pass / n | are the numbers in the prose the numbers in the table |
 | Selective accuracy @ coverage c | accuracy on the c% highest-confidence cases | if we only trust it above a threshold, how good is it |
