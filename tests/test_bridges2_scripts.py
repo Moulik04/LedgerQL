@@ -59,6 +59,8 @@ def cluster(tmp_path):
     (laptop / "scripts/bridges2/assert_commit.sh").write_text(
         (SCRIPTS / "assert_commit.sh").read_text()
     )
+    for job in SCRIPTS.glob("*.sbatch"):  # submit.sh refuses a job file the checkout lacks
+        (laptop / "scripts/bridges2" / job.name).write_text(job.read_text())
     h1 = commit(laptop, "reports/eval.md", "v1\n")
     git(laptop, "push", "-q", "origin", "main")
     stale = tmp_path / "stale"
@@ -83,9 +85,9 @@ def stub_sbatch(tmp: Path, calls: Path) -> Path:
     return stub
 
 
-def run_submit(cluster, expected: str | None):
+def run_submit(cluster, expected: str | None, *jobs: str):
     stub = stub_sbatch(cluster["tmp"], cluster["calls"])
-    args = ["bash", str(SCRIPTS / "submit.sh")] + ([expected] if expected else [])
+    args = ["bash", str(SCRIPTS / "submit.sh")] + ([expected, *jobs] if expected else [])
     env = {**ENV, "LEDGERQL_REPO": str(cluster["stale"]), "SBATCH": str(stub)}
     return subprocess.run(args, capture_output=True, text=True, env=env)
 
@@ -121,6 +123,31 @@ def test_submit_pulls_verifies_and_submits_both_jobs_pinned_to_the_commit(cluste
     assert len(calls) == 2
     assert all(f"EXPECTED_COMMIT={cluster['h2']}" in c for c in calls)
     assert any("30b" in c for c in calls) and any("32b" in c for c in calls)
+
+
+def test_submit_takes_an_explicit_job_list_and_pins_each_to_the_commit(cluster):
+    stale = cluster["stale"]
+    laptop_job = "run_bakeoff_a.sbatch"
+    # The job files must exist in the pulled commit, so add them upstream first.
+    origin = git(stale, "remote", "get-url", "origin")
+    laptop = cluster["tmp"] / "laptop"
+    for name in (laptop_job, "run_bakeoff_b.sbatch"):
+        h = commit(laptop, f"scripts/bridges2/{name}", "#!/bin/bash\n")
+    git(laptop, "push", "-q", origin, "main")
+    result = run_submit(cluster, h, laptop_job, "run_bakeoff_b.sbatch")
+    assert result.returncode == 0, result.stderr
+    calls = sbatch_calls(cluster)
+    assert len(calls) == 2
+    assert all(f"EXPECTED_COMMIT={h}" in c for c in calls)
+    assert calls[0].endswith(laptop_job) and calls[1].endswith("run_bakeoff_b.sbatch")
+
+
+def test_submit_submits_nothing_if_any_named_job_file_is_missing(cluster):
+    # One typo must not leave the first job submitted and the second not.
+    result = run_submit(cluster, cluster["h2"], "run_does_not_exist.sbatch")
+    assert result.returncode != 0
+    assert sbatch_calls(cluster) == []
+    assert "run_does_not_exist.sbatch" in result.stderr
 
 
 def test_submit_refuses_to_run_without_an_expected_commit(cluster):

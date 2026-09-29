@@ -1,7 +1,12 @@
 #!/usr/bin/env bash
 # Pull, verify, and submit both Bridges-2 jobs -- or stop before sbatch.
 #
-#   scripts/bridges2/submit.sh <full-40-char-commit>
+#   scripts/bridges2/submit.sh <full-40-char-commit> [job.sbatch ...]
+#
+# With no job files, submits the Phase 5 pair (30B fp16, 32B AWQ). Job files are
+# names under scripts/bridges2/, e.g. the Task 9 bake-off:
+#   submit.sh <commit> run_qwen3_coder_30b_fp16.sbatch \
+#       run_xiyansql_32b_fp16.sbatch run_omnisql_32b_fp16.sbatch
 #
 # Run on the cluster login node. Every step is a hard stop (set -e): nothing
 # after a failed check can execute, so a mismatch cannot be printed and then
@@ -18,13 +23,18 @@ set -euo pipefail
 
 main() {
     local expected="${1:-}"
-    local here repo sbatch_bin
+    local here repo sbatch_bin job
+    shift || true
+    local jobs=("$@")
+    if [ "${#jobs[@]}" -eq 0 ]; then
+        jobs=(run_qwen3_coder_30b_fp16.sbatch run_qwen25_coder_32b_awq.sbatch)
+    fi
     here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
     repo="${LEDGERQL_REPO:-$HOME/ledgerql-bridges2/ledgerql}"
     sbatch_bin="${SBATCH:-sbatch}"
 
     if [ -z "$expected" ]; then
-        echo "usage: submit.sh <full-40-char-commit>   (git rev-parse HEAD on the laptop)" >&2
+        echo "usage: submit.sh <full-40-char-commit> [job.sbatch ...]   (git rev-parse HEAD on the laptop)" >&2
         return 2
     fi
     if [ "${#expected}" -ne 40 ]; then
@@ -53,8 +63,17 @@ main() {
     bash "$here/assert_commit.sh" "$expected" "$repo"
 
     # 4. Only now submit, each job pinned to the verified commit.
-    "$sbatch_bin" --export=ALL,EXPECTED_COMMIT="$expected" "$repo/scripts/bridges2/run_qwen3_coder_30b_fp16.sbatch"
-    "$sbatch_bin" --export=ALL,EXPECTED_COMMIT="$expected" "$repo/scripts/bridges2/run_qwen25_coder_32b_awq.sbatch"
+    # Every named job must exist in the verified checkout BEFORE the first
+    # sbatch, so a typo cannot leave half the jobs submitted.
+    for job in "${jobs[@]}"; do
+        [ -f "$repo/scripts/bridges2/$job" ] || {
+            echo "STOP: no such job file scripts/bridges2/$job in the verified checkout" >&2
+            return 1
+        }
+    done
+    for job in "${jobs[@]}"; do
+        "$sbatch_bin" --export=ALL,EXPECTED_COMMIT="$expected" "$repo/scripts/bridges2/$job"
+    done
 }
 
 main "$@"
