@@ -7,11 +7,17 @@ wrong magnitude word ("million" instead of "billion") already fails the
 general numeric check on its own, since extract_numbers() reconstructs
 the claimed raw value using the stated magnitude before comparing it --
 no separate unit-consistency mechanism is needed for that case.
-Fiscal-year correctness needs a distinct, narrower check: years are
-deliberately excluded from extract_numbers() (they appear constantly in
-correct, grounded answers and are not the kind of "unsupported data
-value" that check exists to catch), so a wrong fiscal year would
-otherwise pass silently.
+Years need a distinct check: they are deliberately excluded from
+extract_numbers() (they appear constantly in correct, grounded answers), so
+without one a stated year would pass silently. With a `fiscal_year` column in
+the result, a stated year must be one of that column's values. Without one, a
+stated year must appear in a result cell (an integer, or a date string) or as a
+year/date literal in the executed SQL, whose filter is what grounds the period.
+The answer writer never sees the question, so a year in its prose that is in
+neither was invented: the 30B stated "fiscal year 2022"/"2023" in 17 of 55
+answers, over data that runs FY2024-2026, and the original column-only check
+never looked because those results had no `fiscal_year` column (DECISIONS.md,
+2026-09-29).
 
 Found via the real Phase 4 end-to-end run, not assumed: a real gold-set
 query can pre-scale a value itself (`SELECT value / 1e9 AS
@@ -87,6 +93,27 @@ def extract_years(text: str) -> list[int]:
     return [int(m) for m in _BARE_YEAR_RE.findall(text)]
 
 
+def result_years(rows: list[tuple]) -> set[int]:
+    """Years present in a result: an integer-valued cell in 2000-2099, or a string
+    cell (a date) containing a standalone 20xx."""
+    years: set[int] = set()
+    for row in rows:
+        for cell in row:
+            if isinstance(cell, bool):
+                continue
+            if isinstance(cell, int | float) and cell == int(cell) and 2000 <= int(cell) <= 2099:
+                years.add(int(cell))
+            elif isinstance(cell, str):
+                years.update(extract_years(cell))
+    return years
+
+
+def sql_years(sql: str | None) -> set[int]:
+    """Standalone 20xx years in the executed SQL: `fiscal_year = 2025`,
+    `'2024-09-28'`. A digit run inside a longer number is not a year."""
+    return set(extract_years(sql)) if sql else set()
+
+
 def _scalar_match(value: float, grounded: float, tolerance: float = 0.01) -> bool:
     return abs(value - grounded) <= max(abs(grounded) * tolerance, 1e-9)
 
@@ -113,7 +140,9 @@ class VerifyResult:
     detail: str | None = None
 
 
-def verify(answer: str, columns: list[str], rows: list[tuple]) -> VerifyResult:
+def verify(
+    answer: str, columns: list[str], rows: list[tuple], sql: str | None = None
+) -> VerifyResult:
     grounded_values = _grounded_with_scales(columns, rows)
     claimed = extract_numbers(answer)
     ungrounded = [n for n in claimed if not any(_scalar_match(n, g) for g in grounded_values)]
@@ -121,6 +150,10 @@ def verify(answer: str, columns: list[str], rows: list[tuple]) -> VerifyResult:
     if "fiscal_year" in columns:
         idx = columns.index("fiscal_year")
         grounded_years = {row[idx] for row in rows if row[idx] is not None}
+        year_mismatches = [float(y) for y in extract_years(answer) if y not in grounded_years]
+        ungrounded = ungrounded + year_mismatches
+    else:
+        grounded_years = result_years(rows) | sql_years(sql)
         year_mismatches = [float(y) for y in extract_years(answer) if y not in grounded_years]
         ungrounded = ungrounded + year_mismatches
 

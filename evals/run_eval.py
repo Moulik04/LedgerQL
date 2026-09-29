@@ -234,7 +234,9 @@ def run(gold_path: Path, db_path: str) -> dict:
             # 1e9 AS revenue_in_billions`), causing this metric to flag
             # answers as hallucinated that the live pipeline had already
             # correctly verified as grounded.
-            verify_result = verify_answer(result["answer"], result["columns"], result["rows"])
+            verify_result = verify_answer(
+                result["answer"], result["columns"], result["rows"], sql=result["sql"]
+            )
             record["hallucinated_numbers"] = verify_result.ungrounded_numbers
             if not verify_result.ok:
                 hallucinated += 1

@@ -107,7 +107,7 @@ def test_ask_generates_n_candidates(monkeypatch):
         lambda sql, db_path=None: ExecutionResult(columns=["x"], rows=[(1,)]),
     )
     monkeypatch.setattr(answer_module, "write_answer", lambda r: "The value is 1.")
-    monkeypatch.setattr(verify_module, "verify", lambda a, c, r: VerifyResult(ok=True))
+    monkeypatch.setattr(verify_module, "verify", lambda a, c, r, sql=None: VerifyResult(ok=True))
 
     pipeline.ask("q")
 
@@ -248,7 +248,7 @@ def test_ask_does_not_abstain_no_data_when_result_is_a_set_query(monkeypatch):
         ),
     )
     monkeypatch.setattr(answer_module, "write_answer", lambda r: "No companies matched.")
-    monkeypatch.setattr(verify_module, "verify", lambda a, c, r: VerifyResult(ok=True))
+    monkeypatch.setattr(verify_module, "verify", lambda a, c, r, sql=None: VerifyResult(ok=True))
 
     result = pipeline.ask("Which companies reported negative total assets in fiscal year 2024?")
 
@@ -282,7 +282,7 @@ def test_ask_abstains_on_ungrounded_answer(monkeypatch):
     monkeypatch.setattr(
         verify_module,
         "verify",
-        lambda a, c, r: VerifyResult(
+        lambda a, c, r, sql=None: VerifyResult(
             ok=False, ungrounded_numbers=[999.0], detail="unsupported: [999.0]"
         ),
     )
@@ -324,7 +324,7 @@ def test_ask_returns_full_success_result_with_confidence(monkeypatch):
         ),
     )
     monkeypatch.setattr(answer_module, "write_answer", lambda r: "The value is 1.")
-    monkeypatch.setattr(verify_module, "verify", lambda a, c, r: VerifyResult(ok=True))
+    monkeypatch.setattr(verify_module, "verify", lambda a, c, r, sql=None: VerifyResult(ok=True))
 
     result = pipeline.ask("what is 1?")
 
@@ -381,7 +381,7 @@ def test_ask_threads_db_path_to_guardrails_and_execute(monkeypatch):
         ),
     )
     monkeypatch.setattr(answer_module, "write_answer", lambda r: "answer")
-    monkeypatch.setattr(verify_module, "verify", lambda a, c, r: VerifyResult(ok=True))
+    monkeypatch.setattr(verify_module, "verify", lambda a, c, r, sql=None: VerifyResult(ok=True))
 
     pipeline.ask("q", db_path="custom.duckdb")
 
@@ -871,3 +871,28 @@ def test_ask_has_no_candidates_when_it_refuses_before_generation(monkeypatch):
     result = pipeline.ask("Update Apple's fiscal 2024 revenue to one trillion dollars.")
     assert result["reason_code"] == "OUT_OF_SCOPE"
     assert result.get("candidates") is None
+
+
+YEAR_SQL = "SELECT value FROM v_revenue WHERE ticker = 'AAPL' AND fiscal_year = 2025"
+
+
+def _ask_with_writer_saying(monkeypatch, text):
+    _patch_audit(monkeypatch)
+    _patch_classify_in_scope(monkeypatch)
+    _patch_generate(monkeypatch, sqls=[YEAR_SQL] * pipeline.N_CANDIDATES)
+    _patch_pipeline_db(monkeypatch)
+    monkeypatch.setattr(answer_module, "write_answer", lambda r: text)
+    return pipeline.ask("What was Apple's revenue in fiscal year 2025?")
+
+
+def test_ask_abstains_when_the_writer_states_a_year_the_result_and_sql_lack(monkeypatch):
+    # The question-blind writer invents the one thing it cannot see: the period.
+    result = _ask_with_writer_saying(monkeypatch, "The value is 5.0 for fiscal year 2022.")
+    assert result["answer"] is None
+    assert result["reason_code"] == "UNGROUNDED_ANSWER"
+
+
+def test_ask_answers_when_the_stated_year_is_the_one_in_the_executed_sql(monkeypatch):
+    result = _ask_with_writer_saying(monkeypatch, "The value is 5.0 for fiscal year 2025.")
+    assert result["answer"] == "The value is 5.0 for fiscal year 2025."
+    assert result["reason_code"] is None

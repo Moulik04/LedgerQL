@@ -78,16 +78,56 @@ def test_verify_passes_correct_fiscal_year():
     assert result.ok is True
 
 
-def test_verify_ignores_fiscal_year_check_when_column_absent():
-    # No fiscal_year column in this result -- a stated year (however
-    # implausible) is not something this function can ground, so it
-    # must not be flagged.
+def test_verify_rejects_a_year_that_neither_the_result_nor_the_sql_contains():
+    # The writer never sees the question, so a period it states that appears in
+    # neither the rows nor the executed SQL was invented. (30B, L02: "fiscal year
+    # 2022" over a bare value for a question about fiscal 2025.)
     result = verify.verify(
-        "As of 2024, the value was 5.0.",
+        "The value is 416,161,000,000.0 for fiscal year 2022.",
         ["value"],
-        [(5.0,)],
+        [(416161000000.0,)],
+        sql="SELECT value FROM v_revenue WHERE ticker = 'AAPL' AND fiscal_year = 2025",
     )
+    assert result.ok is False
+    assert result.ungrounded_numbers == [2022.0]
+
+
+def test_verify_rejects_an_unsupported_year_when_no_sql_is_given():
+    assert verify.verify("As of 2024, the value was 5.0.", ["value"], [(5.0,)]).ok is False
+
+
+def test_verify_grounds_a_year_in_the_sql_filter():
+    sql = "SELECT value FROM v_revenue WHERE ticker = 'AAPL' AND fiscal_year = 2025"
+    result = verify.verify("Revenue for fiscal year 2025 was 5.0.", ["value"], [(5.0,)], sql=sql)
     assert result.ok is True
+
+
+def test_verify_grounds_a_year_in_a_date_literal_in_the_sql():
+    sql = "SELECT value FROM v_cash WHERE period_end_date = '2024-09-28'"
+    assert verify.verify("At the end of 2024 it was 5.0.", ["value"], [(5.0,)], sql=sql).ok is True
+
+
+def test_verify_grounds_a_year_in_a_result_cell_that_is_not_a_fiscal_year_column():
+    for cell in (2024, 2024.0, "2024-09-28"):
+        result = verify.verify("In 2024 the value was 5.0.", ["value", "d"], [(5.0, cell)])
+        assert result.ok is True, cell
+
+
+def test_verify_does_not_ground_a_year_from_a_digit_run_in_a_larger_number():
+    sql = "SELECT value FROM t WHERE cik = 20240000"
+    assert verify.verify("In 2024 the value was 5.0.", ["value"], [(5.0,)], sql=sql).ok is False
+
+
+def test_verify_keeps_the_stricter_fiscal_year_column_check_when_that_column_exists():
+    # With a fiscal_year column the prose year must be one of ITS values; the
+    # SQL literal does not rescue a year the column contradicts.
+    result = verify.verify(
+        "Fiscal 2025 revenue was 5.0.",
+        ["fiscal_year", "value"],
+        [(2024, 5.0)],
+        sql="SELECT fiscal_year, value FROM v_revenue WHERE fiscal_year IN (2024, 2025)",
+    )
+    assert result.ok is False
 
 
 def test_verify_passes_on_empty_result_with_no_claimed_numbers():

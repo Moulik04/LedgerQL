@@ -356,7 +356,7 @@ def _answer_from(
     winner = ExecutionResult(columns=columns, rows=rows, truncated=truncated)
     answer_text = answer_module.write_answer(winner)
 
-    verify_result = verify_module.verify(answer_text, columns, rows)
+    verify_result = verify_module.verify(answer_text, columns, rows, sql=sql)
     if not verify_result.ok:
         return _finish(
             question,
