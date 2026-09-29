@@ -221,3 +221,43 @@ def test_write_outputs_writes_records_and_a_summary(db, tmp_path):
 
 def test_module_exposes_the_profiles_the_job_scripts_pass():
     assert set(gen_only_eval.PROFILES) == {"current", "omnisql", "xiyan"}
+
+
+def _http_error(status, body):
+    request = httpx.Request("POST", "http://vllm/v1/chat/completions")
+    return httpx.HTTPStatusError(
+        "server said no",
+        request=request,
+        response=httpx.Response(status, text=body, request=request),
+    )
+
+
+def test_an_http_error_records_its_status_and_the_servers_message(db):
+    message = '{"message": "maximum context length is 5120 tokens", "code": 400}'
+
+    def fake(messages, seed):
+        raise _http_error(400, message)
+
+    [rec] = _run(db, fake, n=2)
+    cand = rec["candidates"][0]
+    # Not just "HTTPStatusError": the status and body are the whole diagnosis.
+    assert cand["finish_reason"] == "error:HTTPStatusError:400"
+    assert "maximum context length" in cand["error_detail"]
+    assert cand["raw"] == "" and cand["sql"] == ""  # the message is never parsed as SQL
+
+
+def test_a_non_http_failure_has_no_error_detail_but_keeps_its_type(db):
+    def fake(messages, seed):
+        raise httpx.ReadTimeout("slow")
+
+    [rec] = _run(db, fake, n=1)
+    assert rec["candidates"][0]["finish_reason"] == "error:ReadTimeout"
+    assert rec["candidates"][0]["error_detail"] == "slow"
+
+
+def test_the_smoke_printout_shows_the_error_detail(db, capsys):
+    def fake(messages, seed):
+        raise _http_error(500, "engine dead")
+
+    gen_only_eval._print_smoke(_run(db, fake, n=1))
+    assert "engine dead" in capsys.readouterr().out

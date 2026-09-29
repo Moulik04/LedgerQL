@@ -289,3 +289,18 @@ def test_each_bakeoff_job_sets_a_context_length_that_fits_its_longest_prompt(job
     context_len = int(_exported(job, "MAX_MODEL_LEN"))
     assert context_len >= chars / 2.5 + DEFAULT_MAX_TOKENS
     assert context_len <= 8192  # never back toward the default that overflowed the KV cache
+
+
+def test_each_job_writes_its_own_vllm_logs_so_concurrent_jobs_do_not_overwrite_them():
+    # Four bake-off jobs shared one vllm_server.err in the checkout; the failed
+    # job's server log was unrecoverable. Names carry the SLURM job id.
+    text = (SCRIPTS / "run_model_eval.sh").read_text()
+    assert "vllm_server_${SLURM_JOB_ID:-manual}.err" in text
+    assert "> vllm_server.out" not in text and "cat vllm_server.err" not in text
+
+
+def test_a_failed_smoke_test_prints_the_server_log_tail_before_the_job_exits():
+    text = (SCRIPTS / "run_model_eval.sh").read_text()
+    smoke = text.index("--smoke 3")
+    assert 'tail -n 80 "$VLLM_ERR"' in text[smoke:]
+    assert "PIPESTATUS" in text[smoke:]  # the smoke exit code survives the tee

@@ -59,6 +59,9 @@ SMOKE_EXIT_CODE = 3
 class Generation:
     text: str
     finish_reason: str | None
+    # For a failed call: the server's message (HTTP status errors) or the
+    # exception text. Never mixed into `text`, so it cannot be parsed as SQL.
+    detail: str | None = None
 
 
 class HttpGenerator:
@@ -133,8 +136,16 @@ def smoke_ok(records: list[dict]) -> bool:
 def _safe_generate(generate_fn, messages: list[dict], seed: int) -> Generation:
     try:
         return generate_fn(messages, seed)
+    except httpx.HTTPStatusError as e:
+        # The status and body are the whole diagnosis (a 400 naming the context
+        # length, a 500 from a dead engine), so they are kept.
+        return Generation(
+            text="",
+            finish_reason=f"error:HTTPStatusError:{e.response.status_code}",
+            detail=e.response.text[:1000],
+        )
     except Exception as e:  # noqa: BLE001 -- a failed call is a logged outcome, not a crash
-        return Generation(text="", finish_reason=f"error:{type(e).__name__}")
+        return Generation(text="", finish_reason=f"error:{type(e).__name__}", detail=str(e)[:1000])
 
 
 def run(
@@ -191,6 +202,7 @@ def _score_case(case: dict, gens: list[Generation], gold, db_path: str) -> dict:
     for cand, gen in zip(candidates, gens, strict=True):
         cand["raw"] = gen.text
         cand["finish_reason"] = gen.finish_reason
+        cand["error_detail"] = gen.detail
 
     correct = False
     if consensus.reason_code is None:
@@ -288,6 +300,8 @@ def _print_smoke(records: list[dict]) -> None:
         for i, c in enumerate(r["candidates"][:2]):
             print(f"  candidate {i}: finish={c['finish_reason']} guard_ok={c['guard_ok']} "
                   f"exec_error={c['exec_error']} n_rows={c['n_rows']}")  # fmt: skip
+            if c.get("error_detail"):
+                print(f"    error detail: {c['error_detail'][:600]!r}")
             print(f"    raw: {c['raw'][:600]!r}")
             print(f"    sql: {c['sql'][:400]!r}")
 

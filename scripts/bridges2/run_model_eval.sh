@@ -68,6 +68,10 @@ fi
 export HF_HOME="$LOCAL/hf_cache"
 mkdir -p "$HF_HOME"
 
+# Per-job server logs: concurrent jobs share this checkout, and a fixed name let
+# four jobs overwrite each other (a failed job's server log was unrecoverable).
+VLLM_OUT="vllm_server_${SLURM_JOB_ID:-manual}.out"
+VLLM_ERR="vllm_server_${SLURM_JOB_ID:-manual}.err"
 echo "Starting vllm serve for $REPO_ID (tensor-parallel-size=$TP_SIZE)..."
 echo "First run downloads the checkpoint into \$LOCAL ($LOCAL) -- this can take a while on top of model-load time."
 # --max-model-len caps KV cache reservation. Found for real: Qwen3-Coder's
@@ -84,7 +88,7 @@ echo "First run downloads the checkpoint into \$LOCAL ($LOCAL) -- this can take 
     --tensor-parallel-size "$TP_SIZE" \
     --max-model-len "${MAX_MODEL_LEN:-8192}" \
     ${VLLM_EXTRA_ARGS:-} \
-    > vllm_server.out 2> vllm_server.err &
+    > "$VLLM_OUT" 2> "$VLLM_ERR" &
 VLLM_PID=$!
 trap 'kill "$VLLM_PID" 2>/dev/null || true' EXIT
 
@@ -95,9 +99,9 @@ for i in $(seq 1 360); do
     # first job submission, where vllm crashed within ~1 minute but the
     # loop (checking only curl) burned the whole 30 minutes anyway.
     if ! kill -0 "$VLLM_PID" 2>/dev/null; then
-        echo "vllm process exited after attempt $i -- see vllm_server.err below." >&2
+        echo "vllm process exited after attempt $i -- see $VLLM_ERR below." >&2
         echo "--- vllm_server.err (full) ---" >&2
-        cat vllm_server.err >&2 || true
+        cat "$VLLM_ERR" >&2 || true
         exit 1
     fi
     if curl -sf http://localhost:8000/health >/dev/null 2>&1; then
@@ -110,7 +114,7 @@ for i in $(seq 1 360); do
         # root cause above," and a short tail has twice now cut off the
         # actual error, costing a full debugging round-trip each time.
         echo "--- vllm_server.err (full) ---" >&2
-        cat vllm_server.err >&2 || true
+        cat "$VLLM_ERR" >&2 || true
         exit 1
     fi
     sleep 5
@@ -136,7 +140,12 @@ if [ "${EVAL_MODE:-pipeline}" = "gen_only" ]; then
     echo "Smoke test: profile $FIRST_PROFILE, 3 cases x 2 candidates ..."
     uv run python -m evals.gen_only_eval --profile "$FIRST_PROFILE" --model "$REPO_ID" \
         --host http://localhost:8000 --db data/ledgerql.duckdb --out "$OUT/smoke" \
-        --smoke 3 --n 2 | tee "$OUT/smoke.log"
+        --smoke 3 --n 2 | tee "$OUT/smoke.log" || smoke_status=${PIPESTATUS[0]}
+    if [ "${smoke_status:-0}" -ne 0 ]; then
+        echo "Smoke test FAILED (exit $smoke_status). vllm server log tail ($VLLM_ERR):" >&2
+        tail -n 80 "$VLLM_ERR" >&2 || true
+        exit "$smoke_status"
+    fi
     if [ -n "${SMOKE_ONLY:-}" ]; then
         echo "SMOKE_ONLY set: stopping after the smoke test. Log: $OUT/smoke.log"
     else
