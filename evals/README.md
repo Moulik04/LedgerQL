@@ -247,6 +247,21 @@ and necessary safety property, but it is not evidence that an answered case
 is correct -- read it beside confidently-wrong rate, not in place of it. See
 `DECISIONS.md`, 2026-09-23, "Confidently-wrong rate: the hallucination
 metric's complement, measured".
+
+**Scope of the 0.0%: it does not cover years.** `verify.extract_numbers()`
+skips a bare 2000-2099 number (and a number followed by `-` and a capital, a
+form code like "10-K"), and the fiscal-year check that stands in for the year
+exclusion (`verify.extract_years`) only runs when the result has a
+`fiscal_year` column. The answer writer never sees the question, so a year in
+its prose that no result cell contains was not copied from anything it was shown.
+`python -m evals.year_audit <report>` counts them. Measured on the shipped
+(repair-off) config: 17 of the 30B's 55 answers state such a year (2021, 2022
+or 2023, none of which is a fiscal year the database holds, which runs
+2024-2026, and none asked for by the question), and 1 of the 32B's 44 (T03: right years,
+unsupported by anything shown). Nine of those 17 have a correct result under a
+misstated year. So "0.0% hallucinated numbers" means zero unsupported
+*non-year* numbers until the verifier covers years. See DECISIONS.md,
+2026-09-29, "Two audits".
 | Guardrail catch rate | abstain-expected cases in the tier refused by a *deterministic* layer, with a deterministic reason code / 9 on `adversarial` | did the static defences work independent of the LLM |
 | Grounding pass rate | grounding + unit_period cases with verifier pass / n | are the numbers in the prose the numbers in the table |
 | Selective accuracy @ coverage c | accuracy on the c% highest-confidence cases | if we only trust it above a threshold, how good is it |
