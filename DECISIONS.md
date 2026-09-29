@@ -1608,14 +1608,14 @@ answered; no verifier, no year rule):
 | XiYan -> 32B | 0.725 [0.585, 0.864] | 15/49 -> 5/30 |
 
 Cross-model agreement holds up on generation-only data, at 0.73-0.88. On the
-XiYan prompt the pairs involving XiYan are weaker (0.64-0.68 against the 30B and
+XiYan prompt the pairs involving XiYan are weaker (0.64-0.76 against the 30B and
 32B), and XiYan and the 32B share a Qwen2.5-Coder base, so they are not
 independent. The policy keeps 24-30 of ~47 answers, about half. Native-prompt
 tables (30B and 32B on `current`, XiYan on `xiyan`) give the same range.
 
 ### OmniSQL-32B: no output was produced, so none of the suspected causes applies
 
-Its smoke gate failed with every one of the 12 requests returning an HTTP error
+Its smoke gate failed with every one of its 6 requests (3 cases x 2 candidates) returning an HTTP error
 (`finish=error:HTTPStatusError`, empty raw text, `reason=OUT_OF_SCOPE` from the
 empty SQL). The model never wrote a token, so "the extractor took the first code
 block", "reasoning ran past the token limit" and "SQLite SQL failing in DuckDB" are
