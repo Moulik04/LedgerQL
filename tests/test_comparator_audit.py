@@ -2,7 +2,9 @@ from pathlib import Path
 
 from evals.comparator_audit import (
     apply_relaxed,
+    assumption_outcomes,
     audit,
+    combined_rule,
     context_columns,
     load_jsonl,
     relaxed_match,
@@ -120,3 +122,59 @@ def test_apply_relaxed_flips_only_the_listed_records():
     out = apply_relaxed(per_case, ["A"])
     assert [r["execution_correct"] for r in out] == [True, False]
     assert per_case[0]["execution_correct"] is False  # the input is not mutated
+
+
+def test_combined_rule_credits_a_context_only_mismatch_only_if_its_prose_survives_the_year_rule():
+    cases = {
+        "K": {"id": "K", "expected": "ANSWER_WITH_ASSUMPTION", "compare": "set", "gold_sql": "g"},
+        "Y": {"id": "Y", "expected": "ANSWER_WITH_ASSUMPTION", "compare": "set", "gold_sql": "g"},
+    }
+    gold = {
+        "K": (["value", "uom"], [(5.0, "USD")]),
+        "Y": (["value", "uom"], [(5.0, "USD")]),
+    }
+    sql = "SELECT value FROM v_revenue WHERE fiscal_year = 2025"
+    base = {
+        "columns": ["value"],
+        "rows": [[5.0]],
+        "execution_correct": False,
+        "expected": "ANSWER_WITH_ASSUMPTION",
+    }
+    per_case = [
+        {
+            **base,
+            "id": "K",
+            "answer": "The value is 5.0 for fiscal year 2025.",
+            "generated_sql": sql,
+        },
+        {
+            **base,
+            "id": "Y",
+            "answer": "The value is 5.0 for fiscal year 2022.",
+            "generated_sql": sql,
+        },
+    ]
+    out = combined_rule(per_case, cases, gold)
+    # Y is a context-only mismatch, but its invented year makes it an abstain first.
+    assert out["credited"] == ["K"]
+    assert [r["execution_correct"] for r in out["records"] if r["id"] == "K"] == [True]
+    assert [r["answer"] for r in out["records"] if r["id"] == "Y"] == [None]
+
+
+def test_assumption_outcomes_separates_answering_correctly_from_merely_abstaining():
+    cases = {c: {"id": c, "expected": "ANSWER_WITH_ASSUMPTION"} for c in "ABCD"}
+    cases["Z"] = {"id": "Z", "expected": "ANSWER"}
+    per_case = [
+        {"id": "A", "answer": "x", "execution_correct": True},
+        {"id": "B", "answer": "x", "execution_correct": False},
+        {"id": "C", "answer": None, "execution_correct": False},
+        {"id": "D", "answer": None, "execution_correct": False},
+        {"id": "Z", "answer": "x", "execution_correct": True},  # not an assumption case
+    ]
+    # compute_abstain_metrics's "handled" would say 3 of 4; only one is a real answer.
+    assert assumption_outcomes(per_case, cases) == {
+        "answered_correct": 1,
+        "abstained": 2,
+        "answered_wrong": 1,
+        "n": 4,
+    }

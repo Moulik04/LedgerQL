@@ -38,6 +38,7 @@ import duckdb
 from evals.abstain_scoring import compute_abstain_metrics
 from evals.passn_scoring import GOLD_PATH, load_jsonl
 from evals.replay_repair_off import revert_exec_error_repairs
+from evals.replay_year_rule import apply_year_rule
 from evals.run_eval import results_match
 from evals.year_audit import audit as year_audit
 
@@ -146,6 +147,31 @@ def apply_relaxed(per_case: list[dict], context_only: list[str]) -> list[dict]:
     return [{**r, "execution_correct": True} if r["id"] in ids else r for r in per_case]
 
 
+def combined_rule(per_case: list[dict], cases: dict, gold: dict) -> dict:
+    """The three changes adopted together: the year-grounding verifier (an answer
+    it rejects abstains), then the relaxed comparator on what still answers.
+    `answer_must_state` is not part of it: nothing scores that yet, so the result
+    is an upper bound on assumption handling under the full rule."""
+    after_years = apply_year_rule(per_case)
+    credited = audit(after_years, cases, gold)["context_only"]
+    return {"credited": credited, "records": apply_relaxed(after_years, credited)}
+
+
+def assumption_outcomes(per_case: list[dict], cases: dict) -> dict:
+    """`ANSWER_WITH_ASSUMPTION` cases split three ways. `assumption_case_handling`
+    counts an abstain as handled, so a rule that turns wrong answers into abstains
+    raises it while answering nothing better; this keeps them apart."""
+    records = [r for r in per_case if cases[r["id"]]["expected"] == "ANSWER_WITH_ASSUMPTION"]
+    abstained = sum(r["answer"] is None for r in records)
+    correct = sum(r["answer"] is not None and r.get("execution_correct") is True for r in records)
+    return {
+        "answered_correct": correct,
+        "abstained": abstained,
+        "answered_wrong": len(records) - abstained - correct,
+        "n": len(records),
+    }
+
+
 def gold_context_cases(cases: dict, gold: dict) -> list[tuple[str, list[str]]]:
     """Gold cases that carry at least one context column, with those columns."""
     found = []
@@ -178,6 +204,23 @@ def _report(label: str, per_case: list[dict], cases: dict, gold: dict) -> None:
         f"{after['assumption_cases']}  ({before['assumption_case_handling']:.1%} -> "
         f"{after['assumption_case_handling']:.1%})"
     )
+    combined = combined_rule(per_case, cases, gold)
+    final = compute_abstain_metrics(combined["records"], cases)
+    print(
+        f"  combined (year verifier + relaxed comparator; answer_must_state unscored, so an "
+        f"upper bound): {final['assumption_cases_handled']}/{final['assumption_cases']} "
+        f"({final['assumption_case_handling']:.1%}); credited {combined['credited']}"
+    )
+    for label, records in (
+        ("strict comparator", per_case),
+        ("relaxed comparator", apply_relaxed(per_case, a["context_only"])),
+        ("combined", combined["records"]),
+    ):
+        o = assumption_outcomes(records, cases)
+        print(
+            f"    {label:<20} answered correctly {o['answered_correct']:>2}, "
+            f"abstained {o['abstained']:>2}, answered wrong {o['answered_wrong']:>2} of {o['n']}"
+        )
     fabricated = {f["id"] for f in year_audit(per_case, cases)["ungrounded"]}
     both = sorted(set(a["context_only"]) & fabricated)
     print(
