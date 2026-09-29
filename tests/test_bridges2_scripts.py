@@ -205,3 +205,48 @@ def test_the_job_itself_refuses_to_start_without_or_on_the_wrong_commit(cluster,
         env={**env, "EXPECTED_COMMIT": cluster["h1"]},
     )
     assert "commit verified" in right.stdout  # got past the guard (then fails on module load)
+
+
+GENONLY_JOBS = {
+    "run_qwen3_coder_30b_genonly.sbatch": "Qwen/Qwen3-Coder-30B-A3B-Instruct",
+    "run_qwen25_coder_32b_awq_genonly.sbatch": "Qwen/Qwen2.5-Coder-32B-Instruct-AWQ",
+    "run_xiyansql_32b_genonly.sbatch": "XGenerationLab/XiYanSQL-QwenCoder-32B-2504",
+    "run_omnisql_32b_genonly.sbatch": "seeklhy/OmniSQL-32B",
+}
+
+
+def test_every_bridges2_script_parses():
+    for script in [*SCRIPTS.glob("*.sh"), *SCRIPTS.glob("*.sbatch")]:
+        result = subprocess.run(["bash", "-n", str(script)], capture_output=True, text=True)
+        assert result.returncode == 0, f"{script.name}: {result.stderr}"
+
+
+@pytest.mark.parametrize("job,repo_id", GENONLY_JOBS.items())
+def test_each_bakeoff_job_runs_the_generation_only_mode_for_its_model(job, repo_id):
+    text = (SCRIPTS / job).read_text()
+    assert "export EVAL_MODE=gen_only" in text
+    assert "export PROFILES=" in text
+    assert f"run_model_eval.sh {repo_id} 1" in text
+    assert "--gres=gpu:h100-80:1" in text  # H100-80 (docs/bridges2.md), not the V100 pool
+
+
+def test_a_bakeoff_model_runs_its_own_native_profile_first_so_the_smoke_tests_it():
+    def profiles(job):
+        line = next(
+            line for line in (SCRIPTS / job).read_text().splitlines() if "export PROFILES=" in line
+        )
+        return line.split("=", 1)[1].strip('"').split()
+
+    assert profiles("run_xiyansql_32b_genonly.sbatch")[0] == "xiyan"
+    assert profiles("run_omnisql_32b_genonly.sbatch")[0] == "omnisql"
+    for job in ("run_qwen3_coder_30b_genonly.sbatch", "run_qwen25_coder_32b_awq_genonly.sbatch"):
+        assert profiles(job)[0] == "current"
+    assert all(set(profiles(j)) == {"current", "xiyan", "omnisql"} for j in GENONLY_JOBS)
+
+
+def test_the_job_body_smoke_tests_before_the_full_run_and_can_stop_after_it():
+    text = (SCRIPTS / "run_model_eval.sh").read_text()
+    assert 'EVAL_MODE:-pipeline}" = "gen_only"' in text
+    smoke = text.index("--smoke")
+    assert smoke < text.index("for profile in $PROFILES")  # gate precedes the full sweep
+    assert "SMOKE_ONLY" in text

@@ -81,6 +81,7 @@ echo "First run downloads the checkpoint into \$LOCAL ($LOCAL) -- this can take 
     --port 8000 \
     --tensor-parallel-size "$TP_SIZE" \
     --max-model-len 8192 \
+    ${VLLM_EXTRA_ARGS:-} \
     > vllm_server.out 2> vllm_server.err &
 VLLM_PID=$!
 trap 'kill "$VLLM_PID" 2>/dev/null || true' EXIT
@@ -122,8 +123,31 @@ nvidia-smi --query-gpu=index,name,memory.used,memory.total --format=csv
 OUT="reports/runs/${SLURM_JOB_ID:-manual-$(date +%s)}"
 mkdir -p "$OUT"
 
-echo "Running eval with LLM_BACKEND=vllm OLLAMA_MODEL=$REPO_ID -> $OUT ..."
-LLM_BACKEND=vllm OLLAMA_MODEL="$REPO_ID" uv run python evals/run_eval.py --db data/ledgerql.duckdb --reports-dir "$OUT"
+if [ "${EVAL_MODE:-pipeline}" = "gen_only" ]; then
+    # Task 9 bake-off: generation only, no classify/answer stage. PROFILES is a
+    # space-separated list; the first is the model's native prompt format. A
+    # 3-case smoke test on it runs first and, under pipefail, aborts the job
+    # (exit 3) unless the model produced executing SQL, so a model that will not
+    # load, fit, or emit SQL costs minutes of the allocation, not hours.
+    : "${PROFILES:?PROFILES is required when EVAL_MODE=gen_only, e.g. 'xiyan current omnisql'}"
+    FIRST_PROFILE="${PROFILES%% *}"
+    echo "Smoke test: profile $FIRST_PROFILE, 3 cases x 2 candidates ..."
+    uv run python -m evals.gen_only_eval --profile "$FIRST_PROFILE" --model "$REPO_ID" \
+        --host http://localhost:8000 --db data/ledgerql.duckdb --out "$OUT/smoke" \
+        --smoke 3 --n 2 | tee "$OUT/smoke.log"
+    if [ -n "${SMOKE_ONLY:-}" ]; then
+        echo "SMOKE_ONLY set: stopping after the smoke test. Log: $OUT/smoke.log"
+    else
+        for profile in $PROFILES; do
+            echo "Generation-only eval: profile $profile ..."
+            uv run python -m evals.gen_only_eval --profile "$profile" --model "$REPO_ID" \
+                --host http://localhost:8000 --db data/ledgerql.duckdb --out "$OUT"
+        done
+    fi
+else
+    echo "Running eval with LLM_BACKEND=vllm OLLAMA_MODEL=$REPO_ID -> $OUT ..."
+    LLM_BACKEND=vllm OLLAMA_MODEL="$REPO_ID" uv run python evals/run_eval.py --db data/ledgerql.duckdb --reports-dir "$OUT"
+fi
 
 # Provenance: what ran, on which commit, so every figure is attributable.
 cat > "$OUT/run_meta.json" <<META
@@ -131,6 +155,8 @@ cat > "$OUT/run_meta.json" <<META
   "commit": "$(git rev-parse HEAD)",
   "expected_commit": "$EXPECTED_COMMIT",
   "model": "$REPO_ID",
+  "eval_mode": "${EVAL_MODE:-pipeline}",
+  "profiles": "${PROFILES:-}",
   "tensor_parallel_size": $TP_SIZE,
   "slurm_job_id": "${SLURM_JOB_ID:-}",
   "host": "$(hostname)",
@@ -140,6 +166,10 @@ META
 
 echo ""
 echo "Done. Results at (pull back with: ssh bridges2 'cat <path>' > local-file):"
-echo "  $ROOT/ledgerql/$OUT/eval.md"
-echo "  $ROOT/ledgerql/$OUT/eval_$(date +%Y-%m-%d).jsonl"
+if [ "${EVAL_MODE:-pipeline}" = "gen_only" ]; then
+    echo "  $ROOT/ledgerql/$OUT/gen_only_<profile>.{jsonl,md,_summary.json}"
+else
+    echo "  $ROOT/ledgerql/$OUT/eval.md"
+    echo "  $ROOT/ledgerql/$OUT/eval_$(date +%Y-%m-%d).jsonl"
+fi
 echo "  $ROOT/ledgerql/$OUT/run_meta.json"
