@@ -1172,3 +1172,147 @@ two in every five answered cases are wrong despite being perfectly grounded.
 
 This reproduces the same cases already named in the entry above by ID, not
 re-derived here: T06, O04 and H08 on the 30B; M03 and H02 on the 32B.
+
+---
+
+## 2026-09-29 — pass@N: generation is the ceiling; Task 1 as specced fails
+
+Three findings, one decision each. Numbers reproduce with
+`python -m evals.passn_scoring <report>` and `python -m evals.signal_precheck`
+(no GPU; both replay the committed `reports/eval_bridges2_*_measured.jsonl`).
+
+### 1. Selection headroom is 3 of 50 on both models
+
+pass@1 is the vote's pick, re-executed locally with the same comparator as
+pass@N; pass@N asks whether *any* of the five candidates matched gold. Scored
+over the 50 `ANSWER`-expected cases (the population `overall_execution_accuracy`
+uses).
+
+| model | pass@1 | pass@N | selection headroom | wrong winners | of which no candidate correct |
+|---|---|---|---|---|---|
+| Qwen3-30B fp16 | 32/50 (64%) | 35/50 (70%) | 3 | 18 | 15 |
+| Qwen2.5-32B AWQ | 27/50 (54%) | 30/50 (60%) | 3 | 23 | 20 |
+
+**Generation is the ceiling, not selection.** 83% (30B) and 87% (32B) of wrong
+winners had no correct candidate to select. The per-tier gaps are 0 or 1 case
+each and are not interpretable. Nothing in this table supports tier-level
+claims.
+
+Two qualifications. (a) This is N=5 at temperature 0.7: on the 30B, 30 of the 32
+correct answers and 19 of the 23 wrong answers had unanimous candidates, so the
+samples are not very diverse, and a larger N or hotter sampler could find
+correct queries this one did not. Not measured. (b) The five-candidate pool is
+what selection could have chosen from; it is not an upper bound on what the
+model can generate.
+
+### 2. Why the local replay disagreed with the recorded runs, and what it was not
+
+Five records differ between the local pass@1 re-execution and the recorded
+`execution_correct`. I first guessed database drift. **That was wrong:**
+re-executing every candidate reproduces every recorded winner's rows
+(`rows_drift: none`), so the database is unchanged. The two real causes:
+
+- **Repair winners outside the candidate pool (3, all on the 32B: A11, J01, J07).**
+  Recorded correct via `exec_error` repair; the repaired SQL is a sixth query
+  that is not among the N candidates, so it cannot be the vote's pick. This is
+  why the replay reads 3 lower than the recorded 32B accuracy (29/50). The
+  shipped config has repair off, so this affects only measured-with-repair
+  figures.
+- **Post-vote verifier abstain (2: L07 on the 30B, L11 on the 32B).** The vote
+  picked the correct result; `verify.py` then abstained `UNGROUNDED_ANSWER`, so
+  the recorded case is wrong. Measured evidence for Task 4 (see below).
+
+### 3. Task 1 as specced fails; the fault is in the spec, not the pipeline
+
+Task 1 called for a five-signal logistic regression on `agreement`,
+`schema_margin`, `guardrail_clean`, `verifier_pass`, `result_nonempty`. Judged
+by AUROC for ranking correct answers above wrong ones, over every answered case
+(30B: 55 answered, 23 wrong; 32B: 44 answered, 18 wrong; the same populations
+the confidently-wrong rate uses):
+
+| signal | 30B AUROC [95% CI] | 32B AUROC [95% CI] | why |
+|---|---|---|---|
+| `agreement` | 0.556 [0.474, 0.652] | 0.714 [0.573, 0.848] | the only informative one, and weak on the 30B |
+| `guardrail_clean` | 0.500 | 0.500 | constant: a winner passed its guard, which returns no events on a pass and never rewrites semantically |
+| `verifier_pass` | 0.500 | 0.500 | constant: an answered case is one the verifier passed |
+| `result_nonempty` | 0.484 [0.453, 0.500] | 0.481 [0.442, 0.500] | all 23 (30B) and 18 (32B) wrong answers are non-empty; empty-result cases are already caught by the tautology and no-data checks |
+| `schema_margin` | n/a | n/a | cannot exist: there is no retrieval stage, `schema_index.get_schema_context()` injects the whole schema every time |
+
+Three of the five are constant or absent by construction, one is at chance, so
+the "model" would be `agreement` alone. On the 30B, `agreement` fails because
+its errors are systematic: five samples agree on the same wrong answer (19 of 23
+wrong answers were unanimous, against 30 of 32 correct). **Self-consistency
+cannot detect systematic errors.** Gating at unanimity moves the 30B from 41.8%
+to 38.8% confidently-wrong. On the 32B it does carry signal, and the existing
+`LOW_AGREEMENT` gate already spends it.
+
+**Decision: the calibrator is not built, and Task 1 is restated as a signal
+search evaluated by AUROC on all cases, not a fitted model.** With 23 (30B) and
+18 (32B) confidently-wrong answers, 8 of them in the calib split on each model,
+nothing fitted would generalise. Fitting waits for log-mined data, which makes
+that work the priority after the bake-off. (The 18 in the ANSWER-expected view
+includes 9 wrong winners that had already abstained on the 30B; no gate can help
+those. Only answered cases can be confidently wrong.)
+
+### 4. A signal that does separate: cross-model agreement
+
+For the 39 cases both models answered, whether the 30B's winning result matches
+the 32B's (order-insensitive, floats to 1e-6):
+
+| model | AUROC [95% CI] | winners agree | winners differ |
+|---|---|---|---|
+| Qwen3-30B | 0.884 [0.769, 0.981] | 24 cases, 1 wrong (4%) | 15 cases, 11 wrong (73%) |
+| Qwen2.5-32B | 0.946 [0.858, 1.000] | 24 cases, 1 wrong (4%) | 15 cases, 14 wrong (93%) |
+
+The one case wrong on both models and agreeing is U02. Answering only where the
+two agree keeps 24 of the 30B's 55 answers with 1 wrong (4.2%, against 41.8%),
+and retains 23 of its 32 correct answers (72%); it sacrifices four correct 30B
+answers (T04, U01, M06, M08) where the 32B was wrong. Separately, the 30B
+answered 16 cases the 32B abstained on, and 11 of those 16 were wrong.
+
+**Deployment cost, stated plainly: two large models per query.** Neither runs on
+the project's M2 laptop target; both need Bridges-2-class GPUs, so this is a
+research result, not a shippable default. An exploratory check against the older
+local 7B run (`reports/eval_2026-09-20.jsonl`, an earlier commit, recorded
+winner rows only, gitignored) gives a cheaper second opinion less signal: AUROC
+0.731 [0.577, 0.865] for the 30B (39 pairs) and 0.801 [0.663, 0.939] for the 32B
+(35 pairs). Caveats: 39 pairs; the 103 gold cases were the development set, so
+nothing here is held out. No threshold or parameter was fitted, only a
+match/no-match rule, so split discipline is not violated, but the figure is not
+a generalisation estimate either. Prompt-perturbation agreement on the 7B (the
+fallback) was not run: it was conditional on this failing.
+
+### 5. Consequences for scope
+
+- **Task 9 (bake-off) moves ahead of Task 1**, because pass@N measures
+  generation independently of selection. If XiYanSQL-32B or OmniSQL-32B raises
+  pass@N materially, Phase 6's LoRA should start from that model, or may not be
+  needed. Phase 6 is not scoped until the bake-off is in.
+- **Task 4 gains L11 (32B)** alongside L07/T07/R02/G01. L07 on the 30B and L11 on
+  the 32B are cases where the vote picked correctly and the verifier abstained
+  `UNGROUNDED_ANSWER` (measured, above). The 32B's L07 also abstains
+  `UNGROUNDED_ANSWER` ("31.0"), on a winner that was wrong anyway; investigate it
+  with the same fix, but it is not evidence of a correct-winner veto.
+- **Hallucinated-number rate is unchanged at 0.0%.** This entry touches no
+  generation, execution or answer path.
+
+### 6. Revised order and Task 1's acceptance (mirrors `PHASE_5_5_AMENDMENT_2.md`, which is gitignored)
+
+**Order: Task 7 (done) → Task 9 → Task 1 (signal search) → Task 2 → Task 3 →
+Task 4 (+L11).** Task 5 stays resolved (repair cut, 2026-09-21); O06's
+model-dependence (answered on the 30B, refused on the 32B) is open and
+unscoped. Mining the audit log for new gold cases is the priority after the
+bake-off.
+
+**Task 1, restated:** a signal search judged by AUROC with a bootstrap CI on all
+answered cases, on every model; nothing fitted; a signal advances to
+implementation only with its coverage cost stated. No numeric target is set on
+the confidently-wrong rate. The parts of Task 8 that need a fitted probability
+(reliability diagram, ECE, Brier) wait with the fit; the rest is unaffected.
+
+**Task 9 uses a generation-only harness, not the full pipeline.** `OLLAMA_MODEL`
+drives classify and answer as well as generate, so a specialist that over-refuses
+in classify would never reach generation and would read as low pass@N. The
+harness (`evals/gen_only_eval.py`) scores `ANSWER`-expected cases only, each
+model generating N=5 candidates in its own native prompt format, then guard,
+execute and vote with the unmodified pipeline modules.
