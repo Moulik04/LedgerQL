@@ -490,3 +490,27 @@ evidence of anything model-general.** It detects a specific generator
 behaviour (writing a degenerate, provably-empty query), not a property of the
 question -- see `ledgerql/result_shape.py`'s `is_tautologically_empty`
 docstring and DECISIONS.md.
+
+## 6f. pass@N, signal search, and the generation-only bake-off
+
+Three scripts, none needing a GPU except the last job:
+
+- `evals/passn_scoring.py <report>`: pass@1 (the vote's pick, re-executed
+  locally) against pass@N (did any of the N candidates match gold), over the
+  `ANSWER`-expected cases. A gap is selection headroom; no gap means generation
+  is the ceiling. Measured: 3 of 50 on both models (DECISIONS.md 2026-09-29).
+- `evals/signal_precheck.py`: which signals separate correct answers from wrong
+  ones, by AUROC with a bootstrap CI over every answered case, and the
+  cross-model agreement policy in full. Nothing is fitted: with ~20 wrong
+  answers per model, a fitted calibrator would not generalise. It reports which
+  signals are constant by construction (`guardrail_clean`, `verifier_pass`).
+- `evals/gen_only_eval.py` (Task 9): generation only. `ANSWER`-expected cases,
+  no classify, answer or verifier, N=5 seeded candidates in the model's own
+  prompt format (`--profile current|omnisql|xiyan`, see `evals/gen_prompts.py`),
+  then the pipeline's own guard, execute and vote. Its pass@1 is the vote pick
+  with no agreement gate, so it is **not comparable to a full-pipeline execution
+  accuracy**; compare models to each other, not to `overall_execution_accuracy`.
+  Candidate outcomes are broken out (guard-rejected, execution errors by kind,
+  truncated) so dialect problems show as their own failure class.
+  `--smoke K` gates a run on K cases. `evals/pairwise_agreement.py` then computes
+  cross-model agreement AUROC for every model pair from the runs' jsonl files.
