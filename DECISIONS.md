@@ -1345,3 +1345,75 @@ execute and vote with the unmodified pipeline modules.
 Once the bake-off runs exist, cross-model agreement AUROC is computed for every
 model pair (Qwen3-30B, Qwen2.5-32B, XiYanSQL-32B, OmniSQL-32B), since models that
 differ more may disagree more usefully than two Qwen generations do.
+
+---
+
+## 2026-09-29 — Two audits: years in prose, and over-specified gold
+
+Both reproduce with `python -m evals.year_audit <report>` and
+`python -m evals.comparator_audit <report>` (no GPU, no scoring changed).
+
+### 1. The 0.0% hallucinated-number rate does not cover years
+
+`verify.extract_numbers()` skips a bare 2000-2099 number and a number followed by
+`-` and a capital (a form code, "10-K"); every other integer must be grounded.
+The check that stands in for the year exclusion, `verify.extract_years`, only
+compares against a `fiscal_year` column, so an answer whose result has no such
+column can state any year. The writer never sees the question
+(`ledgerql/answer.py`), so a year in its prose that no result cell contains was
+not copied from anything it was shown.
+
+Scanning every answered case for a bare year in the prose that is in no result
+cell (an integer, or a date string beginning with the year):
+
+| run | answered | prose year in no result cell | result correct / wrong | year not asked for by the question |
+|---|---|---|---|---|
+| 30B, shipped | 55 | **17** | 9 / 8 | 17 |
+| 30B, as measured | 60 | 18 | 9 / 9 | |
+| 32B, shipped | 44 | 1 (T03) | 0 / 1 | 0 |
+
+All 17 of the 30B's stated years are 2021, 2022 or 2023. The database's fiscal
+years run 2024-2026, so none could be a true fiscal year of any row. It is a habit
+of the model: a lone value with no year attached gets "fiscal year 2022" or
+"2023" written beside it (L02, "Apple, fiscal year 2025", is narrated as 2022).
+The 32B's one case (T03) states the right years, unsupported by anything shown.
+Form codes: none ungrounded. **So the headline means zero unsupported non-year
+numbers.** `evals/README.md` now says so.
+
+**Options, not yet applied (the verifier is a safety layer):**
+(a) the verifier requires every prose year to appear in some result cell;
+replayed on the logs that abstains 17 of the 30B's 55 answers (coverage -31%,
+correct answers 32 -> 23, confidently-wrong 41.8% -> 39.5%) and 1 of the 32B's 44
+(40.9% -> 39.5%); (b) change the writer so it states no year that is not in the
+table, which would recover the nine correct results now misnarrated; (c) leave
+the verifier and scope the headline. Recommendation: (a) now, (b) to recover the
+coverage, measured on a GPU run.
+
+### 2. Over-specified gold: 9 cases on the 30B, 1 on the 32B, none in the headline
+
+Eleven gold cases carry a context column beside the target value (L03, L04, L09,
+J02, J06, U02, U07, U08, M01, M09, G04). A gold column counts as context if it is
+named `fiscal_year`, `period_end_date`, `uom` or `fiscal_period` **and is constant
+across gold's rows** (in a multi-year series `fiscal_year` labels the values and
+stays required). Under the relaxed rule those columns are optional on both sides
+and the target columns are compared with the case's own `compare` mode.
+
+| | strict | relaxed |
+|---|---|---|
+| 30B, `ANSWER` (headline execution accuracy, 50) | 31 (62.0%) | 31 (62.0%) |
+| 30B, `ANSWER_WITH_ASSUMPTION` (19) | 3 | 12 |
+| 30B, `assumption_case_handling` | 8/19 (42.1%) | 17/19 (89.5%) |
+| 32B, `ANSWER` (shipped) | 26 (52.0%) | 26 (52.0%) |
+| 32B, `assumption_case_handling` | 12/19 (63.2%) | 13/19 (68.4%) |
+
+The nine 30B cases (L03, L04, L09, J02, U02, U07, U08, M01, G04) are all
+`ANSWER_WITH_ASSUMPTION`, so the headline `ANSWER` accuracy does not move at all;
+the 32B has one, U02. **But seven of the nine the relaxed rule would credit state a
+year no result cell contains** (G04, J02, L03, L04, L09, M01, U02): correct value,
+misstated fiscal year, the very thing an assumption case exists to get right. And
+`answer_must_state`, which is how the assumption is meant to be checked, is
+scored by nothing yet. **Scoring is unchanged, and the relaxed rule should not be
+adopted before year grounding (section 1) and an `answer_must_state` check exist**;
+alone it would lift the 30B's assumption handling from 42% to 89% by crediting
+answers that misstate the year. This was a gold-design choice, not a pipeline
+fault.
