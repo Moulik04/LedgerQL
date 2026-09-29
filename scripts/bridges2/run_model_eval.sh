@@ -77,10 +77,12 @@ echo "First run downloads the checkpoint into \$LOCAL ($LOCAL) -- this can take 
 # real prompts (schema context + one question) are on the order of a few
 # thousand tokens at most (docs/schema.md is ~4.6KB) -- 8192 leaves ample
 # headroom while shrinking the KV cache requirement to well under 1GiB.
+# MAX_MODEL_LEN overrides the 8192 default; the generation-only bake-off jobs set
+# it per job, sized from their longest prompt (see the *_genonly.sbatch files).
 "$VLLM_PYTHON/vllm" serve "$REPO_ID" \
     --port 8000 \
     --tensor-parallel-size "$TP_SIZE" \
-    --max-model-len 8192 \
+    --max-model-len "${MAX_MODEL_LEN:-8192}" \
     ${VLLM_EXTRA_ARGS:-} \
     > vllm_server.out 2> vllm_server.err &
 VLLM_PID=$!

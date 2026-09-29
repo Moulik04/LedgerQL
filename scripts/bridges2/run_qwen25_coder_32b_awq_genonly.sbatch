@@ -21,5 +21,12 @@ set -euo pipefail
 cd "$SLURM_SUBMIT_DIR"
 export EVAL_MODE=gen_only
 export PROFILES="current xiyan omnisql"
+# Context length, explicit: the longest prompt over all 103 cases and 3 profiles is
+# 2253 tokens (omnisql, measured with these models' tokenizers), plus 2048 generated
+# tokens (evals/gen_only_eval.py DEFAULT_MAX_TOKENS) = 4301; 5120 leaves headroom.
+# One 5120-token sequence is 1.25 GiB of KV cache on the 32B (64 layers x 8 KV heads
+# x 128 x 2 x 2 bytes = 256 KiB/token) against ~9-10 GiB free at 0.95 utilisation.
+# The 256K default is what overflowed the cache before (docs/bridges2.md).
+export MAX_MODEL_LEN=5120
 export VLLM_EXTRA_ARGS="--gpu-memory-utilization 0.95"
 bash scripts/bridges2/run_model_eval.sh Qwen/Qwen2.5-Coder-32B-Instruct-AWQ 1

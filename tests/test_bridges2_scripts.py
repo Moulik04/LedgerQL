@@ -250,3 +250,42 @@ def test_the_job_body_smoke_tests_before_the_full_run_and_can_stop_after_it():
     smoke = text.index("--smoke")
     assert smoke < text.index("for profile in $PROFILES")  # gate precedes the full sweep
     assert "SMOKE_ONLY" in text
+
+
+def _exported(job: str, name: str) -> str:
+    line = next(
+        line for line in (SCRIPTS / job).read_text().splitlines() if f"export {name}=" in line
+    )
+    return line.split("=", 1)[1].strip('"')
+
+
+def test_the_job_body_takes_max_model_len_from_the_environment_defaulting_to_8192():
+    text = (SCRIPTS / "run_model_eval.sh").read_text()
+    assert '--max-model-len "${MAX_MODEL_LEN:-8192}"' in text  # pipeline jobs unchanged
+
+
+@pytest.mark.parametrize("job", GENONLY_JOBS)
+def test_each_bakeoff_job_sets_a_context_length_that_fits_its_longest_prompt(job):
+    # vLLM rejects a request whose prompt plus max_tokens exceeds --max-model-len.
+    # Measured with the four models' tokenizers: the longest prompt is omnisql's,
+    # 2253 tokens, so 2253 + 2048 = 4301. Here, without a tokenizer, the prompt is
+    # bounded at 2.5 chars/token (measured: 2.9), which still has to fit.
+    from evals import gen_prompts
+    from evals.gen_only_eval import DEFAULT_MAX_TOKENS
+    from evals.passn_scoring import GOLD_PATH, load_jsonl
+    from ledgerql import schema_index
+    from tests.support import require_fixture
+
+    db = str(require_fixture("data/ledgerql.duckdb"))
+    schema, context = gen_prompts.introspect(db), schema_index.get_schema_context()
+    chars = max(
+        len(m["content"])
+        for profile in gen_prompts.PROFILES
+        for case in load_jsonl(GOLD_PATH)
+        for m in gen_prompts.build_messages(
+            profile, case["question"], schema=schema, schema_context=context
+        )
+    )
+    context_len = int(_exported(job, "MAX_MODEL_LEN"))
+    assert context_len >= chars / 2.5 + DEFAULT_MAX_TOKENS
+    assert context_len <= 8192  # never back toward the default that overflowed the KV cache

@@ -288,3 +288,16 @@ ssh bridges2 'cat ~/ledgerql-bridges2/ledgerql/reports/eval_bridges2_Qwen-Qwen3-
 ```
 
 The `.gitignore` excepts `reports/eval_bridges2_*` so these can be tracked.
+
+## Generation-only bake-off jobs (Task 9)
+
+`scripts/bridges2/run_*_genonly.sbatch` run `evals/gen_only_eval.py` (see
+`evals/README.md` §6f), not the full pipeline. Each is one H100-80 with
+`--gpu-memory-utilization 0.95` and an explicit `--max-model-len 5120`
+(`MAX_MODEL_LEN`, defaulting to 8192 for the pipeline jobs). Sizing: the longest
+prompt over all 103 cases and all three profiles is 2253 tokens (`omnisql`;
+`xiyan` 1900, `current` 1505, identical across the four models' tokenizers),
+plus 2048 generated tokens, is 4301. The 32B models cost 256 KiB of KV cache per
+token, so 5120 tokens is 1.25 GiB against roughly 9-10 GiB free after ~61 GiB of
+BF16 weights. Each job smoke-tests 3 cases on its native profile first and aborts
+before the full sweep if the model produces no executing SQL.
