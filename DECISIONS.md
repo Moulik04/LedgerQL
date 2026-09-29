@@ -1548,3 +1548,86 @@ count of assumption cases answered correctly with the assumption stated is about
 0 of 19 on both models today. That is what Tasks 2 and 3 have to move. The
 relaxed comparator is adopted only as part of this one change: `evals/run_eval.py`
 scoring is unchanged until the grader exists.
+
+---
+
+## 2026-09-29 — Bake-off (Task 9): three of four runs in; nothing raises pass@N
+
+Jobs 47274007 (Qwen3-30B), 47274008 (Qwen2.5-32B AWQ), 47274009 (XiYanSQL-32B)
+completed; **47274010 (OmniSQL-32B) failed its smoke gate and produced no results.**
+All at commit 76c792c (each `run_meta.json`), 50 records per profile file (the 50
+`ANSWER` cases), logs end cleanly, no truncated or failed model calls in the three
+completed runs. `evals.passn_scoring` finds zero drift between each record's
+`execution_correct` and the local re-execution, and no database drift. Re-extracting
+all 2250 candidates of each run's raw replies offline reproduces every stored SQL
+exactly; the extractor takes the last complete fenced block, and 35 replies with two
+or more blocks parse as intended. The gen-only harness reproduces the earlier
+pipeline replay for the 32B exactly (27 -> 30 of 50).
+
+### pass@1 -> pass@N, 50 `ANSWER` cases, N=5, temperature 0.7
+
+| model | `current` prompt | `xiyan` (M-Schema) | `omnisql` (DDL) |
+|---|---|---|---|
+| Qwen3-30B | 31 -> 33 | 35 -> 35 | 26 -> 34 |
+| Qwen2.5-32B AWQ (4-bit) | 27 -> 30 | 30 -> 35 | 31 -> 35 |
+| XiYanSQL-32B | 34 -> 35 | 31 -> 34 (native) | 31 -> 36 |
+| OmniSQL-32B | **not run** | **not run** | **not run** |
+
+**No model or prompt raises pass@N materially.** It sits at 33-36 of 50 (66-72%)
+everywhere; the best cell, XiYan on the DDL prompt at 36, is one case above the
+30B's 35 on the M-Schema prompt (the earlier pipeline replay was also 35). The
+spread between cells is a few cases of 50 from a single seed set, the same order
+as the run-to-run difference on the 30B's own `current` prompt (31/33 here, 32/35 in
+the earlier pipeline replay), so no prompt-format ranking should be read from it.
+The clearest movement: the M-Schema prompt lifts the 30B's pass@1 from 31 to 35 and
+XiYan's native format did not beat the pipeline prompt for XiYan itself (31 vs 34).
+Pass@1 here is the vote pick with no gates and is not comparable to pipeline
+execution accuracy. The 32B stays 4-bit AWQ, so the scale-versus-quantisation
+confound from Phase 5 is unchanged.
+
+**Union over all nine runs, 2250 candidates: 42 of 50 cases are solved by some
+candidate; eight are solved by none** (A09, J04, J05, L12, R02, R04, R05, T02).
+Each model's union over its three prompts is 40-41. So the ceiling is not a model
+property that another checkpoint moves; those eight cases should be read against
+gold and the schema before Phase 6 is scoped, because a LoRA cannot fix a case no
+sample from any model gets right unless the gold is what is wrong.
+
+### Cross-model agreement across the completed runs
+
+`python -m evals.pairwise_agreement`, AUROC for predicting the first model's
+correctness from whether the second's vote winner matches (vote winner exists =
+answered; no verifier, no year rule):
+
+| pair, same `current` prompt | AUROC [95% CI] | wrong -> wrong under "answer only where both agree" |
+|---|---|---|
+| 30B -> 32B | 0.821 [0.696, 0.929] | 16/47 -> 2/24 |
+| 32B -> 30B | 0.881 [0.781, 0.971] | 18/45 -> 2/24 |
+| 30B -> XiYan | 0.854 [0.742, 0.950] | 16/47 -> 2/27 |
+| XiYan -> 30B | 0.819 [0.696, 0.922] | 15/49 -> 2/27 |
+| 32B -> XiYan | 0.824 [0.704, 0.926] | 18/45 -> 5/30 |
+| XiYan -> 32B | 0.725 [0.585, 0.864] | 15/49 -> 5/30 |
+
+Cross-model agreement holds up on generation-only data, at 0.73-0.88. On the
+XiYan prompt the pairs involving XiYan are weaker (0.64-0.68 against the 30B and
+32B), and XiYan and the 32B share a Qwen2.5-Coder base, so they are not
+independent. The policy keeps 24-30 of ~47 answers, about half. Native-prompt
+tables (30B and 32B on `current`, XiYan on `xiyan`) give the same range.
+
+### OmniSQL-32B: no output was produced, so none of the suspected causes applies
+
+Its smoke gate failed with every one of the 12 requests returning an HTTP error
+(`finish=error:HTTPStatusError`, empty raw text, `reason=OUT_OF_SCOPE` from the
+empty SQL). The model never wrote a token, so "the extractor took the first code
+block", "reasoning ran past the token limit" and "SQLite SQL failing in DuckDB" are
+all unobservable; and the same `omnisql` prompt profile ran to completion, with no
+failed calls, on the other three models. The server was healthy (`/health` passed,
+GPU at 76.5 of 81.6 GB). Its `config.json`, `generation_config.json`, chat template
+and tokenizer settings match XiYan's, which served fine. The evidence that would
+settle it, the status code and body of the failed request, was discarded by the
+harness (it kept only the exception type), and the server log was a fixed
+`vllm_server.err` shared by all four jobs, overwritten. Both are fixed: the harness
+now records `error:HTTPStatusError:<status>` and the response body, the job writes
+`vllm_server_<jobid>.{out,err}`, and a failed smoke test prints the last 80 lines
+of the server log into the job's `.out`. Extraction is unchanged, so the completed
+runs are unaffected. A resubmitted OmniSQL job either succeeds or reports its own
+cause.
