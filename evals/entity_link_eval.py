@@ -51,6 +51,33 @@ def pack(
     return out
 
 
+def pack_run_dir(run_dir: Path, model: str, profile: str = "omnisql") -> list[dict]:
+    """A Bridges-2 A/B job writes both conditions into one directory: `gen_only_<profile>.jsonl`
+    (baseline) and `gen_only_<profile>_linked.jsonl` (with `--entity-link`)."""
+    out = []
+    for label, name in (
+        ("baseline", f"gen_only_{profile}.jsonl"),
+        ("linked", f"gen_only_{profile}_linked.jsonl"),
+    ):
+        for line in (Path(run_dir) / name).read_text().splitlines():
+            if not line.strip():
+                continue
+            rec = json.loads(line)
+            out.append(
+                {
+                    "model": model,
+                    "profile": label,
+                    "id": rec["id"],
+                    "sqls": [c["sql"] for c in rec["candidates"]],
+                    "winner_sql": rec["generated_sql"],
+                    "reason_code": rec["reason_code"],
+                    "agreement": rec["confidence"],
+                    "entity_hint": rec.get("entity_hint", ""),
+                }
+            )
+    return out
+
+
 def load(path: Path = EVIDENCE_PATH) -> list[dict]:
     return [json.loads(line) for line in Path(path).read_text().splitlines() if line.strip()]
 
@@ -91,14 +118,25 @@ def compare(base: list[Pool], linked: list[Pool], version: str) -> dict:
     }
 
 
-def render(base: list[Pool], linked: list[Pool]) -> str:
+LOCAL_7B_TITLE = "# Entity linking on the local 7B (qwen2.5-coder:7b, `current` prompt)"
+LOCAL_7B_INTRO = (
+    "{n} cases where the linker adds a hint (elsewhere the prompts are identical); N=5, "
+    "temperature 0.7, seeds 42-46 in both conditions; `evals/entity_link_eval.py`. "
+    "Linked minus baseline."
+)
+
+
+def render(
+    base: list[Pool],
+    linked: list[Pool],
+    title: str = LOCAL_7B_TITLE,
+    intro: str = LOCAL_7B_INTRO,
+) -> str:
     n = len({p.id for p in base})
     lines = [
-        "# Entity linking on the local 7B (qwen2.5-coder:7b, `current` prompt)",
+        title,
         "",
-        f"{n} cases where the linker adds a hint (elsewhere the prompts are identical); N=5, "
-        "temperature 0.7, seeds 42-46 in both conditions; `evals/entity_link_eval.py`. "
-        "Linked minus baseline.",
+        intro.format(n=n),
         "",
         "| gold | pass@1 base -> linked | cases gained / lost | pass@N base -> linked | cases gained / lost | correct candidates base -> linked (of 5 per case) | gained / lost |",
         "|---|---|---|---|---|---|---|",
@@ -131,8 +169,20 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("linked", type=Path, nargs="?")
     ap.add_argument("--db", default=DEFAULT_DB)
     ap.add_argument("--write", type=Path)
+    ap.add_argument("--run-dir", type=Path, help="a Bridges-2 A/B run directory (both conditions)")
+    ap.add_argument("--model", help="model label for --run-dir, e.g. qwen3_30b")
+    ap.add_argument("--profile", default="omnisql")
+    ap.add_argument(
+        "--pack-to", type=Path, help="where --run-dir writes the compact tracked evidence"
+    )
     args = ap.parse_args(argv)
-    if args.baseline and args.linked:
+    if args.run_dir:
+        if not args.model:
+            ap.error("--run-dir needs --model")
+        evidence = pack_run_dir(args.run_dir, args.model, args.profile)
+        if args.pack_to:
+            args.pack_to.write_text("".join(json.dumps(r) + "\n" for r in evidence))
+    elif args.baseline and args.linked:
         evidence = pack(args.baseline, args.linked)
         EVIDENCE_PATH.write_text("".join(json.dumps(r) + "\n" for r in evidence))
     else:
@@ -140,7 +190,18 @@ def main(argv: list[str] | None = None) -> int:
     pools = score_bakeoff(evidence, Gold(args.db))
     base = [p for p in pools if p.profile == "baseline"]
     linked = [p for p in pools if p.profile == "linked"]
-    text = render(base, linked)
+    if args.run_dir:
+        hinted = sum(bool(r["entity_hint"]) for r in evidence if r["profile"] == "linked")
+        text = render(
+            base,
+            linked,
+            f"# Entity linking A/B: {args.model}, `{args.profile}` prompt",
+            "{n} ANSWER cases, N=5, temperature 0.7, seeds 42-46, one server session, both "
+            f"conditions; the linker adds a hint to {hinted} of them (elsewhere the prompts are "
+            "identical). Scored against the frozen gold. Linked minus baseline.",
+        )
+    else:
+        text = render(base, linked)
     if args.write:
         args.write.write_text(text)
         print(f"wrote {args.write}")

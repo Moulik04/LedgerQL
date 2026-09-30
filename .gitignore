@@ -59,6 +59,8 @@ reports/runs/
 !reports/entity_upper_bound.md
 !reports/entity_link_7b.md
 !reports/entity_link_7b_candidates.jsonl
+!reports/entity_link_ab_*.jsonl
+!reports/entity_link_ab_*.md
 
 # Testing / tooling
 .pytest_cache/

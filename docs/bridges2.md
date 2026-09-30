@@ -301,3 +301,35 @@ plus 2048 generated tokens, is 4301. The 32B models cost 256 KiB of KV cache per
 token, so 5120 tokens is 1.25 GiB against roughly 9-10 GiB free after ~61 GiB of
 BF16 weights. Each job smoke-tests 3 cases on its native profile first and aborts
 before the full sweep if the model produces no executing SQL.
+
+## Entity-linking A/B jobs (approved 2026-09-30)
+
+`run_qwen3_coder_30b_entitylink.sbatch` and `run_xiyansql_32b_entitylink.sbatch` run the
+generation-only harness on the DDL (`omnisql`) prompt **twice in one server session**: without
+and then with `--entity-link` (`ledgerql/entity_link.py`). Same commit, same vLLM process, same
+seeds (42 to 46), same 50 `ANSWER` cases; only the resolved-companies hint differs. Each job
+smoke-tests first (unlinked, dev gold), then writes `gen_only_omnisql.jsonl` and
+`gen_only_omnisql_linked.jsonl` into `reports/runs/<jobid>/`, scored against `GOLD_FILE`
+(default: the frozen `evals/gold_v3.jsonl`).
+
+```bash
+# on the laptop: commit, push, then
+git rev-parse HEAD                     # the full 40-character hash
+# on the login node:
+scripts/bridges2/submit.sh <full-40-char-commit> \
+    run_qwen3_coder_30b_entitylink.sbatch run_xiyansql_32b_entitylink.sbatch
+```
+
+Retrieve each job's directory (`run_meta.json` records the commit and `entity_link_ab`), then
+score it offline, per model:
+
+```bash
+python -m evals.entity_link_eval --run-dir reports/runs/<jobid> --model qwen3_30b \
+    --pack-to reports/entity_link_ab_qwen3_30b.jsonl --write reports/entity_link_ab_qwen3_30b.md
+```
+
+**The held-out repeat.** Once `evals/heldout_v1.jsonl` and its `heldout_v1.sha256` are committed
+(`evals/HELDOUT_PROTOCOL.md` section 5), submit the same two jobs with
+`GOLD_FILE=evals/heldout_v1.jsonl` in the environment of `submit.sh`. `run_model_eval.sh` passes
+it to `gen_only_eval --gold`, which refuses a held-out file that is missing its pin or does not
+match it, so no model can run on the set before the freeze.

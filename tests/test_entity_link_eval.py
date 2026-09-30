@@ -59,3 +59,20 @@ def test_pack_keeps_the_sql_the_pick_and_the_hint(tmp_path):
     ]
     assert "secret" not in json.dumps(packed)
     assert all(r["model"] == E.MODEL for r in packed)
+
+
+def test_pack_run_dir_reads_the_baseline_and_linked_files_a_bridges2_ab_job_writes(tmp_path):
+    def rec(hint):
+        return {
+            "id": "L01", "generated_sql": "SELECT 1", "reason_code": None, "confidence": 1.0,
+            "entity_hint": hint, "candidates": [{"sql": "SELECT 1", "raw": "secret"}],
+        }  # fmt: skip
+
+    (tmp_path / "gen_only_omnisql.jsonl").write_text(json.dumps(rec("")) + "\n")
+    (tmp_path / "gen_only_omnisql_linked.jsonl").write_text(json.dumps(rec("HINT")) + "\n")
+    packed = E.pack_run_dir(tmp_path, model="qwen3_30b", profile="omnisql")
+    assert [(r["model"], r["profile"], r["entity_hint"]) for r in packed] == [
+        ("qwen3_30b", "baseline", ""),
+        ("qwen3_30b", "linked", "HINT"),
+    ]
+    assert "secret" not in json.dumps(packed)
