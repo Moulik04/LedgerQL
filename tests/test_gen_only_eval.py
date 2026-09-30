@@ -285,3 +285,13 @@ def test_a_linker_puts_its_hint_in_every_prompt_and_the_record_keeps_it(db):
 def test_cases_can_be_restricted_by_id():
     assert [c["id"] for c in select_cases(CASES, only={"A2"})] == ["A2"]
     assert [c["id"] for c in select_cases(CASES, only=None)] == ["A1", "A2"]
+
+
+def test_outputs_can_be_tagged_so_a_linked_run_sits_beside_its_baseline(tmp_path, db):
+    recs = _run(db, lambda messages, seed: Generation(RIGHT, "stop"), n=2)
+    stats = summarize(recs, CASES_BY_ID, db)
+    write_outputs(recs, stats, tmp_path, profile="omnisql", meta={"model": "m"})
+    write_outputs(recs, stats, tmp_path, profile="omnisql", meta={"model": "m"}, tag="_linked")
+    names = sorted(p.name for p in tmp_path.iterdir())
+    assert "gen_only_omnisql.jsonl" in names and "gen_only_omnisql_linked.jsonl" in names
+    assert "gen_only_omnisql_linked_summary.json" in names

@@ -40,7 +40,7 @@ from pathlib import Path
 import duckdb
 import httpx
 
-from evals import gen_prompts
+from evals import gen_prompts, scoring
 from evals.gen_prompts import PROFILES, SchemaInfo
 from evals.passn_scoring import GOLD_PATH, compute_pass_at_n, load_jsonl
 from evals.scoring import case_matches
@@ -213,7 +213,9 @@ def _score_case(case: dict, gens: list[Generation], gold, db_path: str) -> dict:
     correct = False
     if consensus.reason_code is None:
         gold_rows = gold.execute(case["gold_sql"]).fetchall()
-        correct = case_matches(case, gold_rows, consensus.rows, db_path)
+        correct = case_matches(
+            case, gold_rows, consensus.rows, db_path, pred_columns=consensus.columns
+        )
     return {
         "id": case["id"],
         "tier": case["tier"],
@@ -284,11 +286,11 @@ def _markdown(stats: dict, profile: str, meta: dict) -> str:
 
 
 def write_outputs(
-    records: list[dict], stats: dict, out_dir: Path, *, profile: str, meta: dict
+    records: list[dict], stats: dict, out_dir: Path, *, profile: str, meta: dict, tag: str = ""
 ) -> None:
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    stem = f"gen_only_{profile}"
+    stem = f"gen_only_{profile}{tag}"
     (out_dir / f"{stem}.jsonl").write_text(
         "".join(json.dumps(r, default=str) + "\n" for r in records)
     )
@@ -328,11 +330,18 @@ def main(argv: list[str] | None = None) -> int:
         help="add each question's resolved companies (ledgerql.entity_link) to the prompt",
     )
     ap.add_argument("--cases", help="comma-separated case ids to run (default: every ANSWER case)")
+    ap.add_argument(
+        "--gold",
+        type=Path,
+        default=GOLD_PATH,
+        help="gold file (default: gold.jsonl, v1); a held-out file must match its freeze pin",
+    )
     args = ap.parse_args(argv)
     if not args.model:
         ap.error("--model (or $OLLAMA_MODEL) is required")
 
-    gold = load_jsonl(GOLD_PATH)
+    scoring.require_frozen(args.gold)
+    gold = load_jsonl(args.gold)
     cases = select_cases(gold, set(args.cases.split(",")) if args.cases else None)
     if args.smoke:
         cases = smoke_cases(cases, args.smoke)
@@ -357,10 +366,18 @@ def main(argv: list[str] | None = None) -> int:
         return 0 if ok else SMOKE_EXIT_CODE
 
     stats = summarize(records, {c["id"]: c for c in gold}, args.db)
-    meta = {"model": args.model, "profile": args.profile, "n": args.n,
-            "temperature": args.temperature, "max_tokens": args.max_tokens}  # fmt: skip
-    write_outputs(records, stats, args.out, profile=args.profile, meta=meta)
-    print((args.out / f"gen_only_{args.profile}.md").read_text())
+    tag = "_linked" if args.entity_link else ""
+    meta = {
+        "model": args.model,
+        "profile": args.profile,
+        "n": args.n,
+        "temperature": args.temperature,
+        "max_tokens": args.max_tokens,
+        "entity_link": args.entity_link,
+        "gold": args.gold.name,
+    }
+    write_outputs(records, stats, args.out, profile=args.profile, meta=meta, tag=tag)
+    print((args.out / f"gen_only_{args.profile}{tag}.md").read_text())
     return 0
 
 

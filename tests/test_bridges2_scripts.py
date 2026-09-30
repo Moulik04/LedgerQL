@@ -304,3 +304,34 @@ def test_a_failed_smoke_test_prints_the_server_log_tail_before_the_job_exits():
     smoke = text.index("--smoke 3")
     assert 'tail -n 80 "$VLLM_ERR"' in text[smoke:]
     assert "PIPESTATUS" in text[smoke:]  # the smoke exit code survives the tee
+
+
+ENTITYLINK_JOBS = {
+    "run_qwen3_coder_30b_entitylink.sbatch": "Qwen/Qwen3-Coder-30B-A3B-Instruct",
+    "run_xiyansql_32b_entitylink.sbatch": "XGenerationLab/XiYanSQL-QwenCoder-32B-2504",
+}
+
+
+@pytest.mark.parametrize("job,repo_id", ENTITYLINK_JOBS.items())
+def test_each_entity_link_job_runs_the_ddl_prompt_with_and_without_linking(job, repo_id):
+    text = (SCRIPTS / job).read_text()
+    assert "export EVAL_MODE=gen_only" in text
+    assert _exported(job, "PROFILES") == "omnisql"  # the DDL prompt, only
+    assert _exported(job, "ENTITY_LINK_AB") == "1"
+    assert _exported(job, "MAX_MODEL_LEN") == "5120"
+    assert "${GOLD_FILE:-evals/gold_v3.jsonl}" in text  # frozen v3 by default; held-out by override
+    assert f"run_model_eval.sh {repo_id} 1" in text
+    assert "--gres=gpu:h100-80:1" in text
+
+
+def test_the_ab_job_runs_each_profile_unlinked_then_linked_in_one_server_session():
+    text = (SCRIPTS / "run_model_eval.sh").read_text()
+    body = text[text.index("for profile in $PROFILES") :]
+    plain = body.index('--out "$OUT" --gold')
+    linked = body.index("--entity-link")
+    assert plain < linked  # same server, same seeds, baseline first
+    assert "ENTITY_LINK_AB" in body
+    assert text.index("--smoke") < text.index(
+        "for profile in $PROFILES"
+    )  # the gate still comes first
+    assert '--gold "$GOLD_FILE"' in text

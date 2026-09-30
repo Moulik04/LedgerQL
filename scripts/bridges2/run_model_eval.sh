@@ -149,10 +149,21 @@ if [ "${EVAL_MODE:-pipeline}" = "gen_only" ]; then
     if [ -n "${SMOKE_ONLY:-}" ]; then
         echo "SMOKE_ONLY set: stopping after the smoke test. Log: $OUT/smoke.log"
     else
+        # GOLD_FILE: the gold the run scores against (default: the frozen v3). A held-out
+        # file is refused unless it matches its freeze pin (evals/scoring.require_frozen).
+        GOLD_FILE="${GOLD_FILE:-evals/gold_v3.jsonl}"
         for profile in $PROFILES; do
             echo "Generation-only eval: profile $profile ..."
             uv run python -m evals.gen_only_eval --profile "$profile" --model "$REPO_ID" \
-                --host http://localhost:8000 --db data/ledgerql.duckdb --out "$OUT"
+                --host http://localhost:8000 --db data/ledgerql.duckdb --out "$OUT" --gold "$GOLD_FILE"
+            if [ -n "${ENTITY_LINK_AB:-}" ]; then
+                # Entity-linking A/B: the same server session, the same seeds, the same
+                # cases, only the resolved-companies hint differs.
+                echo "Generation-only eval: profile $profile, WITH --entity-link ..."
+                uv run python -m evals.gen_only_eval --profile "$profile" --model "$REPO_ID" \
+                    --host http://localhost:8000 --db data/ledgerql.duckdb --out "$OUT" --gold "$GOLD_FILE" \
+                    --entity-link
+            fi
         done
     fi
 else
@@ -168,6 +179,8 @@ cat > "$OUT/run_meta.json" <<META
   "model": "$REPO_ID",
   "eval_mode": "${EVAL_MODE:-pipeline}",
   "profiles": "${PROFILES:-}",
+  "entity_link_ab": "${ENTITY_LINK_AB:-}",
+  "gold_file": "${GOLD_FILE:-}",
   "tensor_parallel_size": $TP_SIZE,
   "slurm_job_id": "${SLURM_JOB_ID:-}",
   "host": "$(hostname)",
