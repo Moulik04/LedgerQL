@@ -595,6 +595,13 @@ asks for an order ("highest", "top N", "N most", "oldest first"); otherwise as a
 carry 0.5, evidently percentage points written into a relative field, which
 accepts values up to 50% away.)
 
+**V6. Numeric cells use the case's tolerance in every compare mode.** v1 applied
+`tolerance` to scalar cases only; `set` and `ordered` compared floats for exact
+equality, so a ratio recomputed in a different operation order could never match.
+The relative tolerance is the case's own, default 1e-6, and it applies to every
+numeric cell that is not an entity (V2) or a proportion (V3, which uses the same
+tolerance after rescaling).
+
 **Two comparators, both reported.** *Strict* (the headline): the candidate must
 return exactly gold's columns, in gold's order, under V2 and V3. *Relaxed* (a
 second, labelled column, never the headline): the candidate matches if gold's

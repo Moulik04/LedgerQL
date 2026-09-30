@@ -1716,6 +1716,9 @@ identifier type reported. **V3** ratio scale: for a proportion, `x`, `100x` and
 is not covered and stays open**. **V4** ordered only if the question asks for an
 order, else set; one cell is scalar. **V5** relative tolerance capped at 0.05
 (`A10` and `C04` carry 0.5, which as a relative tolerance accepts values 50% away).
+**V6** the case's tolerance applies to numeric cells in every compare mode (v1 used
+it for scalars only, so a `set` or `ordered` float could only match exactly; added
+in a second commit, also before any gold v2 data or scoring).
 Strict is the headline; a relaxed comparator (extra columns ignored) is a second,
 labelled column.
 
@@ -1728,5 +1731,5 @@ labelled column.
 - **Bias, disclosed.** The audit that suggested V1 to V3 saw candidate output for
   the eight cases; the other 95 are converted from the text alone, and the
   per-case table (`evals/gold_v2.py`) names the rule behind each change.
-- **V5 is an addition beyond the three rules in the brief**, found while reading
-  gold tolerances; flagged so it can be vetoed.
+- **V5 and V6 are additions beyond the three rules in the brief**, found while
+  reading gold tolerances and the comparator; flagged so they can be vetoed.
