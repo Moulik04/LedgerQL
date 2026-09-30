@@ -260,11 +260,17 @@ def main(argv: list[str] | None = None) -> int:
         f"the {metrics['assumption_cases']} assumption cases are scored separately)"
     )
     print(
-        f"   assumption-case handling              "
-        f"{metrics['assumption_case_handling']:6.1%}   "
-        f"({metrics['assumption_cases_handled']}/{metrics['assumption_cases']} did either "
-        "acceptable thing)"
+        f"   assumption cases answered correctly   "
+        f"{metrics['assumption_answered_correct_rate']:6.1%}   "
+        f"({metrics['assumption_answered_correct']}/{metrics['assumption_cases']}; headline)"
     )
+    print(
+        f"   assumption cases abstained            "
+        f"{metrics['assumption_abstained_rate']:6.1%}   "
+        f"({metrics['assumption_abstained']}/{metrics['assumption_cases']}; "
+        f"answered wrong {metrics['assumption_answered_wrong']})"
+    )
+    print(f"   (older union 'handling' counted both: {metrics['assumption_case_handling']:.1%})")
     print(f"   always-abstain baseline precision     {baseline:6.1%}   <-- must beat this")
     if metrics["abstain_precision_strict"] <= baseline:
         print("   *** strict precision is AT OR BELOW the trivial baseline: the")

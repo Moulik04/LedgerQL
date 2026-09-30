@@ -233,10 +233,43 @@ def test_assumption_case_handling_counts_either_acceptable_outcome():
     assert round(metrics["assumption_case_handling"], 3) == 0.667
 
 
+def test_assumption_outcomes_split_answered_correct_abstained_and_answered_wrong():
+    cases_by_id = {
+        "A": _case("A", "ANSWER_WITH_ASSUMPTION", None),
+        "B": _case("B", "ANSWER_WITH_ASSUMPTION", None),
+        "C": _case("C", "ANSWER_WITH_ASSUMPTION", None),
+        "D": _case("D", "ANSWER_WITH_ASSUMPTION", None),
+    }
+    per_case = [
+        _record("A", None, "AMBIGUOUS"),  # abstained
+        {"id": "B", "answer": "x", "reason_code": None, "execution_correct": True},
+        {"id": "C", "answer": "x", "reason_code": None, "execution_correct": False},
+        {"id": "D", "answer": "x", "reason_code": None},  # report predates execution scoring
+    ]
+
+    metrics = compute_abstain_metrics(per_case, cases_by_id)
+
+    assert metrics["assumption_answered_correct"] == 1
+    assert metrics["assumption_abstained"] == 1
+    assert metrics["assumption_answered_wrong"] == 2
+    # Headline: answering correctly. It is NOT credited for abstaining, unlike the union
+    # `assumption_case_handling`, which reads 50% here because it counts the abstain.
+    assert metrics["assumption_answered_correct_rate"] == 0.25
+    assert metrics["assumption_abstained_rate"] == 0.25
+    assert metrics["assumption_case_handling"] == 0.5
+    parts = (
+        metrics["assumption_answered_correct"]
+        + metrics["assumption_abstained"]
+        + metrics["assumption_answered_wrong"]
+    )
+    assert parts == metrics["assumption_cases"]
+
+
 def test_assumption_case_handling_is_zero_with_no_assumption_cases():
     metrics = compute_abstain_metrics([], {"A": _case("A", "ABSTAIN", "OUT_OF_SCOPE")})
     assert metrics["assumption_cases"] == 0
     assert metrics["assumption_case_handling"] == 0.0
+    assert metrics["assumption_answered_correct_rate"] == 0.0
 
 
 def test_recall_correction_on_the_real_30b_report():

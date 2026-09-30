@@ -434,12 +434,17 @@ def write_reports(summary: dict, reports_dir: Path) -> tuple[Path, Path]:
         "are reported on their own line below. Precision still counts an "
         "abstain on either population as a correct decision.",
         "",
-        f"Assumption-case handling: {summary['assumption_case_handling']:.1%} "
-        f"({summary['assumption_cases_handled']}/{summary['assumption_cases']} of the "
-        "ANSWER_WITH_ASSUMPTION cases did one of the two acceptable things: "
-        "abstained, or answered with a result matching gold). The stronger "
-        "check -- that the assumption was also *stated* -- needs "
-        "`answer_must_state` rubric grading, which is not implemented yet.",
+        f"Assumption cases answered correctly: {summary['assumption_answered_correct_rate']:.1%} "
+        f"({summary['assumption_answered_correct']}/{summary['assumption_cases']}). "
+        f"Abstained: {summary['assumption_abstained_rate']:.1%} "
+        f"({summary['assumption_abstained']}/{summary['assumption_cases']}). "
+        f"Answered wrong: {summary['assumption_answered_wrong']}/{summary['assumption_cases']}. "
+        "The first is the headline; an abstain is an accepted alternative, not a success. "
+        '"Answered correctly" is an upper bound on *answered with the assumption '
+        "stated*, which needs `answer_must_state` rubric grading (not implemented). "
+        f"The older union figure, which counts an abstain as handled, was "
+        f"{summary['assumption_case_handling']:.1%} "
+        f"({summary['assumption_cases_handled']}/{summary['assumption_cases']}).",
         f"Reason-code accuracy: {summary['reason_code_accuracy']:.1%} "
         f"({summary['strict_correct_abstains']}/{summary['decision_correct_abstains']} of the "
         "abstains that were the right call also named the right reason).",

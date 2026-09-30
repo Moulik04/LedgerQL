@@ -66,6 +66,10 @@ def assumption_case_handled(record: dict) -> bool:
     `ANSWER_WITH_ASSUMPTION` case: abstain (acceptable), or answer with a
     result matching gold (the ideal outcome)?
 
+    This is the UNION of two different outcomes and reads high whenever a system
+    abstains a lot; prefer the split (`assumption_answered_correct_rate` as the
+    headline, `assumption_abstained_rate` beside it) in `compute_abstain_metrics`.
+
     `execution_correct` is the answer-side signal `run_eval.py` records;
     it is absent from reports written before assumption cases were
     execution-scored, so on those this degrades to counting abstains only
@@ -128,6 +132,15 @@ def compute_abstain_metrics(per_case: list[dict], cases_by_id: dict) -> dict:
     assumption_records = [r for r in per_case if r["id"] in assumption_ids]
     assumption_handled = [r for r in assumption_records if assumption_case_handled(r)]
 
+    # The split of the same 19 cases into three outcomes that cannot be conflated.
+    # `assumption_case_handling` above adds an abstain and a correct answer together,
+    # which is how a run in which nothing improved read 89.5%: it scored 15 abstains as
+    # handled. The headline is answering correctly; an abstain is reported on its own.
+    assumption_abstained = [r for r in assumption_records if r["answer"] is None]
+    assumption_answered_correct = [
+        r for r in assumption_records if r["answer"] is not None and r.get("execution_correct")
+    ]
+
     n_abstains = len(all_abstains)
     n_decision = len(decision_correct)
     n_strict = len(strict_correct)
@@ -152,4 +165,15 @@ def compute_abstain_metrics(per_case: list[dict], cases_by_id: dict) -> dict:
         "abstain_recall_strict": n_required_caught_strict / n_required if n_required else 0.0,
         "reason_code_accuracy": n_strict / n_decision if n_decision else 0.0,
         "assumption_case_handling": (n_assumption_handled / n_assumption if n_assumption else 0.0),
+        "assumption_answered_correct": len(assumption_answered_correct),
+        "assumption_abstained": len(assumption_abstained),
+        "assumption_answered_wrong": (
+            n_assumption - len(assumption_answered_correct) - len(assumption_abstained)
+        ),
+        "assumption_answered_correct_rate": (
+            len(assumption_answered_correct) / n_assumption if n_assumption else 0.0
+        ),
+        "assumption_abstained_rate": (
+            len(assumption_abstained) / n_assumption if n_assumption else 0.0
+        ),
     }

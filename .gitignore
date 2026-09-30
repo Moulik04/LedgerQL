@@ -54,6 +54,8 @@ reports/runs/
 # ...but the bake-off's compact evidence (candidate SQL only, no raw replies) is tracked:
 # every bake-off figure is re-scored from it (evals/bakeoff_evidence.py).
 !reports/bakeoff_candidates.jsonl
+!reports/gold_v2_rescore.md
+!reports/pool_experiment.md
 
 # Testing / tooling
 .pytest_cache/
