@@ -1,0 +1,547 @@
+{
+ "L03": [
+  {
+   "case": "L03",
+   "item": 0,
+   "text": "which fiscal year was used",
+   "surface": "answer",
+   "primary": "pattern",
+   "groups": [
+    {
+     "any": [
+      "(?i)fiscal\\s+(year\\s+)?'?(19|20)\\d\\d",
+      "(?i)\\bFY\\s?'?(19|20)?\\d\\d\\b",
+      "(?i)\\b(19|20)\\d\\d\\s+fiscal\\b"
+     ]
+    }
+   ]
+  }
+ ],
+ "L04": [
+  {
+   "case": "L04",
+   "item": 0,
+   "text": "fiscal year used",
+   "surface": "answer",
+   "primary": "pattern",
+   "groups": [
+    {
+     "any": [
+      "(?i)fiscal\\s+(year\\s+)?'?(19|20)\\d\\d",
+      "(?i)\\bFY\\s?'?(19|20)?\\d\\d\\b",
+      "(?i)\\b(19|20)\\d\\d\\s+fiscal\\b"
+     ]
+    }
+   ]
+  },
+  {
+   "case": "L04",
+   "item": 1,
+   "text": "period end date",
+   "surface": "answer",
+   "primary": "pattern",
+   "groups": [
+    {
+     "any": [
+      "\\b(19|20)\\d\\d-\\d\\d-\\d\\d\\b",
+      "(?i)\\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\\.?\\s+\\d{1,2},?\\s+(19|20)\\d\\d",
+      "(?i)period[- ]end",
+      "(?i)(ended|ending|as of|at the end of)\\s+[A-Za-z]+\\s+\\d{1,2}"
+     ]
+    }
+   ]
+  }
+ ],
+ "L09": [
+  {
+   "case": "L09",
+   "item": 0,
+   "text": "fiscal year used",
+   "surface": "answer",
+   "primary": "pattern",
+   "groups": [
+    {
+     "any": [
+      "(?i)fiscal\\s+(year\\s+)?'?(19|20)\\d\\d",
+      "(?i)\\bFY\\s?'?(19|20)?\\d\\d\\b",
+      "(?i)\\b(19|20)\\d\\d\\s+fiscal\\b"
+     ]
+    }
+   ]
+  }
+ ],
+ "A10": [
+  {
+   "case": "A10",
+   "item": 0,
+   "text": "that some companies, e.g. banks, are expected to be absent",
+   "surface": "answer",
+   "primary": "judge",
+   "groups": [
+    {
+     "any": [
+      "(?i)\\bbanks?\\b",
+      "(?i)financial institution",
+      "(?i)holding compan",
+      "(?i)financial (sector|compan)"
+     ]
+    },
+    {
+     "any": [
+      "(?i)absent|missing|not (all|every)|do(es)? not (report|file|have)|don't|exclud|no (standard )?revenue|expected"
+     ]
+    }
+   ]
+  }
+ ],
+ "T06": [
+  {
+   "case": "T06",
+   "item": 0,
+   "text": "financial_facts holds annual (10-K) figures only; quarterly is a Phase 2+ extension",
+   "surface": "refusal",
+   "primary": "pattern",
+   "groups": [
+    {
+     "any": [
+      "(?i)annual|10-K|yearly|full[- ]year|fiscal year"
+     ]
+    },
+    {
+     "any": [
+      "(?i)quarter|Q[1-4]\\b"
+     ]
+    }
+   ]
+  }
+ ],
+ "R07": [
+  {
+   "case": "R07",
+   "item": 0,
+   "text": "JPMorgan is a bank and does not file a standard revenue tag, so net margin cannot be computed from this dataset \u2014 this is documented as a known gap, not missing data",
+   "surface": "either",
+   "primary": "judge",
+   "groups": [
+    {
+     "any": [
+      "(?i)\\bbanks?\\b",
+      "(?i)financial institution",
+      "(?i)holding compan",
+      "(?i)financial (sector|compan)"
+     ]
+    },
+    {
+     "any": [
+      "(?i)revenue"
+     ]
+    },
+    {
+     "any": [
+      "(?i)\\bnot\\b",
+      "(?i)\\bno\\b",
+      "(?i)cannot|can't|unable",
+      "(?i)absent|missing|doesn't|does not|without"
+     ]
+    }
+   ]
+  }
+ ],
+ "U01": [
+  {
+   "case": "U01",
+   "item": 0,
+   "text": "billions",
+   "surface": "answer",
+   "primary": "pattern",
+   "groups": [
+    {
+     "any": [
+      "(?i)\\bbillions?\\b",
+      "(?i)\\bbn\\b",
+      "(?i)\\d\\s?B\\b"
+     ]
+    }
+   ]
+  }
+ ],
+ "U02": [
+  {
+   "case": "U02",
+   "item": 0,
+   "text": "interpreted as fiscal year 2024, which ended in late September 2024",
+   "surface": "answer",
+   "primary": "pattern",
+   "groups": [
+    {
+     "any": [
+      "(?i)fiscal\\s+(year\\s+)?'?2024",
+      "(?i)\\bFY\\s?'?(20)?24\\b"
+     ]
+    },
+    {
+     "any": [
+      "(?i)\\bsept(ember)?\\b",
+      "\\b2024-09"
+     ]
+    }
+   ]
+  }
+ ],
+ "U03": [
+  {
+   "case": "U03",
+   "item": 0,
+   "text": "total assets is a point-in-time balance and should not be summed across years \u2014 the two figures are shown separately instead",
+   "surface": "answer",
+   "primary": "judge",
+   "groups": [
+    {
+     "any": [
+      "(?i)(not|n't|cannot|can't)\\s+(be\\s+)?(sum|add|combin|total)",
+      "(?i)point[- ]in[- ]time",
+      "(?i)snapshot"
+     ]
+    }
+   ]
+  }
+ ],
+ "U06": [
+  {
+   "case": "U06",
+   "item": 0,
+   "text": "no 8-K filings are loaded for Tesla in this window \u2014 only 10-K and 10-Q are present",
+   "surface": "refusal",
+   "primary": "pattern",
+   "groups": [
+    {
+     "any": [
+      "8-K"
+     ]
+    },
+    {
+     "any": [
+      "(?i)\\bnot\\b|\\bno\\b|only|10-K|10-Q|loaded|available|present|don't|doesn't"
+     ]
+    }
+   ]
+  }
+ ],
+ "U07": [
+  {
+   "case": "U07",
+   "item": 0,
+   "text": "millions",
+   "surface": "answer",
+   "primary": "pattern",
+   "groups": [
+    {
+     "any": [
+      "(?i)millions?",
+      "(?i)\\b\\d[\\d,.]*\\s?M\\b",
+      "(?i)\\bmm\\b"
+     ]
+    }
+   ]
+  },
+  {
+   "case": "U07",
+   "item": 1,
+   "text": "which fiscal year",
+   "surface": "answer",
+   "primary": "pattern",
+   "groups": [
+    {
+     "any": [
+      "(?i)fiscal\\s+(year\\s+)?'?(19|20)\\d\\d",
+      "(?i)\\bFY\\s?'?(19|20)?\\d\\d\\b",
+      "(?i)\\b(19|20)\\d\\d\\s+fiscal\\b"
+     ]
+    }
+   ]
+  }
+ ],
+ "U08": [
+  {
+   "case": "U08",
+   "item": 0,
+   "text": "the raw unit (uom), which is base USD, not thousands or millions",
+   "surface": "answer",
+   "primary": "pattern",
+   "groups": [
+    {
+     "any": [
+      "(?i)\\bUSD\\b|dollars|\\buom\\b"
+     ]
+    },
+    {
+     "any": [
+      "(?i)not\\s+(in\\s+)?(thousands|millions)",
+      "(?i)\\bbase\\b",
+      "(?i)\\braw\\b",
+      "(?i)whole dollars|actual dollars"
+     ]
+    }
+   ]
+  }
+ ],
+ "M01": [
+  {
+   "case": "M01",
+   "item": 0,
+   "text": "which fiscal year was assumed",
+   "surface": "answer",
+   "primary": "pattern",
+   "groups": [
+    {
+     "any": [
+      "(?i)fiscal\\s+(year\\s+)?'?(19|20)\\d\\d",
+      "(?i)\\bFY\\s?'?(19|20)?\\d\\d\\b",
+      "(?i)\\b(19|20)\\d\\d\\s+fiscal\\b"
+     ]
+    }
+   ]
+  }
+ ],
+ "M02": [
+  {
+   "case": "M02",
+   "item": 0,
+   "text": "the metric used to define 'biggest' (e.g. revenue)",
+   "surface": "answer",
+   "primary": "pattern",
+   "groups": [
+    {
+     "any": [
+      "(?i)(by|based on|in terms of|measured (by|as)|using|according to|as measured by)\\s+(the\\s+)?(total\\s+|annual\\s+)?(revenue|assets|net income|market cap|sales)"
+     ]
+    }
+   ]
+  },
+  {
+   "case": "M02",
+   "item": 1,
+   "text": "the fiscal year used",
+   "surface": "answer",
+   "primary": "pattern",
+   "groups": [
+    {
+     "any": [
+      "(?i)fiscal\\s+(year\\s+)?'?(19|20)\\d\\d",
+      "(?i)\\bFY\\s?'?(19|20)?\\d\\d\\b",
+      "(?i)\\b(19|20)\\d\\d\\s+fiscal\\b"
+     ]
+    }
+   ]
+  }
+ ],
+ "M06": [
+  {
+   "case": "M06",
+   "item": 0,
+   "text": "'profit' interpreted as net income",
+   "surface": "answer",
+   "primary": "pattern",
+   "groups": [
+    {
+     "any": [
+      "(?i)net income",
+      "(?i)net profit",
+      "(?i)net earnings"
+     ]
+    }
+   ]
+  }
+ ],
+ "M07": [
+  {
+   "case": "M07",
+   "item": 0,
+   "text": "only the Class A ticker GOOGL is loaded for this CIK; GOOG (Class C) is not a separate row",
+   "surface": "refusal",
+   "primary": "pattern",
+   "groups": [
+    {
+     "any": [
+      "GOOGL",
+      "(?i)class a"
+     ]
+    },
+    {
+     "any": [
+      "\\bGOOG\\b",
+      "(?i)class c",
+      "(?i)not (a )?separate",
+      "(?i)not loaded",
+      "(?i)only"
+     ]
+    }
+   ]
+  }
+ ],
+ "M08": [
+  {
+   "case": "M08",
+   "item": 0,
+   "text": "'Google' resolved to Alphabet Inc. / ticker GOOGL",
+   "surface": "answer",
+   "primary": "pattern",
+   "groups": [
+    {
+     "any": [
+      "(?i)alphabet",
+      "GOOGL"
+     ]
+    }
+   ]
+  }
+ ],
+ "S11": [
+  {
+   "case": "S11",
+   "item": 0,
+   "text": "staging tables (stg_sub, stg_num, stg_tag) exist for debugging only and are never exposed to query generation",
+   "surface": "refusal",
+   "primary": "pattern",
+   "groups": [
+    {
+     "any": [
+      "(?i)staging|stg_"
+     ]
+    },
+    {
+     "any": [
+      "(?i)\\bnot\\b|never|only for debug|cannot|exposed|restricted|internal"
+     ]
+    }
+   ]
+  }
+ ],
+ "H02": [
+  {
+   "case": "H02",
+   "item": 0,
+   "text": "headcount is a cover-page/dei disclosure, not a primary financial statement line, and is not in this dataset",
+   "surface": "refusal",
+   "primary": "pattern",
+   "groups": [
+    {
+     "any": [
+      "(?i)employee|headcount"
+     ]
+    },
+    {
+     "any": [
+      "(?i)\\bnot\\b|\\bno\\b|cover|dei|primary financial|doesn't|does not|unavailable"
+     ]
+    }
+   ]
+  }
+ ],
+ "H04": [
+  {
+   "case": "H04",
+   "item": 0,
+   "text": "financial_facts is restricted to consolidated, non-dimensional values \u2014 segment and geographic breakdowns are explicitly excluded by design",
+   "surface": "refusal",
+   "primary": "pattern",
+   "groups": [
+    {
+     "any": [
+      "(?i)geograph|segment|region"
+     ]
+    },
+    {
+     "any": [
+      "(?i)\\bnot\\b|exclud|consolidated|non-dimensional|\\bno\\b|cannot|unavailable"
+     ]
+    }
+   ]
+  }
+ ],
+ "H06": [
+  {
+   "case": "H06",
+   "item": 0,
+   "text": "bank holding companies generally don't file a single Revenues-style tag, so JPMorgan is expected to be absent from v_revenue \u2014 this is documented, not a data error",
+   "surface": "either",
+   "primary": "judge",
+   "groups": [
+    {
+     "any": [
+      "(?i)\\bbanks?\\b",
+      "(?i)financial institution",
+      "(?i)holding compan",
+      "(?i)financial (sector|compan)"
+     ]
+    },
+    {
+     "any": [
+      "(?i)revenue"
+     ]
+    },
+    {
+     "any": [
+      "(?i)\\bnot\\b",
+      "(?i)\\bno\\b",
+      "(?i)cannot|can't|unable",
+      "(?i)absent|missing|doesn't|does not|without"
+     ]
+    }
+   ]
+  }
+ ],
+ "G05": [
+  {
+   "case": "G05",
+   "item": 0,
+   "text": "both companies' fiscal years used",
+   "surface": "answer",
+   "primary": "pattern",
+   "groups": [
+    {
+     "any": [
+      "\\b(19|20)\\d\\d\\b"
+     ],
+     "min_distinct": 2
+    }
+   ]
+  },
+  {
+   "case": "G05",
+   "item": 1,
+   "text": "that they may cover different calendar periods since Amazon and Walmart have different fiscal year-ends",
+   "surface": "answer",
+   "primary": "judge",
+   "groups": [
+    {
+     "any": [
+      "(?i)differ|different|not the same|don't align|vary|varying"
+     ]
+    },
+    {
+     "any": [
+      "(?i)fiscal[- ]year[- ]end|calendar|period|year[- ]end"
+     ]
+    }
+   ]
+  }
+ ],
+ "C06": [
+  {
+   "case": "C06",
+   "item": 0,
+   "text": "which fiscal years were summed (only two are on record)",
+   "surface": "answer",
+   "primary": "pattern",
+   "groups": [
+    {
+     "any": [
+      "\\b(19|20)\\d\\d\\b"
+     ],
+     "min_distinct": 2
+    }
+   ]
+  }
+ ]
+}
