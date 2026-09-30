@@ -31,12 +31,14 @@ back): it is NO_DATA. A generator that refuses in SQL (`SELECT NULL ... WHERE
 """
 
 import functools
+import os
 import time
 
 from ledgerql import answer as answer_module
 from ledgerql import audit as audit_module
 from ledgerql import classify as classify_module
 from ledgerql import consensus as consensus_module
+from ledgerql import entity_link as entity_link_module
 from ledgerql import execute as execute_module
 from ledgerql import generate as generate_module
 from ledgerql import guardrails as guardrails_module
@@ -49,6 +51,13 @@ from ledgerql.execute import ExecutionResult
 
 N_CANDIDATES = 5
 LOW_AGREEMENT_THRESHOLD = 0.6
+# Deterministic entity linking (ledgerql/entity_link.py): off until measured on a model
+# (DECISIONS.md 2026-09-30). LEDGERQL_ENTITY_LINK=1 turns it on.
+ENTITY_LINK = os.environ.get("LEDGERQL_ENTITY_LINK") == "1"
+
+
+def _entity_hint(question: str, db_path: str | None) -> str:
+    return entity_link_module.hint_for(question, entity_link_module.linker_for(db_path))
 
 
 def ask(question: str, db_path: str | None = None) -> dict:
@@ -78,11 +87,17 @@ def ask(question: str, db_path: str | None = None) -> dict:
             return _finish(question, start, classify_result, reason_code=classify_result.verdict)
 
         schema_context = schema_index.get_schema_context()
+        extra = {}
+        if ENTITY_LINK:
+            hint = _entity_hint(question, db_path)
+            if hint:
+                extra["entity_hint"] = hint
         sqls = generate_module.generate_candidates(
             question,
             schema_context,
             n=N_CANDIDATES,
             temperature=generate_module.OLLAMA_CONSENSUS_TEMPERATURE,
+            **extra,
         )
 
         guards = []

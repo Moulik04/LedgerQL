@@ -229,16 +229,27 @@ def to_ddl(schema: SchemaInfo) -> str:
 
 
 def build_messages(
-    profile: str, question: str, *, schema: SchemaInfo, schema_context: str
+    profile: str,
+    question: str,
+    *,
+    schema: SchemaInfo,
+    schema_context: str,
+    entity_hint: str = "",
 ) -> list[dict]:
+    """`entity_hint` (empty by default) rides where each format keeps external knowledge:
+    after the question in the pipeline's prompt, in the question slot beside EVIDENCE for
+    OmniSQL, and in the evidence slot for XiYan. Empty, every profile is unchanged."""
     if profile == "current":
         return [
             {"role": "system", "content": generate.SYSTEM_PROMPT},
-            {"role": "user", "content": generate.build_prompt(question, schema_context)},
+            {
+                "role": "user",
+                "content": generate.build_prompt(question, schema_context, entity_hint),
+            },
         ]
     if profile == "omnisql":
         body = OMNISQL_TEMPLATE.format(
-            db_details=to_ddl(schema), question=f"{EVIDENCE}\n{question}"
+            db_details=to_ddl(schema), question=f"{EVIDENCE}\n{entity_hint}{question}"
         )
         return [{"role": "user", "content": body}]
     if profile == "xiyan":
@@ -246,7 +257,7 @@ def build_messages(
             dialect="PostgreSQL",
             question=question,
             db_schema=to_mschema(schema),
-            evidence=EVIDENCE,
+            evidence=EVIDENCE + (f"\n{entity_hint.rstrip()}" if entity_hint else ""),
         )
         return [{"role": "user", "content": body}]
     raise ValueError(f"unknown profile {profile!r}; expected one of {PROFILES}")

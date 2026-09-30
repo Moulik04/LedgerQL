@@ -41,8 +41,10 @@ def _strip_fences(text: str) -> str:
     return _FENCE_RE.sub("", text).strip()
 
 
-def build_prompt(question: str, schema_context: str) -> str:
-    return f"Schema:\n{schema_context}\n\nQuestion: {question}\n\nSQL:"
+def build_prompt(question: str, schema_context: str, entity_hint: str = "") -> str:
+    """`entity_hint` (ledgerql.entity_link.hint_for) is empty unless entity linking is on,
+    in which case the prompt is byte-identical to what it was before the step existed."""
+    return f"Schema:\n{schema_context}\n\nQuestion: {question}\n\n{entity_hint}SQL:"
 
 
 def generate_candidates(
@@ -51,10 +53,11 @@ def generate_candidates(
     n: int = 1,
     temperature: float | None = None,
     client: ollama.Client | llm_backends.VLLMClient | None = None,
+    entity_hint: str = "",
 ) -> list[str]:
     client = client or llm_backends.default_client()
     effective_temperature = OLLAMA_TEMPERATURE if temperature is None else temperature
-    prompt = build_prompt(question, schema_context)
+    prompt = build_prompt(question, schema_context, entity_hint)
     candidates = []
     for i in range(n):
         response = client.generate(

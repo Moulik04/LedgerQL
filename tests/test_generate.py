@@ -112,3 +112,13 @@ def test_build_prompt_is_exactly_what_generate_candidates_sends():
     generate.generate_candidates("the question", "the schema", n=1, client=client)
     assert client.last_call["prompt"] == generate.build_prompt("the question", "the schema")
     assert client.last_call["system"] == generate.SYSTEM_PROMPT
+
+
+def test_entity_hint_sits_between_the_question_and_the_sql_cue_and_is_optional():
+    plain = generate.build_prompt("the question", "the schema")
+    hinted = generate.build_prompt("the question", "the schema", entity_hint="HINT\n\n")
+    assert plain == "Schema:\nthe schema\n\nQuestion: the question\n\nSQL:"
+    assert hinted == "Schema:\nthe schema\n\nQuestion: the question\n\nHINT\n\nSQL:"
+    client = _FakeClient("SELECT 1;")
+    generate.generate_candidates("q", "s", n=1, client=client, entity_hint="HINT\n\n")
+    assert "HINT" in client.last_call["prompt"]

@@ -1,3 +1,5 @@
+import json
+
 import duckdb
 import pytest
 
@@ -147,3 +149,15 @@ def test_introspect_reads_columns_examples_and_keys_from_the_database(tmp_path):
     assert (cik.name, cik.type, cik.primary_key) == ("cik", "INTEGER", True)
     assert len(cik.examples) == 3 and set(cik.examples) <= {"1", "2", "3", "4"}
     assert all(not c.primary_key for c in schema.tables[1].columns)
+
+
+@pytest.mark.parametrize("profile", gen_prompts.PROFILES)
+def test_entity_hint_reaches_every_profile_and_is_absent_by_default(profile):
+    hint = "Companies named in the question: HINT-MARKER\n\n"
+    plain = build_messages(profile, "the q", schema=SCHEMA, schema_context="CTX")
+    hinted = build_messages(profile, "the q", schema=SCHEMA, schema_context="CTX", entity_hint=hint)
+    assert "HINT-MARKER" not in json.dumps(plain)
+    assert "HINT-MARKER" in json.dumps(hinted)
+    assert plain == build_messages(
+        profile, "the q", schema=SCHEMA, schema_context="CTX", entity_hint=""
+    )

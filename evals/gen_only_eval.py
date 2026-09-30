@@ -45,8 +45,8 @@ from evals.gen_prompts import PROFILES, SchemaInfo
 from evals.passn_scoring import GOLD_PATH, compute_pass_at_n, load_jsonl
 from evals.scoring import case_matches
 from ledgerql import consensus as consensus_module
+from ledgerql import entity_link, generate, pipeline, schema_index
 from ledgerql import execute as execute_module
-from ledgerql import generate, pipeline, schema_index
 from ledgerql import guardrails as guardrails_module
 
 DEFAULT_N = 5
@@ -103,8 +103,8 @@ class HttpGenerator:
         )
 
 
-def select_cases(gold: list[dict]) -> list[dict]:
-    return [c for c in gold if c["expected"] == "ANSWER"]
+def select_cases(gold: list[dict], only: set[str] | None = None) -> list[dict]:
+    return [c for c in gold if c["expected"] == "ANSWER" and (only is None or c["id"] in only)]
 
 
 def smoke_cases(cases: list[dict], k: int) -> list[dict]:
@@ -159,12 +159,17 @@ def run(
     n: int = DEFAULT_N,
     concurrency: int = 8,
     log=lambda msg: None,
+    entity_linker=None,
 ) -> list[dict]:
+    hints = [
+        entity_link.hint_for(c["question"], entity_linker) if entity_linker is not None else ""
+        for c in cases
+    ]
     prompts = [
         gen_prompts.build_messages(
-            profile, c["question"], schema=schema, schema_context=schema_context
+            profile, c["question"], schema=schema, schema_context=schema_context, entity_hint=h
         )
-        for c in cases
+        for c, h in zip(cases, hints, strict=True)
     ]
     gold = duckdb.connect(db_path, read_only=True, config={"enable_external_access": "false"})
     records = []
@@ -177,9 +182,10 @@ def run(
                 ]
                 for ci in range(len(cases))
             ]
-            for case, case_futures in zip(cases, futures, strict=True):
+            for case, hint, case_futures in zip(cases, hints, futures, strict=True):
                 gens = [f.result() for f in case_futures]
                 records.append(_score_case(case, gens, gold, db_path))
+                records[-1]["entity_hint"] = hint
                 log(f"{case['id']}: {_outcome(records[-1])}")
     finally:
         gold.close()
@@ -316,12 +322,18 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--max-tokens", type=int, default=DEFAULT_MAX_TOKENS)
     ap.add_argument("--concurrency", type=int, default=8)
     ap.add_argument("--smoke", type=int, default=0, help="run only K cases and gate on them")
+    ap.add_argument(
+        "--entity-link",
+        action="store_true",
+        help="add each question's resolved companies (ledgerql.entity_link) to the prompt",
+    )
+    ap.add_argument("--cases", help="comma-separated case ids to run (default: every ANSWER case)")
     args = ap.parse_args(argv)
     if not args.model:
         ap.error("--model (or $OLLAMA_MODEL) is required")
 
     gold = load_jsonl(GOLD_PATH)
-    cases = select_cases(gold)
+    cases = select_cases(gold, set(args.cases.split(",")) if args.cases else None)
     if args.smoke:
         cases = smoke_cases(cases, args.smoke)
 
@@ -336,6 +348,7 @@ def main(argv: list[str] | None = None) -> int:
         n=args.n,
         concurrency=args.concurrency,
         log=lambda msg: print(msg, file=sys.stderr, flush=True),
+        entity_linker=entity_link.EntityLinker.from_db(args.db) if args.entity_link else None,
     )
     if args.smoke:
         _print_smoke(records)

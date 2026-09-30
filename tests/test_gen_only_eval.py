@@ -261,3 +261,27 @@ def test_the_smoke_printout_shows_the_error_detail(db, capsys):
 
     gen_only_eval._print_smoke(_run(db, fake, n=1))
     assert "engine dead" in capsys.readouterr().out
+
+
+def test_a_linker_puts_its_hint_in_every_prompt_and_the_record_keeps_it(db):
+    class FakeLinker:
+        def link(self, question):
+            return [type("L", (), {"mention": "co1", "ticker": "C1", "name": "Company 1"})()]
+
+    seen = []
+
+    def fake(messages, seed):
+        seen.append(messages[-1]["content"])
+        return Generation(RIGHT, "stop")
+
+    [rec] = _run(db, fake, entity_linker=FakeLinker())
+    assert len(seen) == 5 and all("ticker = 'C1'" in m for m in seen)
+    assert "ticker = 'C1'" in rec["entity_hint"]
+    seen.clear()
+    [plain] = _run(db, fake)
+    assert plain["entity_hint"] == "" and all("ticker =" not in m for m in seen)
+
+
+def test_cases_can_be_restricted_by_id():
+    assert [c["id"] for c in select_cases(CASES, only={"A2"})] == ["A2"]
+    assert [c["id"] for c in select_cases(CASES, only=None)] == ["A1", "A2"]

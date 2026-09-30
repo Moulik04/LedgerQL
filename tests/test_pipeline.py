@@ -896,3 +896,31 @@ def test_ask_answers_when_the_stated_year_is_the_one_in_the_executed_sql(monkeyp
     result = _ask_with_writer_saying(monkeypatch, "The value is 5.0 for fiscal year 2025.")
     assert result["answer"] == "The value is 5.0 for fiscal year 2025."
     assert result["reason_code"] is None
+
+
+def test_entity_linking_is_off_by_default_and_passes_a_hint_only_when_enabled(monkeypatch):
+    _patch_audit(monkeypatch)
+    _patch_classify_in_scope(monkeypatch)
+    seen = []
+
+    def fake_generate(question, schema_context, n=1, temperature=None, **kwargs):
+        seen.append(kwargs)
+        return ["SELECT 1"] * n
+
+    monkeypatch.setattr(generate_module, "generate_candidates", fake_generate)
+    monkeypatch.setattr(
+        guardrails_module,
+        "validate",
+        lambda sql, **k: type(
+            "G", (), {"ok": False, "sql": sql, "events": [], "reason_code": "X"}
+        )(),
+    )
+    monkeypatch.setattr(pipeline, "ENTITY_LINK", False)
+    pipeline.ask("What is The Coca-Cola Company's ticker symbol?")
+    assert seen == [{}]  # nothing extra is sent when the step is off
+
+    seen.clear()
+    monkeypatch.setattr(pipeline, "ENTITY_LINK", True)
+    monkeypatch.setattr(pipeline, "_entity_hint", lambda question, db_path: "HINT\n\n")
+    pipeline.ask("What is The Coca-Cola Company's ticker symbol?")
+    assert seen == [{"entity_hint": "HINT\n\n"}]
