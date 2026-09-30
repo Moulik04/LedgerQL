@@ -617,3 +617,26 @@ to V3. Once the rules were written they were applied to the other 95 cases from
 the question text and gold SQL alone, before any re-scoring and without looking at
 any candidate. `evals/gold_v2.py` lists, for every changed case, the rule it
 follows.
+
+## 6h. Gold v2 tooling (all offline, no GPU)
+
+- `python -m evals.gold_v2 [--check]`: builds `gold_v2.jsonl` from `gold.jsonl` and the
+  per-case conversion table in `evals/gold_v2.py` (33 cases changed, each naming the rule
+  it follows). `evals/scoring.py` scores a case under either edition; the scorers
+  (`passn_scoring`, `signal_precheck`, `gen_only_eval`, `run_eval`) take `--gold-version`.
+- `python -m evals.gold_audit {never-solved,dump,outcomes,scale,goodwill}`: the audit that
+  produced v2 (which candidates returned what on cases nothing solved). It reads
+  `reports/bakeoff_candidates.jsonl`, the tracked compact bake-off evidence
+  (`evals/bakeoff_evidence.py`; the raw runs stay gitignored).
+- `python -m evals.rescore_v2 report`: every figure under v1, v2 strict and v2 relaxed
+  (`reports/gold_v2_rescore.md`): Phase 5 runs in three configurations, pass@1/pass@N,
+  cross-model agreement and the policy table.
+- `python -m evals.pool_experiment`: at a fixed budget of 5 candidates, does a pool drawn
+  across models and prompts beat 5 samples from one (`reports/pool_experiment.md`)?
+- `python -m evals.entity_upper_bound`: what perfect entity linking would gain
+  (`reports/entity_upper_bound.md`). `ledgerql/entity_link.py` is the deterministic linker
+  (off by default; `LEDGERQL_ENTITY_LINK=1`, or `gen_only_eval --entity-link`), and
+  `python -m evals.entity_link_eval` scores it on the local 7B.
+
+The pass@N and pass@1 figures in 6f are **v1**. The figures under v2 are in
+`reports/gold_v2_rescore.md`; `DECISIONS.md` 2026-09-30 says which conclusions moved.

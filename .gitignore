@@ -57,6 +57,8 @@ reports/runs/
 !reports/gold_v2_rescore.md
 !reports/pool_experiment.md
 !reports/entity_upper_bound.md
+!reports/entity_link_7b.md
+!reports/entity_link_7b_candidates.jsonl
 
 # Testing / tooling
 .pytest_cache/
