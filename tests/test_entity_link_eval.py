@@ -3,8 +3,8 @@ import json
 from evals import entity_link_eval as E
 from evals.rescore_v2 import Cand, Pool
 
-OK = {"v1": True, "v2": True, "v2r": True}
-NO = {"v1": False, "v2": False, "v2r": False}
+OK = {"v1": True, "v2": True, "v3": True, "v3r": True}
+NO = {"v1": False, "v2": False, "v3": False, "v3r": False}
 
 
 def pool(pid, profile, verdicts, empties=0):
@@ -27,7 +27,7 @@ def test_compare_counts_cases_gained_and_lost_by_the_vote_pick_and_by_any_candid
         pool("B", "linked", [0, 0, 0]),
         pool("C", "linked", [0, 0, 1]),
     ]
-    r = E.compare(base, link, "v2")
+    r = E.compare(base, link, "v3")
     assert r["cases"] == 3
     assert (r["pass_1"]["base"], r["pass_1"]["linked"]) == (2, 2)
     assert r["pass_1"]["gained"] == ["A"] and r["pass_1"]["lost"] == ["B"]
@@ -39,7 +39,7 @@ def test_compare_counts_cases_gained_and_lost_by_the_vote_pick_and_by_any_candid
 def test_compare_counts_empty_results_the_name_literal_failure_mode():
     base = [pool("A", "baseline", [0, 0, 0, 0], empties=3)]
     link = [pool("A", "linked", [1, 1, 1, 1], empties=0)]
-    r = E.compare(base, link, "v2")
+    r = E.compare(base, link, "v3")
     assert r["empty"] == {"base": 3, "linked": 0}
 
 

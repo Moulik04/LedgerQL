@@ -14,8 +14,8 @@ def gold():
     return Gold(DB)
 
 
-def _score(id, expected, answered, v1, v2, v2r=None):
-    verdict = {"v1": v1, "v2": v2, "v2r": v2 if v2r is None else v2r}
+def _score(id, expected, answered, v1, v2, v3r=None):
+    verdict = {"v1": v1, "v2": v2, "v3": v2, "v3r": v2 if v3r is None else v3r}
     return RecordScore(id, "t", expected, answered, v1, verdict)
 
 
@@ -30,16 +30,16 @@ def test_gold_verdicts_score_three_ways_and_none_is_never_correct(gold):
     names = [(n,) for (n,) in gold.rows["v2"]["A09"]]  # v2 gold: the companies, by name
     assert gold.verdicts("A09", names)["v2"] is True
     assert gold.verdicts("A09", names)["v1"] is False  # v1 gold also wanted year and value
-    assert gold.verdicts("A09", None) == {"v1": False, "v2": False, "v2r": False}
+    assert gold.verdicts("A09", None) == dict.fromkeys(("v1", "v2", "v3", "v3r"), False)
     assert gold.verdicts("A09", [])["v2"] is False
 
 
 def test_pool_pass_at_one_uses_the_vote_pick_and_pass_at_n_any_candidate():
-    ok = {"v1": True, "v2": True, "v2r": True}
-    no = {"v1": False, "v2": False, "v2r": False}
+    ok = dict.fromkeys(("v1", "v2", "v3", "v3r"), True)
+    no = dict.fromkeys(("v1", "v2", "v3", "v3r"), False)
     p = Pool("m", "current", "X", "t", [Cand("a", [], no), Cand("b", [], ok)], winner=0)
-    assert not p.pass_at_1("v2") and p.pass_at_n("v2")
-    assert not Pool("m", "current", "X", "t", [Cand("a", None, no)], winner=None).pass_at_1("v2")
+    assert not p.pass_at_1("v3") and p.pass_at_n("v3")
+    assert not Pool("m", "current", "X", "t", [Cand("a", None, no)], winner=None).pass_at_1("v3")
 
 
 def test_assumption_answers_count_only_when_given_but_answer_cases_count_the_result():
@@ -49,9 +49,11 @@ def test_assumption_answers_count_only_when_given_but_answer_cases_count_the_res
         _score("C", "ANSWER_WITH_ASSUMPTION", answered=True, v1=False, v2=True),
         _score("D", "ANSWER_WITH_ASSUMPTION", answered=True, v1=False, v2=False),
     ]
-    assert R.accuracy(scores, "ANSWER")["v2"] == 1
-    assert R.accuracy(scores, "ANSWER_WITH_ASSUMPTION") == {"v1": 0, "v2": 1, "v2r": 1, "n": 3}
-    split = R.assumption_split(scores)["v2"]
+    assert R.accuracy(scores, "ANSWER")["v3"] == 1
+    assert R.accuracy(scores, "ANSWER_WITH_ASSUMPTION") == {
+        "v1": 0, "v2": 1, "v3": 1, "v3r": 1, "n": 3
+    }  # fmt: skip
+    split = R.assumption_split(scores)["v3"]
     assert split == {"n": 3, "answered_correct": 1, "abstained": 1, "answered_wrong": 1}
 
 
@@ -70,7 +72,7 @@ def test_v1_reproduces_the_recorded_phase5_figures_and_v2_moves_them(gold):
     path = require_fixture(Path("reports/eval_bridges2_qwen3_30b_measured.jsonl"), BRIDGES2_HINT)
     scores = R.score_report(R.load_report(path), gold)
     acc = R.accuracy(scores, "ANSWER")
-    assert (acc["n"], acc["v1"], acc["v2"], acc["v2r"]) == (50, 31, 33, 41)
+    assert (acc["n"], acc["v1"], acc["v2"], acc["v3"], acc["v3r"]) == (50, 31, 33, 33, 41)
     assert all(s.verdict["v1"] == s.recorded for s in scores)  # v1 recomputed == recorded
 
 
@@ -84,6 +86,7 @@ def test_bakeoff_v1_reproduces_the_published_cell_and_the_vote_matches_the_harne
     cell = R.passn_table(pools)[("xiyan_32b", "current")]
     assert cell["v1"] == (34, 35)
     assert cell["v2"] == (40, 40)
+    assert cell["v3"] == (41, 41)  # the pivot rule credits one more "side by side" answer
     # The vote recomputed here picks exactly the SQL the harness recorded as its winner.
     picked = [p for p in pools if p.winner is not None]
     assert picked

@@ -63,16 +63,24 @@ def assert_winner_implies_candidate(
         )
 
 
-def _run_candidate(sql: str, db_path: str) -> tuple[str | None, list[tuple] | None]:
-    """The live pipeline's guard-then-execute stage: (guard.sql, rows), or
-    (None, None) if guardrails rejected it or it errored."""
+def _run_candidate_ex(
+    sql: str, db_path: str
+) -> tuple[str | None, list[tuple] | None, list[str] | None]:
+    """The live pipeline's guard-then-execute stage: (guard.sql, rows, column names), or
+    (None, None, None) if guardrails rejected it or it errored."""
     guard = guardrails_module.validate(sql, db_path=db_path)
     if not guard.ok:
-        return None, None
+        return None, None, None
     execution = execute_module.execute(guard.sql, db_path=db_path)
     if execution.error is not None:
-        return None, None
-    return guard.sql, execution.rows
+        return None, None, None
+    return guard.sql, execution.rows, execution.columns
+
+
+def _run_candidate(sql: str, db_path: str) -> tuple[str | None, list[tuple] | None]:
+    """(guard.sql, rows), or (None, None) if guardrails rejected it or it errored."""
+    guard_sql, rows, _ = _run_candidate_ex(sql, db_path)
+    return guard_sql, rows
 
 
 def _canonical_rows(rows: list) -> list[str]:
@@ -102,9 +110,9 @@ def compute_pass_at_n(per_case: list[dict], cases_by_id: dict, db_path: str) -> 
 
             pool: list[tuple[str, bool, list[tuple]]] = []
             for cand in record.get("candidates") or []:
-                guard_sql, rows = _run_candidate(cand["sql"], db_path)
+                guard_sql, rows, columns = _run_candidate_ex(cand["sql"], db_path)
                 if guard_sql is not None:
-                    matched = case_matches(case, gold_rows, rows, db_path)
+                    matched = case_matches(case, gold_rows, rows, db_path, pred_columns=columns)
                     pool.append((guard_sql, matched, rows))
             any_correct = any(matched for _, matched, _ in pool)
 
@@ -120,8 +128,10 @@ def compute_pass_at_n(per_case: list[dict], cases_by_id: dict, db_path: str) -> 
 
             outside_correct = False
             if not in_pool and winner_sql:
-                _, rows = _run_candidate(winner_sql, db_path)
-                outside_correct = rows is not None and case_matches(case, gold_rows, rows, db_path)
+                _, rows, columns = _run_candidate_ex(winner_sql, db_path)
+                outside_correct = rows is not None and case_matches(
+                    case, gold_rows, rows, db_path, pred_columns=columns
+                )
 
             recorded = record.get("execution_correct") is True
             if recorded != winner_correct:

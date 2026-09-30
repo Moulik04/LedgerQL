@@ -113,14 +113,14 @@ def render(base: list[Pool], linked: list[Pool]) -> str:
             f"| +{len(r['pass_n']['gained'])} / -{len(r['pass_n']['lost'])} "
             f"| {c['base']} -> {c['linked']} of {c['n']} | +{c['gained']} / -{c['lost']} |"
         )
-    r = compare(base, linked, "v2")
+    r = compare(base, linked, "v3")
     lines += [
         "",
         f"Candidates returning no rows (the name-literal failure): {r['empty']['base']} -> "
         f"{r['empty']['linked']} of {r['candidates']['n']}.",
         "",
-        f"v2 strict pass@1 gained: {r['pass_1']['gained']}; lost: {r['pass_1']['lost']}.",
-        f"v2 strict pass@N gained: {r['pass_n']['gained']}; lost: {r['pass_n']['lost']}.",
+        f"v3 strict pass@1 gained: {r['pass_1']['gained']}; lost: {r['pass_1']['lost']}.",
+        f"v3 strict pass@N gained: {r['pass_n']['gained']}; lost: {r['pass_n']['lost']}.",
     ]
     return "\n".join(lines) + "\n"
 

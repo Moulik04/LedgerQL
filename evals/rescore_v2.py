@@ -1,11 +1,12 @@
 # ruff: noqa: E501  (markdown table headers are single lines)
-"""Re-score everything under gold v2, side by side with v1.
+"""Re-score everything under gold v3, side by side with v1 and v2.
 
-Three verdicts are computed for every result, in one pass:
+Four verdicts are computed for every result, in one pass:
 
 - `v1`: the original gold and comparator (`gold.jsonl`, `run_eval.results_match`).
-- `v2`: gold v2, strict comparator (the headline, evals/README.md 6g).
-- `v2r`: gold v2, relaxed comparator (extra columns ignored), a labelled second figure.
+- `v2`: gold v2, strict comparator (evals/README.md 6g).
+- `v3`: gold v3, strict comparator (the headline, 6i).
+- `v3r`: gold v3, relaxed comparator (extra columns ignored), a labelled second figure.
 
 Two evidence sources, both tracked and both re-executed locally:
 
@@ -15,7 +16,7 @@ Two evidence sources, both tracked and both re-executed locally:
   and executed, and the vote's pick is recomputed with the pipeline's own rule
   (biggest cluster of identical result sets, ties to the earliest candidate).
 
-    python -m evals.rescore_v2 phase5        # Phase 5 measured runs, v1 | v2 | v2r
+    python -m evals.rescore_v2 phase5        # Phase 5 measured runs, v1 | v2 | v3 | v3 relaxed
     python -m evals.rescore_v2 bakeoff       # pass@1 / pass@N per model and prompt
     python -m evals.rescore_v2 agreement     # cross-model agreement and the policy table
 """
@@ -30,13 +31,13 @@ from pathlib import Path
 import duckdb
 
 from evals import bakeoff_evidence
-from evals.passn_scoring import _run_candidate, load_jsonl
+from evals.passn_scoring import _run_candidate_ex, load_jsonl
 from evals.scoring import case_match, load_gold
 from ledgerql.consensus import _row_sort_key
 
 DEFAULT_DB = "data/ledgerql.duckdb"
-VERSIONS = ("v1", "v2", "v2r")
-LABELS = {"v1": "v1", "v2": "v2 strict", "v2r": "v2 relaxed"}
+VERSIONS = ("v1", "v2", "v3", "v3r")
+LABELS = {"v1": "v1", "v2": "v2 strict", "v3": "v3 strict", "v3r": "v3 relaxed"}
 SCORED = ("ANSWER", "ANSWER_WITH_ASSUMPTION")
 
 
@@ -45,44 +46,47 @@ def _connect(db: str):
 
 
 class Gold:
-    """Both editions' cases and their gold rows, executed once."""
+    """All three editions' cases and their gold rows, executed once."""
 
     def __init__(self, db: str = DEFAULT_DB):
         self.db = db
-        self.v1, self.v2 = load_gold("v1"), load_gold("v2")
+        self.v1, self.v2, self.v3 = load_gold("v1"), load_gold("v2"), load_gold("v3")
         con = _connect(db)
         try:
             self.rows = {
-                "v1": {
+                ed: {
                     i: con.execute(c["gold_sql"]).fetchall()
-                    for i, c in self.v1.items()
+                    for i, c in cases.items()
                     if c.get("gold_sql")
-                },
-                "v2": {
-                    i: con.execute(c["gold_sql"]).fetchall()
-                    for i, c in self.v2.items()
-                    if c.get("gold_sql")
-                },
+                }
+                for ed, cases in (("v1", self.v1), ("v2", self.v2), ("v3", self.v3))
             }
         finally:
             con.close()
 
-    def verdicts(self, case_id: str, pred_rows: list | None) -> dict[str, bool]:
-        """{'v1': bool, 'v2': bool, 'v2r': bool} for one result (None = no result)."""
+    def verdicts(
+        self, case_id: str, pred_rows: list | None, pred_columns: list[str] | None = None
+    ) -> dict[str, bool]:
+        """{'v1', 'v2', 'v3', 'v3r': bool} for one result (None = no result)."""
         if pred_rows is None or case_id not in self.rows["v1"]:
             return dict.fromkeys(VERSIONS, False)
         rows = [tuple(r) for r in pred_rows]
-        return {
-            "v1": case_match(self.v1[case_id], self.rows["v1"][case_id], rows, self.db).matched,
-            "v2": case_match(self.v2[case_id], self.rows["v2"][case_id], rows, self.db).matched,
-            "v2r": case_match(
-                self.v2[case_id], self.rows["v2"][case_id], rows, self.db, mode="relaxed"
-            ).matched,
-        }
 
-    def via(self, case_id: str, pred_rows: list) -> frozenset:
+        def ok(edition, mode="strict"):
+            case = getattr(self, edition)[case_id]
+            return case_match(
+                case, self.rows[edition][case_id], rows, self.db, mode, pred_columns
+            ).matched
+
+        return {"v1": ok("v1"), "v2": ok("v2"), "v3": ok("v3"), "v3r": ok("v3", "relaxed")}
+
+    def via(
+        self, case_id: str, pred_rows: list, pred_columns: list[str] | None = None
+    ) -> frozenset:
         rows = [tuple(r) for r in pred_rows]
-        return case_match(self.v2[case_id], self.rows["v2"][case_id], rows, self.db).via
+        return case_match(
+            self.v3[case_id], self.rows["v3"][case_id], rows, self.db, "strict", pred_columns
+        ).via
 
 
 # --------------------------------------------------------------------------
@@ -108,6 +112,7 @@ def score_report(records: list[dict], gold: Gold) -> list[RecordScore]:
         if rec["expected"] not in SCORED or not gold.v1[rec["id"]].get("gold_sql"):
             continue
         rows = rec.get("rows") if rec.get("execution_error") is None else None
+        columns = rec.get("columns")
         out.append(
             RecordScore(
                 id=rec["id"],
@@ -115,7 +120,7 @@ def score_report(records: list[dict], gold: Gold) -> list[RecordScore]:
                 expected=rec["expected"],
                 answered=rec.get("answer") is not None,
                 recorded=rec.get("execution_correct") is True,
-                verdict=gold.verdicts(rec["id"], rows),
+                verdict=gold.verdicts(rec["id"], rows, columns),
             )
         )
     return out
@@ -133,9 +138,9 @@ def accuracy(scores: list[RecordScore], expected: str = "ANSWER") -> dict[str, i
     } | {"n": len(pool)}
 
 
-def verdict_changes(scores: list[RecordScore]) -> list[RecordScore]:
-    """Cases where the strict v2 verdict differs from v1's, in either direction."""
-    return [s for s in scores if s.verdict["v1"] != s.verdict["v2"]]
+def verdict_changes(scores: list[RecordScore], a: str = "v1", b: str = "v3") -> list[RecordScore]:
+    """Cases where the strict verdict under edition `b` differs from `a`'s, either direction."""
+    return [s for s in scores if s.verdict[a] != s.verdict[b]]
 
 
 def tier_accuracy(scores: list[RecordScore]) -> dict[str, dict[str, int]]:
@@ -161,6 +166,7 @@ class Cand:
     verdict: dict[str, bool]
     via: frozenset = frozenset()
     guard_sql: str | None = None  # the SQL actually executed (after the guard's rewrite)
+    columns: list[str] | None = None
 
     @property
     def key(self) -> tuple | None:
@@ -205,10 +211,10 @@ def score_bakeoff(evidence: list[dict], gold: Gold) -> list[Pool]:
         pool = Pool(rec["model"], rec["profile"], rec["id"], case["tier"])
         pool.recorded_winner_sql = rec.get("winner_sql")
         for sql in rec["sqls"]:
-            guard_sql, rows = _run_candidate(sql, gold.db)
-            verdict = gold.verdicts(rec["id"], rows)
-            via = gold.via(rec["id"], rows) if rows and verdict["v2"] else frozenset()
-            pool.cands.append(Cand(sql, rows, verdict, via, guard_sql))
+            guard_sql, rows, columns = _run_candidate_ex(sql, gold.db)
+            verdict = gold.verdicts(rec["id"], rows, columns)
+            via = gold.via(rec["id"], rows, columns) if rows and verdict["v3"] else frozenset()
+            pool.cands.append(Cand(sql, rows, verdict, via, guard_sql, columns))
         pool.winner = vote_winner([c.key for c in pool.cands])
         pools.append(pool)
     return pools
@@ -230,17 +236,17 @@ def union_solved(pools: list[Pool], v: str) -> set[str]:
 
 def verdict_changes_by_case(pools: list[Pool]) -> dict[str, dict[str, int]]:
     """Per case, candidates matching under each version, for cases whose count differs
-    between v1 and v2 strict."""
+    between any two editions' strict comparators."""
     per: dict[str, Counter] = defaultdict(Counter)
     for p in pools:
         for c in p.cands:
             for v in VERSIONS:
                 per[p.id][v] += c.verdict[v]
-    return {i: dict(c) for i, c in sorted(per.items()) if c["v1"] != c["v2"]}
+    return {i: dict(c) for i, c in sorted(per.items()) if len({c["v1"], c["v2"], c["v3"]}) > 1}
 
 
 def identifier_counts(pools: list[Pool]) -> Counter:
-    """How many strict-v2 matching candidates matched through each identifier type."""
+    """How many strict-v3 matching candidates matched through each identifier type."""
     counts: Counter = Counter()
     for p in pools:
         for c in p.cands:
@@ -340,74 +346,78 @@ def _configs(records: list[dict]) -> dict[str, list[dict]]:
     }
 
 
+def _cols(prefix: str = "") -> str:
+    return " | ".join(f"{prefix}{LABELS[v]}" for v in VERSIONS)
+
+
+def _sep(n: int) -> str:
+    return "|" + "---|" * n
+
+
 def render_phase5(gold: Gold, reports_dir: Path) -> str:
     lines = [
-        "## Phase 5 per-case reports: v1 | v2 strict | v2 relaxed",
+        "## Phase 5 per-case reports: v1 | v2 strict | v3 strict | v3 relaxed",
         "",
         "Each record's own winner rows, scored as `run_eval` scores them, in the three "
         "configurations the published figures come from. `shipped (repair off)` is the config "
         "DECISIONS.md's assumption table used; `+ year rule` is the current headline "
         "(`evals/replay_year_rule.py`).",
         "",
-        "| run | config | ANSWER (50) v1 | v2 | v2 relaxed | assumption cases answered correctly (19) v1 | v2 | v2 relaxed |",
-        "|---|---|---|---|---|---|---|---|",
+        f"| run | config | {_cols('ANSWER (50): ')} | {_cols('assumption answered correctly (19): ')} |",
+        _sep(2 + 2 * len(VERSIONS)),
     ]
     runs = []
     for label, name in PHASE5_REPORTS[:2]:
         for config, records in _configs(load_report(reports_dir / name)).items():
             scores = score_report(records, gold)
             a, w = accuracy(scores, "ANSWER"), accuracy(scores, "ANSWER_WITH_ASSUMPTION")
-            lines.append(
-                f"| {label} | {config} | {_pct(a['v1'], 50)} | {_pct(a['v2'], 50)} "
-                f"| {_pct(a['v2r'], 50)} | {w['v1']}/19 | {w['v2']}/19 | {w['v2r']}/19 |"
-            )
+            cells = " | ".join(_pct(a[v], 50) for v in VERSIONS)
+            wcells = " | ".join(f"{w[v]}/19" for v in VERSIONS)
+            lines.append(f"| {label} | {config} | {cells} | {wcells} |")
             runs.append((label, config, scores))
     lines += ["", "### Assumption cases (19): answered correctly / abstained / answered wrong", ""]
     lines += [
         "`answered correctly` is an upper bound on *answered with the assumption stated*: "
-        "`answer_must_state` is still unscored. An abstain is reported on its own, never as "
-        "handled.",
+        "`answer_must_state` is scored separately (`evals/must_state.py`). An abstain is "
+        "reported on its own, never as handled.",
         "",
         "| run | config | version | answered correctly | abstained | answered wrong |",
-        "|---|---|---|---|---|---|",
+        _sep(6),
     ]
     for label, config, scores in runs:
         if config == "as recorded (repair on)":
             continue
         split = assumption_split(scores)
         for v in VERSIONS:
-            s = split[v]
+            sp = split[v]
             lines.append(
-                f"| {label} | {config} | {LABELS[v]} | {s['answered_correct']} | "
-                f"{s['abstained']} | {s['answered_wrong']} |"
+                f"| {label} | {config} | {LABELS[v]} | {sp['answered_correct']} | "
+                f"{sp['abstained']} | {sp['answered_wrong']} |"
             )
     lines += ["", "### Per tier (ANSWER cases), measured runs, shipped (repair off)", ""]
     for label, config, scores in runs:
         if config != "shipped (repair off)":
             continue
-        lines += [
-            f"**{label}**",
-            "",
-            "| tier | n | v1 | v2 | v2 relaxed |",
-            "|---|---|---|---|---|",
-        ]
+        lines += [f"**{label}**", "", f"| tier | n | {_cols()} |", _sep(2 + len(VERSIONS))]
         for tier, c in tier_accuracy(scores).items():
-            lines.append(f"| {tier} | {c['n']} | {c['v1']} | {c['v2']} | {c['v2r']} |")
+            lines.append(f"| {tier} | {c['n']} | " + " | ".join(str(c[v]) for v in VERSIONS) + " |")
         lines.append("")
-    lines += ["### Every case whose verdict changes (v1 -> v2 strict), in either direction", ""]
+    lines += ["### Every case whose strict verdict changes, in either direction", ""]
     for label, config, scores in runs:
-        changed = verdict_changes(scores)
-        gained = [s.id for s in changed if s.verdict["v2"]]
-        lost = [s.id for s in changed if not s.verdict["v2"]]
-        lines.append(f"- **{label}, {config}**: gained {gained}; lost {lost}")
+        for a_, b_ in (("v1", "v3"), ("v2", "v3")):
+            changed = verdict_changes(scores, a_, b_)
+            gained = [s.id for s in changed if s.verdict[b_]]
+            lost = [s.id for s in changed if not s.verdict[b_]]
+            lines.append(f"- **{label}, {config}, {a_} -> {b_}**: gained {gained}; lost {lost}")
     first = []
     for label, name in PHASE5_REPORTS[2:]:
         scores = score_report(load_report(reports_dir / name), gold)
         a = accuracy(scores, "ANSWER")
         mism = [s.id for s in scores if s.verdict["v1"] != s.recorded]
         first.append(
-            f"{label}: ANSWER v1 {a['v1']}, v2 {a['v2']}, v2 relaxed {a['v2r']} of 50 "
-            f"(recorded != v1 recomputed: {mism})"
+            f"{label}: ANSWER "
+            + ", ".join(f"{LABELS[v]} {a[v]}" for v in VERSIONS)
+            + f" of 50 (recorded != v1 recomputed: {mism})"
         )
     lines += [
         "",
@@ -424,24 +434,28 @@ def render_bakeoff(pools: list[Pool]) -> str:
     lines = [
         "## Bake-off: pass@1 -> pass@N over the 50 ANSWER cases, N=5",
         "",
-        "Each cell: v1 | v2 strict | v2 relaxed. pass@1 is the vote pick with no gates.",
+        f"Each cell: {' | '.join(LABELS[v] for v in VERSIONS)}. pass@1 is the vote pick with no gates.",
         "",
-        "| model | prompt | v1 | v2 strict | v2 relaxed |",
-        "|---|---|---|---|---|",
+        f"| model | prompt | {_cols()} |",
+        _sep(2 + len(VERSIONS)),
     ]
     for (model, profile), d in sorted(table.items()):
         cells = " | ".join(f"{d[v][0]} -> {d[v][1]}" for v in VERSIONS)
         lines.append(f"| {MODEL_NAMES[model]} | {profile} | {cells} |")
-    ranges = {v: [x for d in table.values() for x in (d[v][1],)] for v in VERSIONS}
-    lines += ["", "pass@N range over the nine cells: " + "; ".join(
-        f"{LABELS[v]} {min(r)}-{max(r)} of 50" for v, r in ranges.items())]  # fmt: skip
+    for which, name in ((1, "pass@N"), (0, "pass@1")):
+        ranges = {v: [d[v][which] for d in table.values()] for v in VERSIONS}
+        lines += [
+            "",
+            f"{name} range over the nine cells: "
+            + "; ".join(f"{LABELS[v]} {min(r)}-{max(r)} of 50" for v, r in ranges.items()),
+        ]
     lines += ["", "### Union over all nine runs (2250 candidates)", ""]
     for v in VERSIONS:
         solved = union_solved(pools, v)
         never = sorted({p.id for p in pools} - solved)
         lines.append(f"- {LABELS[v]}: {len(solved)}/50 solved by some candidate; never: {never}")
     lines += ["", "Per model, union over its three prompts:", ""]
-    lines += ["| model | v1 | v2 strict | v2 relaxed |", "|---|---|---|---|"]
+    lines += [f"| model | {_cols()} |", _sep(1 + len(VERSIONS))]
     for model in MODEL_NAMES:
         mine = [p for p in pools if p.model == model]
         lines.append(
@@ -449,32 +463,35 @@ def render_bakeoff(pools: list[Pool]) -> str:
             + " | ".join(str(len(union_solved(mine, v))) for v in VERSIONS)
             + " |"
         )
-    lines += [
-        "",
-        "### Candidates whose verdict changes, per case (of 45; v1 | v2 strict | v2 relaxed)",
-        "",
-    ]
+    lines += ["", "### Candidates whose verdict changes, per case (of 45)", ""]
     flips: dict[str, Counter] = defaultdict(Counter)
     for p in pools:
         for c in p.cands:
-            if c.verdict["v1"] and not c.verdict["v2"]:
-                flips[p.id]["lost"] += 1
-            if c.verdict["v2"] and not c.verdict["v1"]:
-                flips[p.id]["gained"] += 1
-    counts = verdict_changes_by_case(pools)
-    lines += ["| case | v1 | v2 | v2 relaxed | gained | lost |", "|---|---|---|---|---|---|"]
-    for i in sorted(set(counts) | set(flips)):
-        c = counts.get(i) or {
-            v: sum(cd.verdict[v] for p in pools if p.id == i for cd in p.cands) for v in VERSIONS
-        }
+            for a_, b_ in (("v1", "v3"), ("v2", "v3")):
+                if c.verdict[a_] and not c.verdict[b_]:
+                    flips[p.id][f"lost {a_}->{b_}"] += 1
+                if c.verdict[b_] and not c.verdict[a_]:
+                    flips[p.id][f"gained {a_}->{b_}"] += 1
+    totals = {
+        i: {v: sum(cd.verdict[v] for p in pools if p.id == i for cd in p.cands) for v in VERSIONS}
+        for i in {p.id for p in pools}
+    }
+    changed_ids = sorted(
+        i for i, t in totals.items() if len({t["v1"], t["v2"], t["v3"]}) > 1 or flips[i]
+    )
+    lines += [
+        f"| case | {_cols()} | gained v1->v3 | lost v1->v3 | gained v2->v3 | lost v2->v3 |",
+        _sep(1 + len(VERSIONS) + 4),
+    ]
+    for i in changed_ids:
+        t, f = totals[i], flips[i]
         lines.append(
-            f"| {i} | {c['v1']} | {c['v2']} | {c['v2r']} | {flips[i]['gained']} | {flips[i]['lost']} |"
+            f"| {i} | "
+            + " | ".join(str(t[v]) for v in VERSIONS)
+            + f" | {f['gained v1->v3']} | {f['lost v1->v3']} | {f['gained v2->v3']} | {f['lost v2->v3']} |"
         )
     ids = identifier_counts(pools)
-    lines += [
-        "",
-        f"Strict-v2 matches by identifier type on entity columns (V2): {dict(ids)}.",
-    ]
+    lines += ["", f"Strict-v3 matches by identifier type on entity columns (V2): {dict(ids)}."]
     return "\n".join(lines) + "\n"
 
 
@@ -504,7 +521,7 @@ def render_agreement(pools: list[Pool], gold: Gold, reports_dir: Path, db: str) 
         "Agreement is still raw result equivalence between the two winners (order-insensitive, "
         "floats to 1e-6); only the *correctness labels* it is scored against change with the "
         "gold version. A winner that returns extra columns is `differ` from one that does not, "
-        "even where both are right under v2.",
+        "even where both are right under v3.",
         "",
         "### Bake-off, `current` prompt, generation only (AUROC of predicting A's correctness)",
         "",
@@ -526,7 +543,7 @@ def render_agreement(pools: list[Pool], gold: Gold, reports_dir: Path, db: str) 
         "|---|---|---|---|---|---|---|",
     ]
     for year_rule in (False, True):
-        for gv in ("v1", "v2"):
+        for gv in ("v1", "v2", "v3"):
             cases = load_gold(gv)
             rows = {
                 m: sp.build_rows(
@@ -553,11 +570,12 @@ def build_report(db: str = DEFAULT_DB, reports_dir: Path = Path("reports")) -> s
     gold = Gold(db)
     pools = score_bakeoff(load_evidence(), gold)
     parts = [
-        "# Gold v2 re-score",
+        "# Gold re-score: v1, v2, v3",
         "",
-        "Generated by `python -m evals.rescore_v2 report`. Rules: `evals/README.md` 6g. "
-        "v1 = `gold.jsonl` and the original comparator; v2 strict = `gold_v2.jsonl` (the "
-        "headline); v2 relaxed = the same gold with extra candidate columns ignored.",
+        "Generated by `python -m evals.rescore_v2 report`. Rules: `evals/README.md` 6g (v2) and "
+        "6i (v3). v1 = `gold.jsonl` and the original comparator; v2 strict = `gold_v2.jsonl`; "
+        "v3 strict = `gold_v3.jsonl` (the headline, frozen); v3 relaxed = the same gold with "
+        "extra candidate columns ignored.",
         "",
         render_phase5(gold, reports_dir),
         render_bakeoff(pools),

@@ -211,7 +211,9 @@ def run(gold_path: Path, db_path: str) -> dict:
             correct = False
             if result["error"] is None and case.get("gold_sql"):
                 gold_rows = con.execute(case["gold_sql"]).fetchall()
-                correct = case_matches(case, gold_rows, result["rows"], db_path)
+                correct = case_matches(
+                    case, gold_rows, result["rows"], db_path, pred_columns=result["columns"]
+                )
             record["execution_correct"] = correct
             if correct and scores_tier:
                 tier_correct[case["tier"]] += 1

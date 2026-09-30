@@ -3,8 +3,8 @@ import random
 from evals import pool_experiment as P
 from evals.rescore_v2 import Cand
 
-OK = {"v1": True, "v2": True, "v2r": True}
-NO = {"v1": False, "v2": False, "v2r": False}
+OK = {"v1": True, "v2": True, "v3": True, "v3r": True}
+NO = {"v1": False, "v2": False, "v3": False, "v3r": False}
 
 
 def cand(rows, ok):
@@ -14,23 +14,23 @@ def cand(rows, ok):
 def test_select_and_score_votes_by_identical_results_and_breaks_ties_by_order():
     right, wrong = [(1,)], [(2,)]
     draw = [cand(wrong, False), cand(right, True), cand(right, True), cand(wrong, False)]
-    pass_n, pass_1 = P.score_draw(draw, "v2")
+    pass_n, pass_1 = P.score_draw(draw, "v3")
     # right x2 vs wrong x2 is a tie, and the cluster seen first (wrong) wins it, as in the pipeline
     assert (pass_n, pass_1) == (True, False)
     # so with a tie the earlier candidate decides
-    assert P.score_draw([cand(wrong, False), cand(right, True)], "v2") == (True, False)
-    assert P.score_draw([cand(right, True), cand(wrong, False)], "v2") == (True, True)
+    assert P.score_draw([cand(wrong, False), cand(right, True)], "v3") == (True, False)
+    assert P.score_draw([cand(right, True), cand(wrong, False)], "v3") == (True, True)
 
 
 def test_a_draw_with_nothing_executed_scores_zero_and_errors_still_fill_the_budget():
-    assert P.score_draw([cand(None, False)] * 5, "v2") == (False, False)
+    assert P.score_draw([cand(None, False)] * 5, "v3") == (False, False)
 
 
 def test_expected_scores_are_exact_when_the_pool_is_the_draw():
     pool = [("r1", cand([(1,)], True)), ("r1", cand([(2,)], False))]
     rng = random.Random(0)
-    exp = P.expected_over_draws(pool, k=2, n_draws=2000, rng=rng, versions=("v2",))
-    pass_n, pass_1 = exp["v2"]
+    exp = P.expected_over_draws(pool, k=2, n_draws=2000, rng=rng, versions=("v3",))
+    pass_n, pass_1 = exp["v3"]
     assert pass_n == 1.0  # both are drawn every time
     assert abs(pass_1 - 0.5) < 0.06  # a 1-1 vote tie is broken by a random draw order
 

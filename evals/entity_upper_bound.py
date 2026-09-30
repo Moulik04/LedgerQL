@@ -155,8 +155,10 @@ def render(before, after, stats: Counter) -> str:
         "",
         "## pass@1 -> pass@N, before | after linking",
         "",
-        "| model | prompt | v1 before | v1 after | v2 strict before | v2 strict after | v2 relaxed before | v2 relaxed after |",
-        "|---|---|---|---|---|---|---|---|",
+        "| model | prompt | "
+        + " | ".join(f"{LABELS[v]} before | {LABELS[v]} after" for v in VERSIONS)
+        + " |",
+        "|---|---|" + "---|---|" * len(VERSIONS),
     ]
     for key in sorted(tb):
         cells = []
@@ -170,15 +172,15 @@ def render(before, after, stats: Counter) -> str:
             f"- {LABELS[v]}: {len(ub)} -> {len(ua)} of 50; newly solved {sorted(ua - ub)}; "
             f"never solved after: {sorted({p.id for p in after} - ua)}"
         )
-    lines += ["", "## Candidates that flip, by case (v2 strict)", ""]
+    lines += ["", "## Candidates that flip, by case (v3 strict)", ""]
     gained: Counter = Counter()
     lost: Counter = Counter()
     for pb, pa in zip(before, after, strict=True):
         assert (pb.model, pb.profile, pb.id) == (pa.model, pa.profile, pa.id)
         for cb, ca in zip(pb.cands, pa.cands, strict=True):
-            if ca.verdict["v2"] and not cb.verdict["v2"]:
+            if ca.verdict["v3"] and not cb.verdict["v3"]:
                 gained[pb.id] += 1
-            if cb.verdict["v2"] and not ca.verdict["v2"]:
+            if cb.verdict["v3"] and not ca.verdict["v3"]:
                 lost[pb.id] += 1
     lines += ["| case | wrong -> right | right -> wrong |", "|---|---|---|"]
     for cid in sorted(set(gained) | set(lost)):

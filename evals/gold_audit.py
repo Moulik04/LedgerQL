@@ -27,7 +27,7 @@ from collections import Counter
 import duckdb
 
 from evals import bakeoff_evidence
-from evals.passn_scoring import _run_candidate
+from evals.passn_scoring import _run_candidate_ex
 from evals.scoring import case_match, load_gold
 
 DEFAULT_DB = "data/ledgerql.duckdb"
@@ -37,14 +37,20 @@ def _connect(db: str):
     return duckdb.connect(db, read_only=True, config={"enable_external_access": "false"})
 
 
-def candidate_results(evidence: list[dict], case_id: str, db: str):
-    """Yield (model, profile, sql, rows or None) for every candidate of one case."""
+def candidate_results_ex(evidence: list[dict], case_id: str, db: str):
+    """Yield (model, profile, sql, rows or None, column names or None) for every candidate."""
     for rec in evidence:
         if rec["id"] != case_id:
             continue
         for sql in rec["sqls"]:
-            _, rows = _run_candidate(sql, db)
-            yield rec["model"], rec["profile"], sql, rows
+            _, rows, columns = _run_candidate_ex(sql, db)
+            yield rec["model"], rec["profile"], sql, rows, columns
+
+
+def candidate_results(evidence: list[dict], case_id: str, db: str):
+    """Yield (model, profile, sql, rows or None) for every candidate of one case."""
+    for model, profile, sql, rows, _ in candidate_results_ex(evidence, case_id, db):
+        yield model, profile, sql, rows
 
 
 def solved_cases(evidence: list[dict], cases: dict[str, dict], db: str) -> dict[str, int]:
@@ -57,8 +63,8 @@ def solved_cases(evidence: list[dict], cases: dict[str, dict], db: str) -> dict[
                 continue
             gold = con.execute(case["gold_sql"]).fetchall()
             out[cid] = sum(
-                rows is not None and case_match(case, gold, rows, db).matched
-                for _, _, _, rows in candidate_results(evidence, cid, db)
+                rows is not None and case_match(case, gold, rows, db, pred_columns=cols).matched
+                for _, _, _, rows, cols in candidate_results_ex(evidence, cid, db)
             )
         return out
     finally:
@@ -84,18 +90,18 @@ def outcomes(evidence: list[dict], case: dict, db: str) -> Counter:
     finally:
         con.close()
     buckets: Counter = Counter()
-    for _, _, _, rows in candidate_results(evidence, case["id"], db):
+    for _, _, _, rows, cols in candidate_results_ex(evidence, case["id"], db):
         if rows is None:
             buckets["rejected"] += 1
         elif not rows:
             buckets["empty"] += 1
         else:
-            strict = case_match(case, gold, rows, db, mode="strict")
+            strict = case_match(case, gold, rows, db, "strict", cols)
             if strict.matched:
                 via = "+".join(sorted(strict.via)) or "plain"
                 buckets["strict"] += 1
                 buckets[f"strict via {via}"] += 1
-            elif case_match(case, gold, rows, db, mode="relaxed").matched:
+            elif case_match(case, gold, rows, db, "relaxed", cols).matched:
                 buckets["relaxed"] += 1
             else:
                 buckets["miss"] += 1
@@ -173,7 +179,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--db", default=DEFAULT_DB)
     sub = ap.add_subparsers(dest="cmd", required=True)
     ns = sub.add_parser("never-solved")
-    ns.add_argument("--gold-version", choices=("v1", "v2"), default="v1")
+    ns.add_argument("--gold-version", choices=("v1", "v2", "v3"), default="v3")
     for name in ("dump", "outcomes", "scale"):
         sub.add_parser(name).add_argument("cases", nargs="+")
     sub.add_parser("goodwill")
@@ -195,7 +201,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"gold {args.gold_version}: {len(counts) - len(never)}/{len(counts)} solved by some")
         print(f"never solved ({len(never)}): {never}")
         return 0
-    v1, v2 = load_gold("v1"), load_gold("v2")
+    v1, v2 = load_gold("v1"), load_gold("v3")
     for cid in args.cases:
         print(f"\n== {cid}: {v1[cid]['question']}")
         if args.cmd == "dump":

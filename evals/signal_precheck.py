@@ -38,7 +38,7 @@ from pathlib import Path
 
 import duckdb
 
-from evals.passn_scoring import _run_candidate, load_jsonl
+from evals.passn_scoring import _run_candidate_ex, load_jsonl
 from evals.replay_repair_off import revert_exec_error_repairs
 from evals.replay_year_rule import apply_year_rule
 from evals.scoring import case_matches, load_gold
@@ -115,27 +115,30 @@ def build_rows(
             case = cases_by_id[rec["id"]]
             cands = rec.get("candidates") or []
             n = len(cands)
-            executed = [_run_candidate(c["sql"], db_path) for c in cands]
+            executed = [_run_candidate_ex(c["sql"], db_path) for c in cands]
 
             # consensus.vote(): biggest cluster of identical result sets, ties
             # to the earliest candidate.
             clusters: dict[tuple, list[int]] = {}
-            for i, (_, result) in enumerate(executed):
+            for i, (_, result, _cols) in enumerate(executed):
                 if result is not None:
                     clusters.setdefault(tuple(sorted(map(_key, result))), []).append(i)
             if clusters:
                 winning = max(clusters.values(), key=len)
                 winner = winning[0]
                 winner_rows = executed[winner][1]
+                winner_columns = executed[winner][2]
                 agreement = len(winning) / n
                 winner_events = cands[winner]["events"]
             else:
-                winner_rows, agreement, winner_events = None, 0.0, None
+                winner_rows, winner_columns, agreement, winner_events = None, None, 0.0, None
 
             winner_correct = False
             if case["expected"] in _SCORED and case.get("gold_sql") and winner_rows is not None:
                 gold_rows = con.execute(case["gold_sql"]).fetchall()
-                winner_correct = case_matches(case, gold_rows, winner_rows, db_path)
+                winner_correct = case_matches(
+                    case, gold_rows, winner_rows, db_path, pred_columns=winner_columns
+                )
             answered = rec["answer"] is not None
             rows.append(
                 {
