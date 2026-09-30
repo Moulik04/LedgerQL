@@ -1945,3 +1945,41 @@ is still unscored, so "answered with the assumption stated" is unmeasured and th
 
 Commands: `python -m evals.rescore_v2 report`, `evals.pool_experiment`,
 `evals.entity_upper_bound`, `evals.entity_link_eval`, `evals.gold_audit` (evals/README.md 6h).
+
+---
+
+## 2026-09-30 — Gold v3: the rules, written before any re-scoring, and the freeze
+
+**Committed before `gold_v3.jsonl` exists and before anything is scored under it.**
+Decisions taken after the v2 report (its open items); the rules are `evals/README.md`
+section 6i, authoritative, summarised here.
+
+- **V7 pivot equivalence.** For cases asking one quantity for two or more named periods or
+  entities (`T03`, `R06`, `U03`), the answer is the set of (label, value) pairs, wide or
+  long. The gap was mine: v2's V1 used "side by side" as an example of long format, and the
+  dominant candidate answer was a wide row (12 of 45 on T03), so the best bake-off cell
+  scored 0/5 on both cases even relaxed. Labels come from a label cell before the value or
+  from the column name (a year, or a company name or ticker).
+- **V8 unit-scale equivalence** for questions that state a scale (`U01` billions, `U05`
+  billion shares, `U07` millions): the raw and the scaled value are the same quantity, only
+  that scale is accepted. Same principle as V3.
+- **V6 approved** (the tolerance bug fix).
+- **V5 revised: tolerance has an explicit type.** Relative (at most 0.05) or absolute (only
+  on proportion columns, at most 1 percentage point). `A10` and `C04` were written to mean
+  0.5 *percentage points*; v3 encodes exactly that, replacing v2's blunter global cap.
+- **V9 alternatives.** `R07` accepts a NULL margin or the original (net income, NULL
+  revenue) shape; both mean "not computable". The stated reason needs the
+  `answer_must_state` grader.
+
+**Discipline, as for v2.** Applied mechanically to all 103; every case whose verdict moves
+is reported in both directions; v1, v2 and v3 side by side everywhere.
+
+**The freeze.** Then the 103 cases are frozen and pinned by hash. They were revised twice
+after inspecting model outputs, so their scores no longer cleanly measure generalisation.
+Later issues go on `evals/KNOWN_GOLD_ISSUES.md`, not into a v4. Headline claims come from
+the held-out set from then on (`evals/HELDOUT_PROTOCOL.md`). That set is also the only fair
+test of the entity linker (built with the current golds visible) and of "XiYanSQL-32B on the
+DDL prompt" (chosen in hindsight).
+
+**Bias, disclosed.** V7 was motivated by seeing candidates on two cases. V8, the absolute
+tolerance type and V9 are the author's decisions, not derived from candidates.

@@ -640,3 +640,58 @@ follows.
 
 The pass@N and pass@1 figures in 6f are **v1**. The figures under v2 are in
 `reports/gold_v2_rescore.md`; `DECISIONS.md` 2026-09-30 says which conclusions moved.
+
+## 6i. Gold v3: the scoring rules, and the freeze (written before any v3 scoring)
+
+`gold_v3.jsonl` is the third and **last** edition of the 103 cases. v1 and v2 stay as
+they are, as history, and every figure is reported v1, v2 and v3 side by side. v3 keeps
+V1 to V4 and V6 of section 6g unchanged and changes or adds the following. As in 6g,
+every rule derives from a question's wording or from the author's stated intent, none from
+what a candidate returned, and all are applied mechanically to all 103 cases.
+
+**V5 (revised). Tolerance has an explicit type.** A case carries `tolerance` and
+`tolerance_kind`: `relative` (the default, a fraction of the gold value, never above 0.05)
+or `absolute` (in the unit of the gold column). Absolute is allowed only on a proportion
+column (V3), and never above 1.0 (one percentage point). The `0.5` on `A10` and `C04` was
+written to mean **0.5 percentage points**, not 50%; v3 encodes that as `absolute` 0.5. The
+candidate value is first brought into the gold's units (V3), then compared.
+
+**V7. Pivot equivalence.** A question that asks for one quantity for two or more named
+periods or entities ("side by side", "across fiscal years 2024 and 2025") does not say
+whether the answer is long (a row per period) or wide (a column per period). Cases carry
+`pivot`, and the answer is the set of (label, value) pairs, whatever the layout. A
+candidate's pairs are read from each row's cells: a value cell is paired with the label
+cell immediately before it in the row, or else with the label its **column name** carries (a
+four-digit year equal to the label, or a company name or ticker that resolves to the
+label's company). Labels compare as in V2 for entities and exactly for periods; values
+compare under the case's own kinds (V3, V8, V6). Under the strict comparator every cell of
+the row must be a label or a paired value; under the relaxed comparator unexplained extra
+cells are ignored. Applies to `T03`, `R06`, `U03`.
+
+**V8. Unit-scale equivalence.** When a question states a scale ("in billions of dollars",
+"how many billion shares", "expressed in millions"), the raw value and the scaled value are
+the same quantity at the SQL level: a value matches gold `g` if it equals `g` or
+`g * factor` within tolerance, where `factor` is the case's own stated scale (`scale_cols`).
+Only that scale is accepted, not any other (a figure in millions does not match a question
+in billions). Presenting the asked unit is the answer grader's job. Applies to `U01`
+(1e9), `U05` (1e9), `U07` (1e6).
+
+**V9. Alternative accepted shapes.** A case may list `alternatives`: further accepted
+answers, each with its own gold SQL and compare mode; a result matches if it matches any.
+`R07` (JPMorgan's margin, which cannot be computed because it reports no revenue tag)
+accepts either a NULL margin or the original shape (net income with a NULL revenue): both
+mean "not computable". What matters is the stated reason, which is `answer_must_state`'s,
+not the comparator's.
+
+**The freeze.** Once v3 is built and re-scored, the 103 cases are frozen: `gold_v3.jsonl`
+is pinned by its SHA-256 (`evals/gold_v3.sha256`, checked by a test), and any change has
+to change that file on purpose. The reason: the 103 were revised twice after inspecting
+model outputs, so their scores no longer cleanly measure generalisation. Issues found
+later go on `evals/KNOWN_GOLD_ISSUES.md`, **not into a v4**. Headline claims move to the
+held-out set (`evals/HELDOUT_PROTOCOL.md`).
+
+**Provenance, stated because it matters.** V7 was motivated by inspecting candidates on
+`T03` and `R06` (the dominant answer to "side by side" was a wide row); the rule itself is
+stated from the wording ("side by side" specifies no layout) and applied to all three
+cases the wording covers. V8, V5's absolute type and V9 are the author's decisions, not
+derived from candidates.
