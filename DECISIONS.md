@@ -1571,7 +1571,7 @@ pipeline replay for the 32B exactly (27 -> 30 of 50).
 | Qwen3-30B | 31 -> 33 | 35 -> 35 | 26 -> 34 |
 | Qwen2.5-32B AWQ (4-bit) | 27 -> 30 | 30 -> 35 | 31 -> 35 |
 | XiYanSQL-32B | 34 -> 35 | 31 -> 34 (native) | 31 -> 36 |
-| OmniSQL-32B | **not run** | **not run** | **not run** |
+| OmniSQL-32B | **attempted twice, no results:** stopped by the smoke gate | same | same |
 
 **No model or prompt raises pass@N materially.** It sits at 33-36 of 50 (66-72%)
 everywhere; the best cell, XiYan on the DDL prompt at 36, is one case above the
@@ -1631,3 +1631,45 @@ now records `error:HTTPStatusError:<status>` and the response body, the job writ
 of the server log into the job's `.out`. Extraction is unchanged, so the completed
 runs are unaffected. A resubmitted OmniSQL job either succeeds or reports its own
 cause.
+
+### OmniSQL-32B resubmit (job 47275443, commit 8003302): attempted, stopped by the smoke gate on output quality
+
+The resubmit, with the status and body capture in place, did not reproduce the
+first failure. All 6 smoke requests returned `200 OK` (`vllm_server_47275443.out`), the
+server log has no error, and the model loaded (`Qwen2ForCausalLM`, bf16,
+`max_model_len` 5120, 17 checkpoint shards) and answered. So there is no HTTP status
+or response body to report. What went wrong the first time is unrecoverable: that
+server log was overwritten before the harness kept per-job logs, and it did not recur.
+
+The gate tripped on the model's output, and `sacct` confirms the job ended
+**FAILED, ExitCode 3:0, at 3:04** (the harness's smoke-gate exit code). `smoke_ok`
+needs all but at most one of the 3 smoke cases to produce an executing candidate
+with rows; OmniSQL had 1 of 3:
+
+- L01: both candidates filter `companies.name = 'Apple'` (the stored name is
+  `Apple Inc.`), so both execute and return 0 rows.
+- A01: both candidates fail to bind, using columns the view does not have (`qtrs`,
+  `tag` on `v_revenue`). J01: one candidate correct, one invents `fiscal_year` on
+  `financial_facts`.
+
+Every reply ended with `finish=stop`, so this is neither truncation nor the extractor.
+
+**How to read it.** OmniSQL was *attempted* twice and produced no scored output;
+"not run" would be wrong, because the second attempt ran the model and the gate
+stopped it. The gate worked as a quality filter here, not as an infrastructure
+alarm: a model that invents columns on 2 of 3 cases is stopped before it spends the
+full sweep. That is 6 samples, so it does not show OmniSQL is a weak generator, only
+that it did not clear the same bar the other three did (each had at least 2 of 3
+cases executing). The first failure (47274010) had a different signature (every
+request an HTTP error) and did not recur; its server log was overwritten, so its
+cause is unrecoverable. No config change is indicated and the model is not
+resubmitted: three models across three prompt formats already agree (pass@N 33-36 of
+50), and a fourth would not change the Phase 6 decision.
+
+**Base model.** The model card, its YAML front matter, the GitHub README and the arXiv
+abstract do not name a base model. `config.json` does record one, as a training
+artifact: `"_name_or_path": "/data2/qwen/Qwen2.5-Coder-32B-Instruct"`, with the same
+64-layer / 5120-hidden geometry. So OmniSQL-32B shares the Qwen2.5-Coder-32B lineage
+with XiYanSQL-32B and Qwen2.5-32B, and its agreement pairs with either would carry the
+same independence caveat. There are none, since no OmniSQL run produced results; the caveat
+applies if it is ever run.
