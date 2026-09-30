@@ -1,0 +1,28 @@
+{"run": "qwen3_30b", "case": "L03", "item": 0, "label": true, "note": "states 'fiscal year 2022' (wrong year; correctness is the year verifier's)", "labeller": "claude"}
+{"run": "qwen3_30b", "case": "L04", "item": 0, "label": true, "note": "states 'fiscal year 2023'", "labeller": "claude"}
+{"run": "qwen3_30b", "case": "L04", "item": 1, "label": false, "note": "", "labeller": "claude"}
+{"run": "qwen3_30b", "case": "L09", "item": 0, "label": true, "note": "states 'fiscal year 2023'", "labeller": "claude"}
+{"run": "qwen3_30b", "case": "A10", "item": 0, "label": false, "note": "", "labeller": "claude"}
+{"run": "qwen3_30b", "case": "U01", "item": 0, "label": true, "note": "'billions of dollars'", "labeller": "claude"}
+{"run": "qwen3_30b", "case": "U02", "item": 0, "label": false, "note": "states fiscal year 2022, not 2024, and no September date", "labeller": "claude"}
+{"run": "qwen3_30b", "case": "U03", "item": 0, "label": false, "note": "shows two values with 'no additional context'", "labeller": "claude"}
+{"run": "qwen3_30b", "case": "U07", "item": 0, "label": true, "note": "'millions of dollars'", "labeller": "claude"}
+{"run": "qwen3_30b", "case": "U07", "item": 1, "label": false, "note": "no year stated", "labeller": "claude"}
+{"run": "qwen3_30b", "case": "U08", "item": 0, "label": false, "note": "JUDGEMENT CALL: says 'USD' but not that it is base USD rather than thousands or millions (as DECISIONS 2026-09-29 s6 read it)", "labeller": "claude"}
+{"run": "qwen3_30b", "case": "M01", "item": 0, "label": true, "note": "states 'fiscal year 2022' (presence)", "labeller": "claude"}
+{"run": "qwen3_30b", "case": "M02", "item": 0, "label": false, "note": "'maximum value', no metric named", "labeller": "claude"}
+{"run": "qwen3_30b", "case": "M02", "item": 1, "label": false, "note": "", "labeller": "claude"}
+{"run": "qwen3_30b", "case": "M06", "item": 0, "label": false, "note": "no 'net income'", "labeller": "claude"}
+{"run": "qwen3_30b", "case": "M08", "item": 0, "label": false, "note": "no Alphabet or GOOGL", "labeller": "claude"}
+{"run": "qwen3_30b", "case": "C06", "item": 0, "label": false, "note": "mentions one year only", "labeller": "claude"}
+{"run": "qwen25_32b", "case": "A10", "item": 0, "label": false, "note": "", "labeller": "claude"}
+{"run": "qwen25_32b", "case": "U01", "item": 0, "label": true, "note": "'391.035 billion dollars'", "labeller": "claude"}
+{"run": "qwen25_32b", "case": "U02", "item": 0, "label": false, "note": "", "labeller": "claude"}
+{"run": "qwen25_32b", "case": "U03", "item": 0, "label": false, "note": "sums the two values, the opposite of the item", "labeller": "claude"}
+{"run": "qwen25_32b", "case": "U08", "item": 0, "label": false, "note": "JUDGEMENT CALL: as for the 30B", "labeller": "claude"}
+{"run": "qwen25_32b", "case": "M01", "item": 0, "label": true, "note": "JUDGEMENT CALL: gives both years ('In 2024 ... in 2025'); years stated, not called fiscal", "labeller": "claude"}
+{"run": "qwen25_32b", "case": "M02", "item": 0, "label": true, "note": "JUDGEMENT CALL: 'had total assets of ...' names the metric without saying 'by total assets'", "labeller": "claude"}
+{"run": "qwen25_32b", "case": "M02", "item": 1, "label": false, "note": "", "labeller": "claude"}
+{"run": "qwen25_32b", "case": "M06", "item": 0, "label": false, "note": "no 'net income'", "labeller": "claude"}
+{"run": "qwen25_32b", "case": "M08", "item": 0, "label": true, "note": "'the value for ticker GOOGL'", "labeller": "claude"}
+{"run": "qwen25_32b", "case": "C06", "item": 0, "label": false, "note": "", "labeller": "claude"}
