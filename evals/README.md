@@ -537,3 +537,76 @@ Three scripts, none needing a GPU except the last job:
   truncated) so dialect problems show as their own failure class.
   `--smoke K` gates a run on K cases. `evals/pairwise_agreement.py` then computes
   cross-model agreement AUROC for every model pair from the runs' jsonl files.
+
+## 6g. Gold v2: the scoring rules (written before any re-scoring)
+
+`gold.jsonl` is v1 and stays exactly as it is. `gold_v2.jsonl` (same 103 ids,
+same questions) is a second version whose queries and compare modes follow the
+rules below. Both are scored and reported side by side. Why v2 exists:
+`DECISIONS.md` 2026-09-30, which audited the eight cases no candidate from any
+model ever solved and found seven of them were gold errors.
+
+**Every rule below is derived from the question's wording. None is derived from
+what a candidate returned.** They are applied mechanically to all 103 cases, not
+to the eight that motivated them; a case whose verdict moves under them is
+reported whichever direction it moves. Only `ANSWER` and `ANSWER_WITH_ASSUMPTION`
+cases (69) are execution-scored, so only they can change.
+
+**V1. Projection.** A v2 gold returns exactly the values the question asks for,
+and nothing else.
+- Each quantity the question asks for ("what was", "how many", "how much",
+  "what percentage", "with counts") is a column.
+- Each entity the question asks for ("which company", "which GICS sector") is a
+  column.
+- A period or filing label (`fiscal_year`, `period_end_date`, `filed_date`,
+  `uom`) is a column only if the question asks for it ("with accession number
+  and fiscal year", "in what unit") or asks for one value per period, where the
+  period is the row's label ("2024 and 2025 side by side"). A label that only
+  qualifies one asked value (the year behind "most recent", the date behind
+  "revenue for 2024") is not asked for. Whether the *prose* states it is
+  `answer_must_state`'s job, not the SQL comparator's.
+- Supporting inputs (the revenue and net income behind a margin, the two values
+  behind a difference) are not projected unless the question asks for them.
+
+**V2. Entity targets are compared at company level.** Where the question asks
+*which company* (or asks per-company rows), the target is the company, not a
+spelling of it. Every cell of the entity column, in gold and in the candidate,
+is resolved to a `cik` through `companies`: an integer that is a `companies.cik`,
+else a value equal to a `companies.ticker`, else equal to a `companies.name`
+(exact, no fuzzy matching). Two cells match iff they resolve to the same `cik`.
+A candidate cell that resolves to nothing does not match. It does not apply where
+the identifier is itself the answer (a CIK, a registrant name, a ticker symbol).
+The identifier type a candidate matched through (`name`, `ticker`, `cik`) is
+reported.
+
+**V3. Ratio scale.** For a target that is a dimensionless proportion (a margin,
+ratio, return, share, growth rate or percentage), fraction and percentage are one
+quantity: a value `x` matches gold `g` if `x`, `100*x` or `x/100` matches it
+within the case's tolerance. Cases carry `ratio_cols`. Presenting the unit in the
+prose is the answer grader's job. **Not covered:** rescaling by 1e6 or 1e9
+("in billions", "in millions") is a unit choice the question states, not a
+proportion; it is unchanged and left as an open question.
+
+**V4. Order and shape.** A result is compared as `ordered` only if the question
+asks for an order ("highest", "top N", "N most", "oldest first"); otherwise as a
+`set`. One row of one column is `scalar` (or `scalar_or_null`).
+
+**V5. Tolerance.** A relative tolerance is never above 0.05. (`A10` and `C04`
+carry 0.5, evidently percentage points written into a relative field, which
+accepts values up to 50% away.)
+
+**Two comparators, both reported.** *Strict* (the headline): the candidate must
+return exactly gold's columns, in gold's order, under V2 and V3. *Relaxed* (a
+second, labelled column, never the headline): the candidate matches if gold's
+columns, resolved under V2 and V3, appear among its columns in any order, with
+extra columns ignored.
+
+**What v2 does not do.** It does not loosen the strict comparator for extra
+columns, does not rewrite a question, and does not touch `gold.jsonl`.
+
+**Provenance, stated because it matters.** The eight never-solved cases were
+audited with the candidates' output in view, and that audit is what suggested V1
+to V3. Once the rules were written they were applied to the other 95 cases from
+the question text and gold SQL alone, before any re-scoring and without looking at
+any candidate. `evals/gold_v2.py` lists, for every changed case, the rule it
+follows.

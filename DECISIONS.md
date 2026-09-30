@@ -1673,3 +1673,60 @@ artifact: `"_name_or_path": "/data2/qwen/Qwen2.5-Coder-32B-Instruct"`, with the 
 with XiYanSQL-32B and Qwen2.5-32B, and its agreement pairs with either would carry the
 same independence caveat. There are none, since no OmniSQL run produced results; the caveat
 applies if it is ever run.
+
+---
+
+## 2026-09-30 — Gold v2: the rules, written before any re-scoring
+
+**This entry is committed before `gold_v2.jsonl` exists and before anything is
+re-scored**, so the history shows the rules were fixed first.
+
+### Why
+
+Job 47274007-9 left 8 of the 50 `ANSWER` cases unsolved by all 2,250 candidates
+(A09, J04, J05, L12, R02, R04, R05, T02). Audited against the gold, seven are gold
+errors and one is genuinely hard:
+
+- **A09, J04, J05 (over-specified projection).** The questions ask "which
+  companies" and "accession number and fiscal year"; gold also returns
+  `fiscal_year`/`value` and `filed_date`. J04's gold *logic* is sound: five readings
+  of "most recent 10-K" all return the same 27 companies.
+- **R02, R05 (literal reading).** "Net income divided by total assets", "ratio":
+  no candidate that returned a value returned a percentage (0 of 23, 0 of 21), gold
+  multiplies by 100.
+- **R04, T02 ("which" plus scale).** The question asks which company; gold
+  returns the company and a percentage, and "margin"/"growth" split about evenly
+  between fraction and percentage in candidates.
+- **L12 (genuine).** The stored name is `Coca-Cola Company (The)`; all 45
+  candidates wrote `name = 'The Coca-Cola Company'`. Entity resolution.
+
+Percent wording also matters elsewhere: models scale when asked for a "percentage"
+or "share" (T01 39 of 45, R03 30 of 33), split on "margin" (R01 24 to 11, R06 16 to
+15, G01 22 to 16), and never scale on "ratio" or "divided by".
+
+### The rules
+
+The rules are `evals/README.md` section 6g, reproduced as a summary here; that
+section is authoritative. **V1** projection: exactly what the question asks, no
+supporting inputs, and a period or filing label only if the question asks for it or
+asks for one value per period. **V2** entity targets: resolved to `cik` through
+`companies` (integer cik, else ticker, else exact name), compared at company level,
+identifier type reported. **V3** ratio scale: for a proportion, `x`, `100x` and
+`x/100` are the same quantity; cases carry `ratio_cols`; **1e6/1e9 unit rescaling
+is not covered and stays open**. **V4** ordered only if the question asks for an
+order, else set; one cell is scalar. **V5** relative tolerance capped at 0.05
+(`A10` and `C04` carry 0.5, which as a relative tolerance accepts values 50% away).
+Strict is the headline; a relaxed comparator (extra columns ignored) is a second,
+labelled column.
+
+### Constraints on how they are applied
+
+- Every rule derives from the question's wording, none from candidate output.
+- Applied mechanically to all 103 cases; every case whose verdict moves is
+  reported, in both directions (A01 projects an unasked `value`, so it may drop).
+- `gold.jsonl` (v1) is kept; v1 and v2 are reported side by side everywhere.
+- **Bias, disclosed.** The audit that suggested V1 to V3 saw candidate output for
+  the eight cases; the other 95 are converted from the text alone, and the
+  per-case table (`evals/gold_v2.py`) names the rule behind each change.
+- **V5 is an addition beyond the three rules in the brief**, found while reading
+  gold tolerances; flagged so it can be vetoed.
