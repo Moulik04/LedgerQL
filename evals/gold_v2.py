@@ -375,9 +375,9 @@ def build_gold_v2(v1_cases: list[dict]) -> list[dict]:
     for case in v1_cases:
         change = CHANGES.get(case["id"])
         if change is None:
-            out.append(dict(case))
+            out.append({**case, "gold_version": "v2"})
             continue
-        new = dict(case)
+        new = {**case, "gold_version": "v2"}
         meta = {
             "rules": change["rules"],
             "v1_gold_sql": case.get("gold_sql"),

@@ -38,10 +38,10 @@ from pathlib import Path
 
 import duckdb
 
-from evals.passn_scoring import GOLD_PATH, _run_candidate, load_jsonl
+from evals.passn_scoring import _run_candidate, load_jsonl
 from evals.replay_repair_off import revert_exec_error_repairs
 from evals.replay_year_rule import apply_year_rule
-from evals.run_eval import results_match
+from evals.scoring import case_matches, load_gold
 
 SIGNALS = [
     "agreement",
@@ -135,9 +135,7 @@ def build_rows(
             winner_correct = False
             if case["expected"] in _SCORED and case.get("gold_sql") and winner_rows is not None:
                 gold_rows = con.execute(case["gold_sql"]).fetchall()
-                winner_correct = results_match(
-                    gold_rows, winner_rows, case["compare"], case.get("tolerance", 1e-6)
-                )
+                winner_correct = case_matches(case, gold_rows, winner_rows, db_path)
             answered = rec["answer"] is not None
             rows.append(
                 {
@@ -255,9 +253,10 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="apply the year-grounding verifier first (replay_year_rule)",
     )
+    ap.add_argument("--gold-version", choices=("v1", "v2"), default="v1")
     args = ap.parse_args(argv)
 
-    gold = {c["id"]: c for c in load_jsonl(GOLD_PATH)}
+    gold = load_gold(args.gold_version)
     rows = {
         m: build_rows(
             load_jsonl(args.reports_dir / f"eval_bridges2_{m}_measured.jsonl"),

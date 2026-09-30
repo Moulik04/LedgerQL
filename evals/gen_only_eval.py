@@ -43,7 +43,7 @@ import httpx
 from evals import gen_prompts
 from evals.gen_prompts import PROFILES, SchemaInfo
 from evals.passn_scoring import GOLD_PATH, compute_pass_at_n, load_jsonl
-from evals.run_eval import results_match
+from evals.scoring import case_matches
 from ledgerql import consensus as consensus_module
 from ledgerql import execute as execute_module
 from ledgerql import generate, pipeline, schema_index
@@ -207,9 +207,7 @@ def _score_case(case: dict, gens: list[Generation], gold, db_path: str) -> dict:
     correct = False
     if consensus.reason_code is None:
         gold_rows = gold.execute(case["gold_sql"]).fetchall()
-        correct = results_match(
-            gold_rows, consensus.rows, case["compare"], case.get("tolerance", 1e-6)
-        )
+        correct = case_matches(case, gold_rows, consensus.rows, db_path)
     return {
         "id": case["id"],
         "tier": case["tier"],

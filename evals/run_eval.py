@@ -34,6 +34,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from evals.abstain_scoring import compute_abstain_metrics
 from evals.confidently_wrong import compute_confidently_wrong_rate
 from evals.repair_scoring import compute_repair_stats
+from evals.scoring import case_matches
 from ledgerql import answer as answer_module
 from ledgerql import generate as generate_module
 from ledgerql import pipeline
@@ -210,8 +211,7 @@ def run(gold_path: Path, db_path: str) -> dict:
             correct = False
             if result["error"] is None and case.get("gold_sql"):
                 gold_rows = con.execute(case["gold_sql"]).fetchall()
-                tolerance = case.get("tolerance", 1e-6)
-                correct = results_match(gold_rows, result["rows"], case["compare"], tolerance)
+                correct = case_matches(case, gold_rows, result["rows"], db_path)
             record["execution_correct"] = correct
             if correct and scores_tier:
                 tier_correct[case["tier"]] += 1

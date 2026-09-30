@@ -34,7 +34,7 @@ from pathlib import Path
 
 import duckdb
 
-from evals.run_eval import results_match
+from evals.scoring import case_matches, load_gold
 from ledgerql import execute as execute_module
 from ledgerql import guardrails as guardrails_module
 
@@ -99,13 +99,12 @@ def compute_pass_at_n(per_case: list[dict], cases_by_id: dict, db_path: str) -> 
             if case is None or case["expected"] != _SCORED_EXPECTED:
                 continue
             gold_rows = con.execute(case["gold_sql"]).fetchall()
-            tolerance = case.get("tolerance", 1e-6)
 
             pool: list[tuple[str, bool, list[tuple]]] = []
             for cand in record.get("candidates") or []:
                 guard_sql, rows = _run_candidate(cand["sql"], db_path)
                 if guard_sql is not None:
-                    matched = results_match(gold_rows, rows, case["compare"], tolerance)
+                    matched = case_matches(case, gold_rows, rows, db_path)
                     pool.append((guard_sql, matched, rows))
             any_correct = any(matched for _, matched, _ in pool)
 
@@ -122,9 +121,7 @@ def compute_pass_at_n(per_case: list[dict], cases_by_id: dict, db_path: str) -> 
             outside_correct = False
             if not in_pool and winner_sql:
                 _, rows = _run_candidate(winner_sql, db_path)
-                outside_correct = rows is not None and results_match(
-                    gold_rows, rows, case["compare"], tolerance
-                )
+                outside_correct = rows is not None and case_matches(case, gold_rows, rows, db_path)
 
             recorded = record.get("execution_correct") is True
             if recorded != winner_correct:
@@ -178,9 +175,10 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("report", type=Path)
     ap.add_argument("--db", default="data/ledgerql.duckdb")
+    ap.add_argument("--gold-version", choices=("v1", "v2"), default="v1")
     args = ap.parse_args(argv)
 
-    cases_by_id = {c["id"]: c for c in load_jsonl(GOLD_PATH)}
+    cases_by_id = load_gold(args.gold_version)
     per_case = load_jsonl(args.report)
     stats = compute_pass_at_n(per_case, cases_by_id, args.db)
 
