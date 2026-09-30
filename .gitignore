@@ -51,6 +51,9 @@ reports/*.jsonl
 !reports/eval_bridges2_*.jsonl
 # Cluster runs write here (job-specific); they must never touch a tracked file.
 reports/runs/
+# ...but the bake-off's compact evidence (candidate SQL only, no raw replies) is tracked:
+# every bake-off figure is re-scored from it (evals/bakeoff_evidence.py).
+!reports/bakeoff_candidates.jsonl
 
 # Testing / tooling
 .pytest_cache/
