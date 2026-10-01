@@ -33,6 +33,7 @@ import duckdb
 from evals import bakeoff_evidence, must_state
 from evals.passn_scoring import _run_candidate_ex, load_jsonl
 from evals.scoring import case_match, load_gold
+from ledgerql import refusal as refusal_module
 from ledgerql.consensus import _row_sort_key
 
 DEFAULT_DB = "data/ledgerql.duckdb"
@@ -120,8 +121,16 @@ def score_report(records: list[dict], gold: Gold, judge=None) -> list[RecordScor
         rubric_pass = None
         if rec["id"] in items:
             question = gold.v1[rec["id"]]["question"]
+            if rec.get("answer") is None and rec.get("reason_code") and not rec.get("refusal"):
+                # a record from before abstains carried an explanation: replay it (it is a pure
+                # function of the reason code, the question and the database)
+                rec = {**rec, "refusal": refusal_module.explain(
+                    rec["reason_code"], question, db_path=gold.db
+                ).text}  # fmt: skip
             rubric_pass = must_state.stated(
-                must_state.grade_case(items[rec["id"]], rec.get("answer"), None, judge, question)
+                must_state.grade_case(
+                    items[rec["id"]], rec.get("answer"), rec.get("refusal"), judge, question
+                )
             )
         out.append(
             RecordScore(
@@ -296,6 +305,7 @@ def assumption_split(scores: list[RecordScore]) -> dict[str, dict[str, int]]:
             "not_stated": sum(s.rubric_pass is False for s in correct_rows),
             "unassessed": sum(s.rubric_pass is None for s in correct_rows),
             "abstained": abstained,
+            "abstained_reason_stated": sum(not s.answered and s.rubric_pass is True for s in pool),
             "answered_wrong": len(pool) - abstained - len(correct_rows),
         }
     return out
@@ -397,8 +407,8 @@ def render_phase5(gold: Gold, reports_dir: Path, judge=None) -> str:
         "**the headline is `stated`**. An abstain is reported on its "
         "own, never as handled.",
         "",
-        "| run | config | version | answered correctly | of which **stated** | not stated | no rubric / not gradable | abstained | answered wrong |",
-        _sep(9),
+        "| run | config | version | answered correctly | of which **stated** | not stated | no rubric / not gradable | abstained | of which reason stated | answered wrong |",
+        _sep(10),
     ]
     for label, config, scores in runs:
         if config == "as recorded (repair on)":
@@ -409,7 +419,7 @@ def render_phase5(gold: Gold, reports_dir: Path, judge=None) -> str:
             lines.append(
                 f"| {label} | {config} | {LABELS[v]} | {sp['answered_correct']} | "
                 f"**{sp['stated']}** | {sp['not_stated']} | {sp['unassessed']} | "
-                f"{sp['abstained']} | {sp['answered_wrong']} |"
+                f"{sp['abstained']} | {sp['abstained_reason_stated']} | {sp['answered_wrong']} |"
             )
     lines += ["", "### Per tier (ANSWER cases), measured runs, shipped (repair off)", ""]
     for label, config, scores in runs:

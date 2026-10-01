@@ -114,3 +114,35 @@ def test_bakeoff_v1_reproduces_the_published_cell_and_the_vote_matches_the_harne
     assert picked
     for p in picked:
         assert p.cands[p.winner].guard_sql == p.recorded_winner_sql, p.id
+
+
+def test_an_abstain_that_states_the_documented_reason_is_counted_apart_from_a_bare_abstain():
+    scores = [
+        _score(
+            "R07", "ANSWER_WITH_ASSUMPTION", False, False, False, rubric=True
+        ),  # abstained, reason stated
+        _score(
+            "H06", "ANSWER_WITH_ASSUMPTION", False, False, False, rubric=False
+        ),  # abstained, wrong reason
+        _score(
+            "L03", "ANSWER_WITH_ASSUMPTION", False, False, False, rubric=None
+        ),  # abstained, no refusal item
+        _score("U02", "ANSWER_WITH_ASSUMPTION", True, True, True, rubric=True),
+    ]
+    sp = R.assumption_split(scores)["v3"]
+    assert sp["abstained"] == 3 and sp["abstained_reason_stated"] == 1
+    assert sp["stated"] == 1  # only the answer counts toward the headline
+
+
+def test_an_old_abstain_record_with_no_refusal_text_gets_the_deterministic_one_replayed(gold):
+    rec = {
+        "id": "R07", "tier": "ratio", "expected": "ANSWER_WITH_ASSUMPTION", "answer": None,
+        "reason_code": "NO_DATA", "rows": None, "execution_error": None, "execution_correct": False,
+    }  # fmt: skip
+    (score,) = R.score_report([rec], gold, judge=lambda q, a, t: True)
+    assert (
+        score.rubric_pass is True
+    )  # the replayed text states the documented gap, the judge agrees
+    assert R.assumption_split([score])["v3"]["abstained_reason_stated"] == 1
+    (none,) = R.score_report([rec], gold)  # without a judge the judge-primary item is not assessed
+    assert none.rubric_pass is None
