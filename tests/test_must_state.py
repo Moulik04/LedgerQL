@@ -103,3 +103,39 @@ def test_the_committed_patterns_cover_every_rubric_item_of_the_gold_and_compile(
             )
             M.compile_item(it)  # every regex compiles
     assert sum(len(v) for v in patterns.values()) == 27
+
+
+def test_calibration_counts_agreement_false_passes_and_false_fails():
+    patterns = {"X": [ITEM]}
+    records = {"run": [{"id": "X", "answer": "In fiscal year 2024 it was 1", "question": "q"}]}
+    labels = [
+        {"run": "run", "case": "X", "item": 0, "label": True, "note": ""},
+        {"run": "run", "case": "X", "item": 0, "label": False, "note": "disagree"},
+    ]
+    out = M.calibrate(records, patterns, labels)
+    assert out["n"] == 2 and out["agree"] == 1
+    assert out["false_pass"] == 1 and out["false_fail"] == 0  # grader True where the label is False
+    assert out["disagreements"][0]["note"] == "disagree"
+
+
+def test_calibration_reports_the_judge_on_its_own_and_skips_unanswered_records():
+    patterns = {"X": [ITEM]}
+    records = {"run": [{"id": "X", "answer": None, "question": "q"}]}
+    labels = [{"run": "run", "case": "X", "item": 0, "label": False, "note": ""}]
+    assert M.calibrate(records, patterns, labels)["n"] == 0  # nothing to grade, not a pass
+    records = {"run": [{"id": "X", "answer": "It was 1", "question": "q"}]}
+    out = M.calibrate(records, patterns, labels, judge=lambda q, a, t: True)
+    assert out["judge"]["n"] == 1 and out["judge"]["agree"] == 0  # the judge said yes, the label no
+
+
+def test_judge_check_reports_recall_and_precision_on_constructed_answers():
+    checks = [
+        {"case": "X", "item": 0, "question": "q", "answer": "yes stated", "label": True},
+        {"case": "X", "item": 0, "question": "q", "answer": "also stated", "label": True},
+        {"case": "X", "item": 0, "question": "q", "answer": "not stated", "label": False},
+    ]
+    patterns = {"X": [ITEM]}
+    out = M.judge_check(checks, patterns, judge=lambda q, a, t: "stated" in a and "not" not in a)
+    assert out["n"] == 3 and out["recall"] == 1.0 and out["precision"] == 1.0
+    always_no = M.judge_check(checks, patterns, judge=lambda q, a, t: False)
+    assert always_no["recall"] == 0.0 and always_no["false_negatives"] == 2

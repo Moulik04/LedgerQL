@@ -14,9 +14,9 @@ def gold():
     return Gold(DB)
 
 
-def _score(id, expected, answered, v1, v2, v3r=None):
+def _score(id, expected, answered, v1, v2, v3r=None, rubric=None):
     verdict = {"v1": v1, "v2": v2, "v3": v2, "v3r": v2 if v3r is None else v3r}
-    return RecordScore(id, "t", expected, answered, v1, verdict)
+    return RecordScore(id, "t", expected, answered, v1, verdict, rubric)
 
 
 def test_vote_winner_is_the_first_of_the_largest_cluster_and_none_when_nothing_ran():
@@ -54,7 +54,29 @@ def test_assumption_answers_count_only_when_given_but_answer_cases_count_the_res
         "v1": 0, "v2": 1, "v3": 1, "v3r": 1, "n": 3
     }  # fmt: skip
     split = R.assumption_split(scores)["v3"]
-    assert split == {"n": 3, "answered_correct": 1, "abstained": 1, "answered_wrong": 1}
+    assert (split["n"], split["answered_correct"], split["abstained"], split["answered_wrong"]) == (
+        3, 1, 1, 1
+    )  # fmt: skip
+
+
+def test_a_correct_assumption_answer_splits_into_stated_not_stated_and_unassessed():
+    scores = [
+        _score("A", "ANSWER_WITH_ASSUMPTION", True, True, True, rubric=True),
+        _score("B", "ANSWER_WITH_ASSUMPTION", True, True, True, rubric=False),
+        _score("C", "ANSWER_WITH_ASSUMPTION", True, True, True, rubric=None),
+        _score(
+            "D", "ANSWER_WITH_ASSUMPTION", True, False, False, rubric=True
+        ),  # stated, wrong value
+        _score("E", "ANSWER_WITH_ASSUMPTION", False, False, False, rubric=None),  # abstained
+    ]
+    sp = R.assumption_split(scores)["v3"]
+    assert (sp["answered_correct"], sp["stated"], sp["not_stated"], sp["unassessed"]) == (
+        3,
+        1,
+        1,
+        1,
+    )
+    assert (sp["abstained"], sp["answered_wrong"]) == (1, 1)  # the stated-but-wrong D is wrong
 
 
 def test_verdict_changes_reports_gains_and_losses():

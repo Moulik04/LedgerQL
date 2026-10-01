@@ -30,7 +30,7 @@ from pathlib import Path
 
 import duckdb
 
-from evals import bakeoff_evidence
+from evals import bakeoff_evidence, must_state
 from evals.passn_scoring import _run_candidate_ex, load_jsonl
 from evals.scoring import case_match, load_gold
 from ledgerql.consensus import _row_sort_key
@@ -102,17 +102,27 @@ class RecordScore:
     answered: bool
     recorded: bool  # the report's own execution_correct
     verdict: dict[str, bool]
+    rubric_pass: bool | None = None  # answer_must_state: stated / not stated / not assessed
 
 
-def score_report(records: list[dict], gold: Gold) -> list[RecordScore]:
+def score_report(records: list[dict], gold: Gold, judge=None) -> list[RecordScore]:
     """Each scored record, judged by the winner rows it recorded, exactly as `run_eval`
-    judged them: no execution error, and the rows match."""
+    judged them: no execution error, and the rows match. `rubric_pass` is the
+    `answer_must_state` grade of the answer text (patterns; `judge` decides only the
+    judge-primary items, None leaves those not assessed)."""
+    items = must_state.load_patterns()
     out = []
     for rec in records:
         if rec["expected"] not in SCORED or not gold.v1[rec["id"]].get("gold_sql"):
             continue
         rows = rec.get("rows") if rec.get("execution_error") is None else None
         columns = rec.get("columns")
+        rubric_pass = None
+        if rec["id"] in items:
+            question = gold.v1[rec["id"]]["question"]
+            rubric_pass = must_state.stated(
+                must_state.grade_case(items[rec["id"]], rec.get("answer"), None, judge, question)
+            )
         out.append(
             RecordScore(
                 id=rec["id"],
@@ -121,6 +131,7 @@ def score_report(records: list[dict], gold: Gold) -> list[RecordScore]:
                 answered=rec.get("answer") is not None,
                 recorded=rec.get("execution_correct") is True,
                 verdict=gold.verdicts(rec["id"], rows, columns),
+                rubric_pass=rubric_pass,
             )
         )
     return out
@@ -269,20 +280,23 @@ def load_report(path: Path) -> list[dict]:
 
 
 def assumption_split(scores: list[RecordScore]) -> dict[str, dict[str, int]]:
-    """{version: {answered_correct, abstained, answered_wrong}} over the
-    `ANSWER_WITH_ASSUMPTION` cases. Whether the answer *states* its assumption is
-    `answer_must_state`, which nothing scores yet, so `answered_correct` is an upper
-    bound on "answered with the assumption stated"."""
+    """{version: outcome counts} over the `ANSWER_WITH_ASSUMPTION` cases. `answered_correct` is
+    split again by the `answer_must_state` grade of its prose: `stated` (the headline),
+    `not_stated`, or `unassessed` (nothing to grade, or a judge-decided item without a judge).
+    Execution outranks prose: a wrong value is never counted as stated."""
     pool = [s for s in scores if s.expected == "ANSWER_WITH_ASSUMPTION"]
     out = {}
     for v in VERSIONS:
         abstained = sum(not s.answered for s in pool)
-        correct = sum(s.answered and s.verdict[v] for s in pool)
+        correct_rows = [s for s in pool if s.answered and s.verdict[v]]
         out[v] = {
             "n": len(pool),
-            "answered_correct": correct,
+            "answered_correct": len(correct_rows),
+            "stated": sum(s.rubric_pass is True for s in correct_rows),
+            "not_stated": sum(s.rubric_pass is False for s in correct_rows),
+            "unassessed": sum(s.rubric_pass is None for s in correct_rows),
             "abstained": abstained,
-            "answered_wrong": len(pool) - abstained - correct,
+            "answered_wrong": len(pool) - abstained - len(correct_rows),
         }
     return out
 
@@ -354,7 +368,7 @@ def _sep(n: int) -> str:
     return "|" + "---|" * n
 
 
-def render_phase5(gold: Gold, reports_dir: Path) -> str:
+def render_phase5(gold: Gold, reports_dir: Path, judge=None) -> str:
     lines = [
         "## Phase 5 per-case reports: v1 | v2 strict | v3 strict | v3 relaxed",
         "",
@@ -369,7 +383,7 @@ def render_phase5(gold: Gold, reports_dir: Path) -> str:
     runs = []
     for label, name in PHASE5_REPORTS[:2]:
         for config, records in _configs(load_report(reports_dir / name)).items():
-            scores = score_report(records, gold)
+            scores = score_report(records, gold, judge)
             a, w = accuracy(scores, "ANSWER"), accuracy(scores, "ANSWER_WITH_ASSUMPTION")
             cells = " | ".join(_pct(a[v], 50) for v in VERSIONS)
             wcells = " | ".join(f"{w[v]}/19" for v in VERSIONS)
@@ -377,12 +391,14 @@ def render_phase5(gold: Gold, reports_dir: Path) -> str:
             runs.append((label, config, scores))
     lines += ["", "### Assumption cases (19): answered correctly / abstained / answered wrong", ""]
     lines += [
-        "`answered correctly` is an upper bound on *answered with the assumption stated*: "
-        "`answer_must_state` is scored separately (`evals/must_state.py`). An abstain is "
-        "reported on its own, never as handled.",
+        "`answered correctly` is split by whether the prose states the assumption "
+        "(`answer_must_state`, `evals/must_state.py`; patterns decide most items, a local judge "
+        "decides the five judge-primary ones, and without a judge those are *not assessed*; J02 and G04 have no rubric items at all): "
+        "**the headline is `stated`**. An abstain is reported on its "
+        "own, never as handled.",
         "",
-        "| run | config | version | answered correctly | abstained | answered wrong |",
-        _sep(6),
+        "| run | config | version | answered correctly | of which **stated** | not stated | no rubric / not gradable | abstained | answered wrong |",
+        _sep(9),
     ]
     for label, config, scores in runs:
         if config == "as recorded (repair on)":
@@ -392,6 +408,7 @@ def render_phase5(gold: Gold, reports_dir: Path) -> str:
             sp = split[v]
             lines.append(
                 f"| {label} | {config} | {LABELS[v]} | {sp['answered_correct']} | "
+                f"**{sp['stated']}** | {sp['not_stated']} | {sp['unassessed']} | "
                 f"{sp['abstained']} | {sp['answered_wrong']} |"
             )
     lines += ["", "### Per tier (ANSWER cases), measured runs, shipped (repair off)", ""]
@@ -566,7 +583,7 @@ def render_agreement(pools: list[Pool], gold: Gold, reports_dir: Path, db: str) 
     return "\n".join(lines) + "\n"
 
 
-def build_report(db: str = DEFAULT_DB, reports_dir: Path = Path("reports")) -> str:
+def build_report(db: str = DEFAULT_DB, reports_dir: Path = Path("reports"), judge=None) -> str:
     gold = Gold(db)
     pools = score_bakeoff(load_evidence(), gold)
     parts = [
@@ -577,7 +594,7 @@ def build_report(db: str = DEFAULT_DB, reports_dir: Path = Path("reports")) -> s
         "v3 strict = `gold_v3.jsonl` (the headline, frozen); v3 relaxed = the same gold with "
         "extra candidate columns ignored.",
         "",
-        render_phase5(gold, reports_dir),
+        render_phase5(gold, reports_dir, judge),
         render_bakeoff(pools),
         render_agreement(pools, gold, reports_dir, db),
     ]
@@ -590,9 +607,14 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--db", default=DEFAULT_DB)
     ap.add_argument("--reports-dir", type=Path, default=Path("reports"))
     ap.add_argument("--write", type=Path, help="write the report here (part=report)")
+    ap.add_argument(
+        "--judge", action="store_true", help="use the local judge for judge-primary items"
+    )
+    ap.add_argument("--judge-model", default="llama3.1:8b")
     args = ap.parse_args(argv)
+    judge = must_state.OllamaJudge(args.judge_model) if args.judge else None
     if args.part == "report":
-        text = build_report(args.db, args.reports_dir)
+        text = build_report(args.db, args.reports_dir, judge)
         if args.write:
             args.write.write_text(text)
             print(f"wrote {args.write}")
@@ -601,7 +623,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     gold = Gold(args.db)
     if args.part == "phase5":
-        print(render_phase5(gold, args.reports_dir))
+        print(render_phase5(gold, args.reports_dir, judge))
         return 0
     pools = score_bakeoff(load_evidence(), gold)
     print(

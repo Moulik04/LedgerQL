@@ -312,3 +312,34 @@ def test_recall_correction_on_the_real_30b_report():
     # 2 of 19 (U05, G05) abstained, the other 17 answered unscored.
     assert metrics["assumption_cases_handled"] == 2
     assert round(metrics["assumption_case_handling"], 3) == 0.105
+
+
+def test_the_headline_is_answered_correctly_with_the_assumption_stated():
+    cases_by_id = {k: _case(k, "ANSWER_WITH_ASSUMPTION", None) for k in "ABCDE"}
+
+    def rec(cid, answer, correct, rubric):
+        return {"id": cid, "answer": answer, "reason_code": None,
+                "execution_correct": correct, "rubric_pass": rubric}  # fmt: skip
+
+    per_case = [
+        rec("A", "x", True, True),  # correct and stated: the ideal outcome
+        rec("B", "x", True, False),  # right value, assumption not stated
+        rec("C", "x", True, None),  # right value, rubric not assessed (no judge, or no text)
+        rec("D", "x", False, True),  # stated, but the value is wrong: execution outranks the prose
+        {**rec("E", None, False, None), "reason_code": "AMBIGUOUS"},  # abstained
+    ]
+    m = compute_abstain_metrics(per_case, cases_by_id)
+    assert m["assumption_answered_correct_stated"] == 1
+    assert m["assumption_answered_correct_not_stated"] == 1
+    assert m["assumption_answered_correct_unassessed"] == 1
+    assert m["assumption_answered_correct"] == 3  # the three right values, stated or not
+    assert m["assumption_answered_correct_stated_rate"] == 0.2
+    assert m["assumption_stated_scored"] is True
+
+
+def test_without_any_rubric_result_the_stated_figure_is_flagged_unscored_not_zero():
+    cases_by_id = {"A": _case("A", "ANSWER_WITH_ASSUMPTION", None)}
+    per_case = [{"id": "A", "answer": "x", "reason_code": None, "execution_correct": True}]
+    m = compute_abstain_metrics(per_case, cases_by_id)
+    assert m["assumption_stated_scored"] is False
+    assert m["assumption_answered_correct_unassessed"] == 1

@@ -31,6 +31,7 @@ import duckdb
 # This bootstrap makes the script self-sufficient regardless of that.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from evals import must_state
 from evals.abstain_scoring import compute_abstain_metrics
 from evals.confidently_wrong import compute_confidently_wrong_rate
 from evals.repair_scoring import compute_repair_stats
@@ -144,8 +145,9 @@ def load_gold_cases(path: Path) -> list[dict]:
     return cases
 
 
-def run(gold_path: Path, db_path: str) -> dict:
+def run(gold_path: Path, db_path: str, judge=None) -> dict:
     cases = load_gold_cases(gold_path)
+    rubric_items = must_state.load_patterns()
     cases_by_id = {c["id"]: c for c in cases}
     # Must match execute.execute()'s connection config exactly -- DuckDB
     # refuses a second connection to the same file with a different
@@ -217,6 +219,21 @@ def run(gold_path: Path, db_path: str) -> dict:
             record["execution_correct"] = correct
             if correct and scores_tier:
                 tier_correct[case["tier"]] += 1
+
+        # `answer_must_state`: did the prose state what the case requires (which fiscal year,
+        # that a balance is not summed)? Graded on the text the user sees. None = not assessed
+        # (nothing to grade, or a judge-decided item and no judge). Execution outranks it: a
+        # wrong value is never "correct with the assumption stated" (abstain_scoring).
+        if case["id"] in rubric_items:
+            graded = must_state.grade_case(
+                rubric_items[case["id"]], result["answer"], None, judge, case["question"]
+            )
+            record["rubric"] = [
+                {"item": r.item, "passed": r.passed, "decided_by": r.decided_by,
+                 "pattern": r.pattern_pass, "judge": r.judge_pass}
+                for r in graded
+            ]  # fmt: skip
+            record["rubric_pass"] = must_state.stated(graded)
 
         if case["tier"] in GUARDRAIL_SCORED_TIERS and case["expected"] == "ABSTAIN":
             score = score_guardrail_case(case, result)
@@ -441,9 +458,17 @@ def write_reports(summary: dict, reports_dir: Path) -> tuple[Path, Path]:
         f"Abstained: {summary['assumption_abstained_rate']:.1%} "
         f"({summary['assumption_abstained']}/{summary['assumption_cases']}). "
         f"Answered wrong: {summary['assumption_answered_wrong']}/{summary['assumption_cases']}. "
-        "The first is the headline; an abstain is an accepted alternative, not a success. "
-        '"Answered correctly" is an upper bound on *answered with the assumption '
-        "stated*, which needs `answer_must_state` rubric grading (not implemented). "
+        + (
+            f"**Headline: answered correctly with the assumption stated "
+            f"{summary['assumption_answered_correct_stated_rate']:.1%} "
+            f"({summary['assumption_answered_correct_stated']}/{summary['assumption_cases']})**; "
+            f"correct but not stated {summary['assumption_answered_correct_not_stated']}, "
+            f"correct but not assessed {summary['assumption_answered_correct_unassessed']} "
+            "(`evals/must_state.py`). "
+            if summary["assumption_stated_scored"]
+            else "The assumption-stated figure is unscored in this report (no rubric results). "
+        )
+        + "An abstain is an accepted alternative, not a success. "
         f"The older union figure, which counts an abstain as handled, was "
         f"{summary['assumption_case_handling']:.1%} "
         f"({summary['assumption_cases_handled']}/{summary['assumption_cases']}).",

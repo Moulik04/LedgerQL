@@ -164,3 +164,170 @@ class OllamaJudge:
             self._cache[key] = parse_judge_reply(raw)
             self.log.append({"item": item_text, "raw": response.response[:200]})
         return self._cache[key]
+
+
+def load_labels(path: Path = LABELS_PATH) -> list[dict]:
+    return [json.loads(line) for line in Path(path).read_text().splitlines() if line.strip()]
+
+
+def calibrate(
+    records_by_run: dict[str, list[dict]],
+    patterns: dict[str, list[dict]],
+    labels: list[dict],
+    judge=None,
+) -> dict:
+    """Agreement of the grader (and, separately, the judge) with hand labels. A label for a record
+    with no answer text is skipped: there is nothing to grade."""
+    by_key = {(run, r["id"]): r for run, records in records_by_run.items() for r in records}
+    rows = []
+    for lab in labels:
+        rec = by_key.get((lab["run"], lab["case"]))
+        item = patterns[lab["case"]][lab["item"]]
+        if rec is None or not rec.get("answer"):
+            continue
+        res = grade_item(item, rec["answer"], None, judge, rec.get("question", ""))
+        rows.append({**lab, "graded": res.passed, "pattern": res.pattern_pass,
+                     "judge": res.judge_pass, "decided_by": res.decided_by})  # fmt: skip
+    gradable = [r for r in rows if r["graded"] is not None]
+    out = {
+        "n": len(rows),
+        "agree": sum(r["graded"] == r["label"] for r in gradable),
+        "false_pass": sum(r["graded"] is True and r["label"] is False for r in gradable),
+        "false_fail": sum(r["graded"] is False and r["label"] is True for r in gradable),
+        "ungradable": len(rows) - len(gradable),
+        "disagreements": [r for r in gradable if r["graded"] != r["label"]],
+        "rows": rows,
+    }
+    voted = [r for r in rows if r["judge"] is not None]
+    if judge is not None:
+        out["judge"] = {
+            "n": len(voted),
+            "agree": sum(r["judge"] == r["label"] for r in voted),
+            "unparsed": sum(r["judge"] is None for r in rows),
+        }
+    return out
+
+
+def _format_calibration(out: dict, title: str) -> str:
+    lines = [
+        title,
+        "",
+        f"{out['n']} hand labels on real answers; grader agrees on {out['agree']} of "
+        f"{out['n'] - out['ungradable']} gradable (false passes {out['false_pass']}, false fails "
+        f"{out['false_fail']}, not gradable {out['ungradable']}).",
+    ]
+    if "judge" in out:
+        j = out["judge"]
+        lines.append(
+            f"The judge (logged apart, decides only `primary: judge` items) agrees with the labels "
+            f"on {j['agree']} of {j['n']} votes ({j['unparsed']} unparsed)."
+        )
+    lines += [
+        "",
+        "| run | case | item | label | pattern | judge | decides | graded | note |",
+        "|---|---|---|---|---|---|---|---|---|",
+    ]
+    for r in out["rows"]:
+        lines.append(
+            f"| {r['run']} | {r['case']} | {r['item']} | {r['label']} | {r['pattern']} | "
+            f"{r['judge']} | {r['decided_by']} | {r['graded']} | {r['note'][:70]} |"
+        )
+    return "\n".join(lines) + "\n"
+
+
+def main(argv: list[str] | None = None) -> int:
+    import argparse
+
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap.add_argument("command", choices=["calibrate", "judge-check"])
+    ap.add_argument("--reports-dir", type=Path, default=Path("reports"))
+    ap.add_argument("--judge", action="store_true", help="also ask the local judge (Ollama)")
+    ap.add_argument("--judge-model", default="llama3.1:8b")
+    ap.add_argument("--write", type=Path)
+    args = ap.parse_args(argv)
+    if args.command == "judge-check":
+        checks = [json.loads(x) for x in CHECKS_PATH.read_text().splitlines() if x.strip()]
+        patterns = load_patterns()
+        judge = OllamaJudge(args.judge_model)
+        by_judge = judge_check(checks, patterns, judge)
+        by_pattern = judge_check(checks, patterns, _pattern_voter(patterns, checks))
+        text = (
+            "# answer_must_state: judge and pattern on constructed answers\n\n"
+            f"{len(checks)} constructed answers (10 that state the item, 10 that do not), "
+            f"judge `{args.judge_model}`.\n\n| grader | recall | precision | false negatives | "
+            "false positives | unparsed |\n|---|---|---|---|---|---|\n"
+            + "".join(
+                f"| {name} | {r['recall']} | {r['precision']} | {r['false_negatives']} | "
+                f"{r['false_positives']} | {r['unparsed']} |\n"
+                for name, r in (("judge", by_judge), ("pattern", by_pattern))
+            )
+        )
+        if args.write:
+            args.write.write_text(text)
+        print(text)
+        return 0
+    runs = {
+        name: [
+            json.loads(line)
+            for line in (args.reports_dir / f"eval_bridges2_{name}_measured.jsonl")
+            .read_text()
+            .splitlines()
+            if line.strip()
+        ]
+        for name in ("qwen3_30b", "qwen25_32b")
+    }
+    questions = {}
+    for line in open(Path(__file__).resolve().parent / "gold.jsonl"):
+        case = json.loads(line)
+        questions[case["id"]] = case["question"]
+    for records in runs.values():
+        for r in records:
+            r["question"] = questions.get(r["id"], "")
+    judge = OllamaJudge(args.judge_model) if args.judge else None
+    out = calibrate(runs, load_patterns(), load_labels(), judge)
+    text = _format_calibration(out, "# answer_must_state: calibration against hand labels")
+    if args.write:
+        args.write.write_text(text)
+    print(text)
+    return 0
+
+
+CHECKS_PATH = Path(__file__).resolve().parent / "must_state_judge_checks.jsonl"
+
+
+def _pattern_voter(patterns: dict[str, list[dict]], checks: list[dict]):
+    """The pattern result as a `judge(question, answer, item_text)` callable, for comparison."""
+    lookup = {item["text"]: item for items in patterns.values() for item in items}
+    return lambda question, answer, item_text: pattern_pass(lookup[item_text], answer)
+
+
+def judge_check(checks: list[dict], patterns: dict[str, list[dict]], judge) -> dict:
+    """Recall and precision of a judge on constructed answers that do and do not state an item
+    (`must_state_judge_checks.jsonl`, written from the rubric text before the judge was run).
+    Real answers rarely state the judge-decided items, so their positives cannot test it."""
+    tp = fp = fn = tn = unparsed = 0
+    for c in checks:
+        item = patterns[c["case"]][c["item"]]
+        vote = judge(c["question"], c["answer"], item["text"])
+        if vote is None:
+            unparsed += 1
+            continue
+        if c["label"]:
+            tp += vote
+            fn += not vote
+        else:
+            fp += vote
+            tn += not vote
+    positives, voted_pos = tp + fn, tp + fp
+    return {
+        "n": len(checks),
+        "recall": tp / positives if positives else None,
+        "precision": tp / voted_pos if voted_pos else None,
+        "false_negatives": fn,
+        "false_positives": fp,
+        "unparsed": unparsed,
+    }
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

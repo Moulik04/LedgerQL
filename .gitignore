@@ -61,6 +61,7 @@ reports/runs/
 !reports/entity_link_7b_candidates.jsonl
 !reports/entity_link_ab_*.jsonl
 !reports/entity_link_ab_*.md
+!reports/must_state_*.md
 
 # Testing / tooling
 .pytest_cache/

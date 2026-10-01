@@ -141,6 +141,14 @@ def compute_abstain_metrics(per_case: list[dict], cases_by_id: dict) -> dict:
         r for r in assumption_records if r["answer"] is not None and r.get("execution_correct")
     ]
 
+    # With the `answer_must_state` grader (evals/must_state.py) a correct answer splits again:
+    # the assumption was stated, was not stated, or could not be assessed (no text to grade, or a
+    # judge-decided item without a judge). Execution outranks prose: a wrong value never counts.
+    correct_answers = [r for r in assumption_answered_correct]
+    stated_ok = [r for r in correct_answers if r.get("rubric_pass") is True]
+    not_stated = [r for r in correct_answers if r.get("rubric_pass") is False]
+    unassessed = [r for r in correct_answers if r.get("rubric_pass") is None]
+
     n_abstains = len(all_abstains)
     n_decision = len(decision_correct)
     n_strict = len(strict_correct)
@@ -176,4 +184,11 @@ def compute_abstain_metrics(per_case: list[dict], cases_by_id: dict) -> dict:
         "assumption_abstained_rate": (
             len(assumption_abstained) / n_assumption if n_assumption else 0.0
         ),
+        "assumption_answered_correct_stated": len(stated_ok),
+        "assumption_answered_correct_not_stated": len(not_stated),
+        "assumption_answered_correct_unassessed": len(unassessed),
+        "assumption_answered_correct_stated_rate": (
+            len(stated_ok) / n_assumption if n_assumption else 0.0
+        ),
+        "assumption_stated_scored": any("rubric_pass" in r for r in assumption_records),
     }
