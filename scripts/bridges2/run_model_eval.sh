@@ -168,7 +168,8 @@ if [ "${EVAL_MODE:-pipeline}" = "gen_only" ]; then
     fi
 else
     echo "Running eval with LLM_BACKEND=vllm OLLAMA_MODEL=$REPO_ID -> $OUT ..."
-    LLM_BACKEND=vllm OLLAMA_MODEL="$REPO_ID" uv run python evals/run_eval.py --db data/ledgerql.duckdb --reports-dir "$OUT"
+    LLM_BACKEND=vllm OLLAMA_MODEL="$REPO_ID" uv run python evals/run_eval.py --db data/ledgerql.duckdb --reports-dir "$OUT" \
+        --gold "${GOLD_FILE:-evals/gold_v3.jsonl}"
 fi
 
 # Provenance: what ran, on which commit, so every figure is attributable.

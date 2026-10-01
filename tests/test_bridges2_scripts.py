@@ -335,3 +335,11 @@ def test_the_ab_job_runs_each_profile_unlinked_then_linked_in_one_server_session
         "for profile in $PROFILES"
     )  # the gate still comes first
     assert '--gold "$GOLD_FILE"' in text
+
+
+def test_the_pipeline_job_scores_against_the_frozen_gold_unless_told_otherwise():
+    text = (SCRIPTS / "run_model_eval.sh").read_text()
+    line = next(x for x in text.splitlines() if "evals/run_eval.py" in x)
+    assert (
+        '--gold "${GOLD_FILE:-evals/gold_v3.jsonl}"' in line
+    )  # frozen v3, or a pinned held-out file
