@@ -661,7 +661,7 @@ periods or entities ("side by side", "across fiscal years 2024 and 2025") does n
 whether the answer is long (a row per period) or wide (a column per period). Cases carry
 `pivot`, and the answer is the set of (label, value) pairs, whatever the layout. A
 candidate's pairs are read from each row's cells: a value cell is paired with the label
-cell immediately before it in the row, or else with the label its **column name** carries (a
+cell adjacent to it (the one before it, else the one after it, not already used), or else with the label its **column name** carries (a
 four-digit year equal to the label, or a company name or ticker that resolves to the
 label's company). Labels compare as in V2 for entities and exactly for periods; values
 compare under the case's own kinds (V3, V8, V6). Under the strict comparator every cell of
@@ -695,3 +695,18 @@ held-out set (`evals/HELDOUT_PROTOCOL.md`).
 stated from the wording ("side by side" specifies no layout) and applied to all three
 cases the wording covers. V8, V5's absolute type and V9 are the author's decisions, not
 derived from candidates.
+
+## 6j. The `answer_must_state` grader (`evals/must_state.py`)
+
+Scores the 27 rubric items on 23 cases against the text the user sees. Regex groups per item
+(`must_state_patterns.json`) decide most items; a local judge (llama3.1:8b, temperature 0)
+decides the five items marked `primary: judge` and is only logged for the rest. `run_eval`
+records `rubric_pass` (stated / not stated / not assessed) per case; `compute_abstain_metrics`
+reports **answered correctly with the assumption stated** as the assumption-case headline, beside
+answered-correctly-not-stated, abstained and answered wrong. Execution outranks prose.
+An abstain has no text to grade (the pipeline records only a reason code), so refusal items are
+reported as not gradable, never as passes.
+
+    python -m evals.must_state calibrate [--judge]   # vs the 28 hand labels (labeller: Claude)
+    python -m evals.must_state judge-check           # judge and patterns on 20 constructed answers
+    python -m evals.rescore_v2 report --judge        # the figures, with the judge on

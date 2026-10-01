@@ -1983,3 +1983,129 @@ DDL prompt" (chosen in hindsight).
 
 **Bias, disclosed.** V7 was motivated by seeing candidates on two cases. V8, the absolute
 tolerance type and V9 are the author's decisions, not derived from candidates.
+
+---
+
+## 2026-09-30 — Gold v3 results and freeze, the held-out protocol, the entity-link A/B, and the `answer_must_state` grader
+
+### 1. Gold v3: built to the committed rules, narrow in effect
+
+`gold_v3.jsonl` follows `evals/README.md` 6i (committed first, 7910dfc): V5 revised (explicit
+tolerance type; `A10`, `C04` are 0.5 *absolute* percentage points), V7 pivot equivalence
+(`T03`, `R06`, `U03`), V8 unit scale (`U01`, `U05`, `U07`), V9 alternatives (`R07`). Nine
+cases differ from v2; the rest are v2's, marked v3.
+
+**One clarification to V7, disclosed.** The rule text said a value is paired with the label
+cell "immediately before it"; the comparator also accepts the label cell *after* it when no
+unused one precedes (a `(value, year)` long layout). The README was corrected after the code
+existed and after v3 was scored. No verdict in any evidence depends on it: no candidate in the
+bake-off or Phase 5 returns that layout.
+
+**What v3 changed relative to v2, in both directions.** Only the two "side by side" cases move.
+Bake-off candidates: `T03` +15 and `R06` +12 correct, none lost. Phase 5: the 32B gains `T03`;
+the 30B gains nothing. `A10`'s absolute 0.5 percentage points rejects the same nine wrong
+answers (48.96 against 94.6) that v2's cap did. `C04`, `U01`, `U03`, `U05`, `U07` and `R07` move
+no verdict at all. The gained candidates were inspected: they are correct wide rows (a column
+per year or company, labelled by a label cell or the column name); `[null, null]` results and
+values under the wrong label stay rejected.
+
+| | v1 | v2 strict | v3 strict (frozen headline) | v3 relaxed |
+|---|---|---|---|---|
+| bake-off pass@N, nine cells | 30-36 | 34-46 | **34-48** | 41-48 |
+| bake-off pass@1, nine cells | 26-35 | 30-40 | 30-41 | 34-46 |
+| best cell (XiYan, DDL prompt) pass@1 -> pass@N | 31 -> 36 | 40 -> 46 | **40 -> 48** | 41 -> 48 |
+| union over all nine runs | 42 | 49 | 49 (only L12) | 49 |
+| Phase 5 30B, shipped | 31/50 | 32/50 | 32/50 | 40/50 |
+| Phase 5 32B AWQ, shipped | 26/50 | 28/50 | **29/50** | 37/50 |
+
+**Everything restated under v3** (`reports/gold_v2_rescore.md`, now v1 | v2 | v3 | v3 relaxed):
+the policy table (30B confidently wrong 41.8% v1, 23.6% v2 and v3; 32B 40.9%, 36.4%, 34.1%;
+0 of 24 under "both agree" for v2 and v3); cross-model agreement AUROC for the bake-off pairs
+(0.60-0.89 strict, XiYan->32B lowest at 0.601, still the shared Qwen2.5-Coder base); the pool
+experiment (pooled pass@N +5.5 to +7.5 over the mean single run, pass@1 +2.8 to +5.1; against
+the best single run chosen in hindsight, pooled pass@N is -0.6 to -2.6 and pass@1 about equal,
+all CIs include 0); the entity upper bound (**261 of 2250 candidates flip to correct, none to
+wrong**, per-cell pass@1 +1 to +12, union 50/50); the 7B linker result (unchanged, +4 cases
+and none lost, v3 relaxed 20 -> 24).
+
+### 2. The freeze
+
+`gold_v3.jsonl` is pinned by `evals/gold_v3.sha256` (checked by a test; `python -m evals.gold_v3
+--check`); the builder refuses to change a frozen file. The 103 cases are frozen because they
+were revised twice after inspecting model outputs. Later problems go on
+`evals/KNOWN_GOLD_ISSUES.md` (R06's exact-label limit, C04's loose denominator, U03's "combined",
+the `A01`/`A11`/`R04` strict-projection cases, L12, the first-run Phase 5 files, and the dev-set
+contamination of the linker and the XiYan + DDL pick), not into a v4.
+
+### 3. The held-out set: protocol and seating plan, awaiting approval
+
+`evals/HELDOUT_PROTOCOL.md`: roles and what "blind" means, a 50-question tier/count template
+(24 ANSWER, 10 ASSUMPTION, 16 ABSTAIN, the dev mix at half scale) and an 80-question variant,
+gold written under the v3 rules at writing time, validation (executes, non-empty, an
+independently written second formulation agrees, MJ reviews), the freeze procedure
+(`heldout_v1.sha256`, tag, no model before it), four pre-registered confirmatory comparisons, and
+a run log. `evals/heldout_template.jsonl` assigns a company and a mention style to each slot from
+a seeded, name-class-stratified draw (seed 20260930; no dev-set company), pinned by hash and
+committed **before any question exists**, so neither writer chose the companies.
+
+**The power problem, stated here too.** An exact sign test needs six net discordant cases in one
+direction. The linker's dev result (+4, 0) would not reach it on the 24 ANSWER cases of variant A;
+variant B (40 ANSWER cases) can confirm about a six-case effect. The recommendation is B; A is
+what was asked. This is MJ's call.
+
+### 4. The entity-link A/B on Bridges-2: prepared, not submitted
+
+`run_qwen3_coder_30b_entitylink.sbatch` and `run_xiyansql_32b_entitylink.sbatch`: the DDL prompt,
+50 ANSWER cases, N=5, seeds 42-46, **both conditions in one vLLM session** (without, then with
+`--entity-link`), scored against the frozen v3 gold (or `GOLD_FILE`). `gen_only_eval --gold`
+refuses a held-out file without a matching freeze pin. `evals.entity_link_eval --run-dir` scores
+a returned run directory. The submit command is in `docs/bridges2.md`.
+
+### 5. The `answer_must_state` grader
+
+`evals/must_state.py`, 27 rubric items on 23 cases. Regex groups per item
+(`evals/must_state_patterns.json`, written from the item text alone and committed before any
+answer was read, afd3596) decide most items; a local judge (llama3.1:8b, temperature 0) decides
+only the five judge-primary items and is otherwise logged beside the pattern. Execution outranks
+prose: a wrong value is never "correct with the assumption stated".
+
+**Calibration** against 28 labels I wrote on the real answers (committed before the grader was run
+on them, ddb4709). **The labels are mine, not independent; MJ should spot-check a sample, and
+five are marked judgement calls.** First pass, patterns only: 22 of 24 gradable items agree
+(0 false passes, 2 false fails, both labels I flagged as judgement calls: `M01` and `M02` on
+the 32B, which state the years or the metric without the words the patterns want); the four
+judge-primary items were not gradable without the judge. With the judge on those: 26 of 28.
+**The judge as a general grader is poor:** asked about the pattern items it agrees on 20 of 28
+by answering NO to all eight positives. So it is confined to the judge-primary items, and
+checked on 20 constructed answers (10 state the item, 10 do not; written from the rubric text
+before it ran): judge recall 0.70 and precision 0.875, patterns 0.90 and 1.0 (the patterns were
+written beside those examples, so theirs is optimistic). No real answer states a judge-primary
+item, so nothing in today's headline depends on the judge; if real positives appear, the call
+between "judge decides" and "pattern decides, judge audits" should be revisited.
+
+**The headline it unlocks (19 assumption cases, strict v3).** Answered correctly, of which the
+assumption is stated:
+
+| | answered correctly | **stated** | not stated |
+|---|---|---|---|
+| 30B, shipped (repair off) | 11 | **3** (`L03`, `L09`, `M01`) | 6 (+2 with no rubric items: `J02`, `G04`) |
+| 30B, shipped + year rule | 2 | **0** | 2 |
+| 32B AWQ, shipped (and + year rule) | 1 | **0** | 1 |
+
+The three the 30B "states" all name a fiscal year, and the year is wrong (2022 and 2023 where
+the data is fiscal 2025): the year verifier turns them into abstains, so under the current headline
+configuration **both models answer correctly with the assumption stated on 0 of 19 cases.**
+That is the baseline Tasks 2 and 3 have to move.
+
+**What cannot be graded.** The pipeline records no text when it abstains, only a reason code.
+So the six abstain-case rubric items (`T06`, `U06`, `M07`, `S11`, `H02`, `H04`) and the "state the
+reason" half of `R07`/`H06` are **not gradable on any existing run** (reported as such, never as
+a pass). `R07`'s "what matters is the stated reason" therefore cannot be satisfied or measured
+until the system says *why* it abstains in prose; that is a product change, not a grader one.
+
+### 6. Open for MJ
+
+(a) Variant A or B for the held-out set, and approval of the protocol and its four comparisons.
+(b) Spot-check the 28 labels (`evals/must_state_labels.jsonl`), especially the four judgement
+calls. (c) Whether the abstain path should emit a reason string. (d) Push the commit and submit
+the two entity-link jobs (the command is below).
