@@ -416,6 +416,8 @@ def frame_answer(
             )
         )
 
+    # A stored name that ends in a period ("Tesla, Inc.") must not double the sentence's own.
+    clauses = [Clause(c.kind, re.sub(r"\.\.+$", ".", c.text), c.assumption) for c in clauses]
     text = " ".join(c.text for c in clauses)
     years = frozenset(int(y) for y in _YEAR.findall(text))
     return Frame(tuple(clauses), years, frozenset(numbers))

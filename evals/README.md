@@ -710,3 +710,28 @@ reported as not gradable, never as passes.
     python -m evals.must_state calibrate [--judge]   # vs the 28 hand labels (labeller: Claude)
     python -m evals.must_state judge-check           # judge and patterns on 20 constructed answers
     python -m evals.rescore_v2 report --judge        # the figures, with the judge on
+
+## 6k. Abstain explanations, the answer framing and the third state
+
+- **`ledgerql/refusal.py`**: when the pipeline abstains it now returns `refusal`, a sentence saying
+  why. Deterministic only, no model: one template per reason code, filled from the question and the
+  entity linker (company, period), plus `ledgerql/known_gaps.json`, a registry of documented data gaps
+  (no revenue tag for some companies, no segment or geographic breakdowns, annual figures only, staging
+  tables not queryable, canonical tickers for dual-class shares, no 8-K for a company) each anchored by
+  a quotation that a test finds in `docs/schema.md`. `tests/test_refusal.py` checks every reason code
+  has a template, that no template can emit a number that is not in the question or the linker's
+  output, and that the module imports no model client. `python -m evals.replay_refusals` re-grades
+  the refusal rubric items on recorded abstains.
+- **`ledgerql/frame.py`**: the framing that states what an answer assumed (the fiscal year resolved
+  from "most recent", a bare year read as a fiscal year, the metric a ranking used, a term read as a
+  concept, a brand name resolved, the years a sum covers, a balance that is not summed). Deterministic:
+  it takes the question, the winning SQL and the result's *shape*, never a value, and reads labels
+  (fiscal year, period end date, unit) from the database by a keyed lookup. The verifier is told which
+  year and day labels it stated (`verify(..., context_years, context_numbers)`), so a year the writer
+  invents still fails. The writer's prompt now says not to state a period the table does not show.
+- **The third state.** `ask()` returns `state`: `ANSWER`, `ANSWER_WITH_ASSUMPTION` (the answer plus the
+  framing, when the framing states an assumption) or `ABSTAIN`, and `assumptions` (the sentences).
+  There is no confidence band: Task 2's fitted thresholds depend on a calibrator that was never built.
+- `python -m evals.replay_frame` scores the framing alone on the recorded Phase 5 runs;
+  `python -m evals.summarize_run <run dir> [--judge] [--ablate-frame]` summarises any run under the
+  frozen v3 gold, and with `--ablate-frame` removes the framing text first to isolate its contribution.

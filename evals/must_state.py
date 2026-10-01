@@ -36,6 +36,10 @@ from pathlib import Path
 PATTERNS_PATH = Path(__file__).resolve().parent / "must_state_patterns.json"
 LABELS_PATH = Path(__file__).resolve().parent / "must_state_labels.jsonl"
 
+# The judge's prompts are short. A small context keeps the model inside the GPU memory left over when
+# other applications are using it (at the default 4096 it returned empty replies under memory pressure).
+JUDGE_NUM_CTX = 1024
+
 JUDGE_PROMPT = """You are grading an answer to a question about SEC financial data.
 
 Question: {question}
@@ -159,7 +163,9 @@ class OllamaJudge:
         if key not in self._cache:
             prompt = JUDGE_PROMPT.format(question=question, answer=answer, item=item_text)
             response = self._client.generate(
-                model=self.model, prompt=prompt, options={"temperature": 0, "seed": 42}
+                model=self.model,
+                prompt=prompt,
+                options={"temperature": 0, "seed": 42, "num_ctx": JUDGE_NUM_CTX},
             )
             raw = re.sub(r"<think>.*?</think>", "", response.response, flags=re.S)
             self._cache[key] = parse_judge_reply(raw)

@@ -175,3 +175,23 @@ def test_agreement_reports_per_item_overall_and_every_disagreement_in_both_compa
     assert out["per_item"][("X", 0)] == {"n": 1, "mj_claude": 0, "mj_grader": 1}
     blank = M.agreement([{**blind[0], "label": None}], claude, records, patterns)
     assert blank["unlabelled"] == 1 and blank["n"] == 0
+
+
+def test_the_judge_asks_for_a_small_context_so_it_fits_beside_other_applications(monkeypatch):
+    seen = {}
+
+    class FakeClient:
+        def __init__(self, host=None):
+            pass
+
+        def generate(self, model, prompt, options):
+            seen.update(options)
+            return type("R", (), {"response": "YES"})()
+
+    import ollama
+
+    monkeypatch.setattr(ollama, "Client", FakeClient)
+    judge = M.OllamaJudge()
+    assert judge("q", "an answer", "an item") is True
+    assert seen["num_ctx"] == M.JUDGE_NUM_CTX == 1024
+    assert seen["temperature"] == 0 and seen["seed"] == 42

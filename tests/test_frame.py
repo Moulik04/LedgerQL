@@ -206,3 +206,9 @@ def test_a_ranking_that_names_its_metric_adds_no_metric_clause():
         db_path=DB,
     )
     assert "measured by" not in f.text
+
+
+def test_a_company_name_that_ends_in_a_period_does_not_double_the_sentence_period():
+    for cid in ("C06", "G05", "L03"):
+        assert ".." not in frame(cid).text, cid
+    assert frame("C06").text.endswith("Tesla, Inc.")
