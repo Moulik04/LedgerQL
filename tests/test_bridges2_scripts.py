@@ -339,7 +339,6 @@ def test_the_ab_job_runs_each_profile_unlinked_then_linked_in_one_server_session
 
 def test_the_pipeline_job_scores_against_the_frozen_gold_unless_told_otherwise():
     text = (SCRIPTS / "run_model_eval.sh").read_text()
-    line = next(x for x in text.splitlines() if "evals/run_eval.py" in x)
-    assert (
-        '--gold "${GOLD_FILE:-evals/gold_v3.jsonl}"' in line
-    )  # frozen v3, or a pinned held-out file
+    start = text.index("uv run python evals/run_eval.py")
+    command = text[start : text.index("\nfi", start)]  # the invocation, with its continuation
+    assert '--gold "${GOLD_FILE:-evals/gold_v3.jsonl}"' in command
