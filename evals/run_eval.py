@@ -31,7 +31,7 @@ import duckdb
 # This bootstrap makes the script self-sufficient regardless of that.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from evals import must_state
+from evals import must_state, scoring
 from evals.abstain_scoring import compute_abstain_metrics
 from evals.confidently_wrong import compute_confidently_wrong_rate
 from evals.repair_scoring import compute_repair_stats
@@ -538,6 +538,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = ap.parse_args(argv)
 
+    scoring.require_frozen(args.gold)  # a held-out file is refused unless it matches its pin
     summary = run(Path(args.gold), args.db)
     md_path, jsonl_path = write_reports(summary, Path(args.reports_dir))
     print(f"Wrote {md_path} and {jsonl_path}")

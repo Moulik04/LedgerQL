@@ -30,6 +30,10 @@ HERE = Path(__file__).resolve().parent
 TEMPLATE_PATH = HERE / "heldout_template.jsonl"
 HASH_PATH = HERE / "heldout_template.sha256"
 QUESTIONS_PATH = HERE / "heldout_questions.jsonl"
+SHEET_PATH = HERE / "heldout_template.md"
+COMMITTED_VARIANT = (
+    "B"  # 80 questions; the 50-question variant could not confirm the linker's dev effect
+)
 SEED = 20260930
 
 MENTION_STYLES = ("brand", "legal", "ticker", "informal")
@@ -190,6 +194,32 @@ def assignment_digest(rows: list[dict]) -> str:
     return hashlib.sha256(json.dumps(core, sort_keys=True).encode()).hexdigest()
 
 
+def render_sheet(rows: list[dict]) -> str:
+    """The slot sheet as a table MJ can write questions from."""
+    lines = [
+        "# Held-out slot sheet (80 questions)",
+        "",
+        "Write one question per row, in the mention style given for each company. Nothing else about "
+        "the question is fixed. The company assignment is pinned by `heldout_template.sha256` and "
+        "was drawn before any question existed (`evals/HELDOUT_PROTOCOL.md` 3.2).",
+        "",
+        "Mention styles: **brand** = the name people use; **legal** = the registered style "
+        "(`Apple Inc.`); **ticker** = the symbol; **informal** = a looser form a person might type.",
+        "",
+        "| id | tier | expected | company (stored name) | ticker | name class | mention style |",
+        "|---|---|---|---|---|---|---|",
+    ]
+    for r in rows:
+        if not r["company_slots"]:
+            lines.append(f"| {r['id']} | {r['tier']} | {r['expected']} | *(no company)* | | | |")
+        for k, c in enumerate(r["company_slots"]):
+            head = f"| {r['id']} | {r['tier']} | {r['expected']} " if k == 0 else "| | | "
+            lines.append(
+                f"{head}| {c['name']} | {c['ticker']} | {c['class']} | **{c['mention_style']}** |"
+            )
+    return "\n".join(lines) + "\n"
+
+
 def load_template(path: Path = TEMPLATE_PATH) -> list[dict]:
     return [json.loads(line) for line in Path(path).read_text().splitlines() if line.strip()]
 
@@ -200,7 +230,7 @@ def questions_written() -> bool:
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--variant", choices=sorted(TEMPLATES), default="A")
+    ap.add_argument("--variant", choices=sorted(TEMPLATES), default=COMMITTED_VARIANT)
     ap.add_argument("--db", default="data/ledgerql.duckdb")
     ap.add_argument("--seed", type=int, default=SEED)
     ap.add_argument("--write", action="store_true")
@@ -216,6 +246,7 @@ def main(argv: list[str] | None = None) -> int:
             print("the assignment is already committed and pinned; refusing", file=sys.stderr)
             return 2
         TEMPLATE_PATH.write_text("".join(json.dumps(r) + "\n" for r in rows))
+        SHEET_PATH.write_text(render_sheet(rows))
         HASH_PATH.write_text(f"{assignment_digest(rows)}  heldout_template.jsonl (assignment)\n")
         print(f"wrote {TEMPLATE_PATH}: {len(rows)} rows, {total_slots(args.variant)} company slots")
         return 0

@@ -66,13 +66,26 @@ def test_every_slot_carries_a_class_and_a_mention_style_and_no_question_text(com
     assert len(classes) >= 4  # the draw is stratified, not dominated by plain names
 
 
-def test_the_committed_template_has_fifty_rows_and_no_questions_yet():
+def test_the_committed_template_is_the_eighty_question_variant_with_no_questions_yet():
     committed = H.load_template()
-    assert len(committed) == 50
+    assert len(committed) == 80 and committed[-1]["id"] == "H80"
+    assert Counter(r["expected"] for r in committed) == {
+        "ANSWER": 40,
+        "ANSWER_WITH_ASSUMPTION": 16,
+        "ABSTAIN": 24,
+    }
     assert all(r["question"] is None for r in committed) or H.questions_written()
+    assert sum(r["n_slots"] for r in committed) == H.total_slots("B")
+    assert all(len(r["company_slots"]) == r["n_slots"] for r in committed)
 
 
 def test_the_assignment_is_pinned_by_a_hash_written_with_the_template():
     assert (
         H.assignment_digest(H.load_template()) == H.HASH_PATH.read_text().split()[0]
     ), "the company assignment is committed before any question is written and must not change"
+
+
+def test_the_human_readable_sheet_is_what_the_committed_template_renders_to():
+    assert H.SHEET_PATH.read_text() == H.render_sheet(H.load_template())
+    sheet = H.SHEET_PATH.read_text()
+    assert "H80" in sheet and "mention style" in sheet.lower()

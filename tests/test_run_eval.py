@@ -626,3 +626,16 @@ def test_main_writes_reports_to_the_requested_directory_and_defaults_to_reports(
     run_eval.main([])
 
     assert seen == [tmp_path / "runs" / "123", Path("reports")]
+
+
+def test_run_eval_refuses_a_held_out_gold_file_that_is_not_frozen(tmp_path, monkeypatch):
+    import pytest
+
+    from evals import run_eval
+    from evals.scoring import FrozenGoldError
+
+    held = tmp_path / "heldout_v1.jsonl"
+    held.write_text("{}\\n")
+    monkeypatch.setattr(run_eval, "run", lambda *a, **k: pytest.fail("a model must not run"))
+    with pytest.raises(FrozenGoldError, match="not frozen"):
+        run_eval.main(["--gold", str(held), "--db", "unused.duckdb"])
