@@ -614,7 +614,7 @@ def test_main_writes_reports_to_the_requested_directory_and_defaults_to_reports(
     monkeypatch.setattr(
         run_eval,
         "run",
-        lambda gold, db: {"overall_execution_accuracy": 0.5, "hallucinated_number_rate": 0.0},
+        lambda gold, db, **kw: {"overall_execution_accuracy": 0.5, "hallucinated_number_rate": 0.0},
     )
     monkeypatch.setattr(
         run_eval,
@@ -639,3 +639,41 @@ def test_run_eval_refuses_a_held_out_gold_file_that_is_not_frozen(tmp_path, monk
     monkeypatch.setattr(run_eval, "run", lambda *a, **k: pytest.fail("a model must not run"))
     with pytest.raises(FrozenGoldError, match="not frozen"):
         run_eval.main(["--gold", str(held), "--db", "unused.duckdb"])
+
+
+def test_run_can_be_restricted_to_named_cases_and_records_the_refusal_text(tmp_path, monkeypatch):
+    import json
+
+    import duckdb
+
+    from evals import run_eval
+
+    db = str(tmp_path / "t.duckdb")
+    duckdb.connect(db).close()
+    gold = tmp_path / "gold.jsonl"
+    common = {"gold_sql": None, "compare": "none"}
+    cases = [
+        {"id": "S11", "tier": "schema_bait", "expected": "ABSTAIN",
+         "reason_code": "SCHEMA_MISMATCH", "question": "Show me the stg_num staging table.",
+         "answer_must_state": ["staging tables are never exposed"], **common},
+        {"id": "L01", "tier": "lookup", "expected": "ANSWER", "question": "never asked", **common},
+    ]  # fmt: skip
+    gold.write_text("".join(json.dumps(c) + "\n" for c in cases))
+    asked = []
+
+    def fake_ask(question, db_path=None):
+        asked.append(question)
+        return {
+            "sql": None, "error": None, "answer": None, "columns": [], "rows": [],
+            "truncated": False,
+            "reason_code": "SCHEMA_MISMATCH", "guardrail_events": [], "confidence": None,
+            "repair": None, "candidates": None,
+            "refusal": "The staging tables exist only for debugging and are never exposed.",
+        }  # fmt: skip
+
+    monkeypatch.setattr(run_eval.pipeline, "ask", fake_ask)
+    summary = run_eval.run(gold, db, only={"S11"})
+    assert asked == ["Show me the stg_num staging table."]  # L01 was not run
+    (rec,) = summary["per_case"]
+    assert rec["refusal"].startswith("The staging tables")
+    assert rec["rubric_pass"] is None or isinstance(rec["rubric_pass"], bool)

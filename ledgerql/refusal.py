@@ -17,10 +17,11 @@ by the database, never assumed.
 from __future__ import annotations
 
 import json
-import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
+
+from ledgerql import meta_lookup
 
 REASON_CODES = (
     "OUT_OF_SCOPE",
@@ -94,24 +95,8 @@ def _links(question: str, db_path: str | None):
         return []
 
 
-def _connect(db_path: str | None):
-    import duckdb
-
-    path = db_path or os.environ.get("LEDGERQL_DB_PATH", "data/ledgerql.duckdb")
-    return duckdb.connect(path, read_only=True, config={"enable_external_access": "false"})
-
-
 def _data(db_path: str | None, sql: str, params: list) -> list[tuple]:
-    try:
-        con = _connect(db_path)
-    except Exception:  # noqa: BLE001
-        return []
-    try:
-        return con.execute(sql, params).fetchall()
-    except Exception:  # noqa: BLE001
-        return []
-    finally:
-        con.close()
+    return meta_lookup.data(db_path, sql, params)
 
 
 def _join(items: list[str]) -> str:

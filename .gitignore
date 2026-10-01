@@ -62,6 +62,9 @@ reports/runs/
 !reports/entity_link_ab_*.jsonl
 !reports/entity_link_ab_*.md
 !reports/must_state_*.md
+!reports/refusal_replay.md
+!reports/frame_replay.md
+!reports/refusal_7b.md
 
 # Testing / tooling
 .pytest_cache/

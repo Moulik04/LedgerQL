@@ -815,7 +815,9 @@ def test_ask_repairs_schema_mismatch_when_explicitly_enabled(monkeypatch):
     result = pipeline.ask("What was Apple's dividend yield?")
 
     assert len(calls) == 1
-    assert result["answer"] == "The value is 5.0."
+    # the question named no period but the repaired SQL filters on one, so the framing states it
+    assert result["answer"] == "The value is 5.0. Fiscal year 2026 was used."
+    assert result["state"] == "ANSWER_WITH_ASSUMPTION"
 
 
 def test_ask_logs_every_candidate_with_its_guardrail_reason_and_result_shape(monkeypatch):
@@ -964,3 +966,102 @@ def test_every_reason_code_the_pipeline_can_emit_has_a_refusal_template():
     for code in set(__import__("re").findall(r'reason_code="([A-Z_]+)"', source)):
         assert code in refusal.TEMPLATES, code
     assert emitted <= set(refusal.TEMPLATES)
+
+
+def _answering_pipeline(monkeypatch, sql, rows, columns, writer_text):
+    """Faked generator, guard and executor; the framing and the verifier are real."""
+    _patch_audit(monkeypatch)
+    _patch_classify_in_scope(monkeypatch)
+    monkeypatch.setattr(
+        generate_module, "generate_candidates", lambda q, s, n=1, temperature=None: [sql] * n
+    )
+    monkeypatch.setattr(
+        guardrails_module,
+        "validate",
+        lambda s, db_path=None: guardrails_module.GuardrailResult(ok=True, sql=s),
+    )
+    monkeypatch.setattr(
+        execute_module,
+        "execute",
+        lambda s, db_path=None: ExecutionResult(columns=columns, rows=rows),
+    )
+    monkeypatch.setattr(answer_module, "write_answer", lambda r: writer_text)
+
+
+FIXTURE_DB = "tests/fixtures/eval_fixture.duckdb"
+
+
+def test_an_assumed_period_makes_the_third_state_and_the_framing_is_appended_and_verified(
+    monkeypatch,
+):
+    _answering_pipeline(
+        monkeypatch,
+        "SELECT value FROM v_net_income WHERE ticker='MSFT' ORDER BY fiscal_year DESC LIMIT 1",
+        [(101832000000.0,)], ["value"], "The value is 101,832,000,000.0.",
+    )  # fmt: skip
+    result = pipeline.ask(
+        "What was Microsoft's net income in its most recent fiscal year on record?",
+        db_path=FIXTURE_DB,
+    )
+    assert result["state"] == "ANSWER_WITH_ASSUMPTION"
+    assert result["answer"].startswith("The value is 101,832,000,000.0.")
+    assert "fiscal year 2025 (period ended June 30, 2025)" in result["answer"]
+    assert result["assumptions"] and "most recent fiscal year" in result["assumptions"][0]
+
+
+def test_a_fully_specified_question_stays_in_the_plain_answer_state(monkeypatch):
+    _answering_pipeline(
+        monkeypatch,
+        "SELECT value FROM v_revenue WHERE ticker='AAPL' AND fiscal_year=2024",
+        [(391035000000.0,)], ["value"], "The value is 391,035,000,000.0.",
+    )  # fmt: skip
+    result = pipeline.ask("What was Apple's revenue in fiscal year 2024?", db_path=FIXTURE_DB)
+    assert result["state"] == "ANSWER" and result["assumptions"] == []
+    assert result["answer"] == "The value is 391,035,000,000.0."
+
+
+def test_an_abstain_is_the_abstain_state(monkeypatch):
+    _patch_audit(monkeypatch)
+    monkeypatch.setattr(
+        classify_module,
+        "classify",
+        lambda q: ClassifyResult(verdict="OUT_OF_SCOPE", explanation="e"),
+    )
+    result = pipeline.ask("Should I buy Tesla stock?")
+    assert result["state"] == "ABSTAIN" and result["answer"] is None
+
+
+def test_the_framing_is_given_the_result_shape_and_never_the_rows(monkeypatch):
+    seen = {}
+    real = pipeline.frame_module.frame_answer
+
+    def spy(question, sql, result_shape, **kw):
+        seen["shape"] = result_shape
+        seen["kw"] = kw
+        return real(question, sql, result_shape, **kw)
+
+    monkeypatch.setattr(pipeline.frame_module, "frame_answer", spy)
+    _answering_pipeline(
+        monkeypatch,
+        "SELECT value FROM v_revenue WHERE ticker='AAPL' AND fiscal_year=2024",
+        [(391035000000.0,)], ["value"], "The value is 391,035,000,000.0.",
+    )  # fmt: skip
+    pipeline.ask("What was Apple's revenue in fiscal year 2024?", db_path=FIXTURE_DB)
+    assert (seen["shape"].columns, seen["shape"].row_count) == (["value"], 1)
+    assert "rows" not in seen["kw"] and not hasattr(seen["shape"], "rows")
+
+
+def test_a_year_the_writer_invents_still_abstains_even_when_the_framing_states_the_right_one(
+    monkeypatch,
+):
+    _answering_pipeline(
+        monkeypatch,
+        "SELECT value FROM v_net_income WHERE ticker='MSFT' ORDER BY fiscal_year DESC LIMIT 1",
+        [(101832000000.0,)], ["value"], "The value is 101,832,000,000.0 for fiscal year 2022.",
+    )  # fmt: skip
+    result = pipeline.ask(
+        "What was Microsoft's net income in its most recent fiscal year on record?",
+        db_path=FIXTURE_DB,
+    )
+    assert result["answer"] is None and result["reason_code"] == "UNGROUNDED_ANSWER"
+    assert result["state"] == "ABSTAIN"

@@ -203,3 +203,28 @@ def test_verify_does_not_widen_a_column_whose_name_has_no_scale_word():
         [(5,)],
     )
     assert result.ok is False
+
+
+def test_years_and_day_labels_the_framing_states_are_grounded_only_when_the_caller_names_them():
+    from ledgerql.verify import verify
+
+    text = "Fiscal year 2025 (period ended June 30, 2025) was used."
+    assert not verify(text, ["value"], [(1.0,)], sql="SELECT value FROM v_revenue").ok
+    ok = verify(
+        text,
+        ["value"],
+        [(1.0,)],
+        sql="SELECT value FROM v_revenue",
+        context_years={2025},
+        context_numbers={30},
+    )
+    assert ok.ok
+    # a year the framing did not say it stated is still caught, and so is a day it did not name
+    assert not verify("Fiscal year 2024 was used.", ["value"], [(1.0,)], context_years={2025}).ok
+    assert not verify(
+        "It ended on June 29, 2025.",
+        ["value"],
+        [(1.0,)],
+        context_years={2025},
+        context_numbers={30},
+    ).ok

@@ -141,19 +141,31 @@ class VerifyResult:
 
 
 def verify(
-    answer: str, columns: list[str], rows: list[tuple], sql: str | None = None
+    answer: str,
+    columns: list[str],
+    rows: list[tuple],
+    sql: str | None = None,
+    context_years: set[int] | frozenset[int] | None = None,
+    context_numbers: set[int] | frozenset[int] | None = None,
 ) -> VerifyResult:
-    grounded_values = _grounded_with_scales(columns, rows)
+    """`context_years` and `context_numbers` are the year and day-of-month labels the framing
+    (`ledgerql/frame.py`) says it stated, read from the database by a keyed lookup. They ground
+    exactly those labels and nothing else: a year or day the framing did not name still fails."""
+    grounded_values = _grounded_with_scales(columns, rows) | {
+        float(n) for n in context_numbers or ()
+    }
     claimed = extract_numbers(answer)
     ungrounded = [n for n in claimed if not any(_scalar_match(n, g) for g in grounded_values)]
 
     if "fiscal_year" in columns:
         idx = columns.index("fiscal_year")
-        grounded_years = {row[idx] for row in rows if row[idx] is not None}
+        grounded_years = {row[idx] for row in rows if row[idx] is not None} | set(
+            context_years or ()
+        )
         year_mismatches = [float(y) for y in extract_years(answer) if y not in grounded_years]
         ungrounded = ungrounded + year_mismatches
     else:
-        grounded_years = result_years(rows) | sql_years(sql)
+        grounded_years = result_years(rows) | sql_years(sql) | set(context_years or ())
         year_mismatches = [float(y) for y in extract_years(answer) if y not in grounded_years]
         ungrounded = ungrounded + year_mismatches
 

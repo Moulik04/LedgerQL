@@ -145,8 +145,12 @@ def load_gold_cases(path: Path) -> list[dict]:
     return cases
 
 
-def run(gold_path: Path, db_path: str, judge=None) -> dict:
+def run(gold_path: Path, db_path: str, judge=None, only: set[str] | None = None) -> dict:
     cases = load_gold_cases(gold_path)
+    if only is not None:
+        cases = [
+            c for c in cases if c["id"] in only
+        ]  # a subset run: its summary is not a full-set figure
     rubric_items = must_state.load_patterns()
     cases_by_id = {c["id"]: c for c in cases}
     # Must match execute.execute()'s connection config exactly -- DuckDB
@@ -541,10 +545,17 @@ def main(argv: list[str] | None = None) -> int:
         "job-specific, gitignored directory so they never modify the tracked "
         "reports/eval.md.",
     )
+    ap.add_argument("--cases", help="comma-separated case ids; the summary then covers only those")
+    ap.add_argument(
+        "--judge-model",
+        help="a local Ollama model that decides the judge-primary answer_must_state items",
+    )
     args = ap.parse_args(argv)
 
     scoring.require_frozen(args.gold)  # a held-out file is refused unless it matches its pin
-    summary = run(Path(args.gold), args.db)
+    judge = must_state.OllamaJudge(args.judge_model) if args.judge_model else None
+    only = set(args.cases.split(",")) if args.cases else None
+    summary = run(Path(args.gold), args.db, judge=judge, only=only)
     md_path, jsonl_path = write_reports(summary, Path(args.reports_dir))
     print(f"Wrote {md_path} and {jsonl_path}")
     print(f"Overall execution accuracy: {summary['overall_execution_accuracy']:.1%}")

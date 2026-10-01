@@ -24,8 +24,9 @@ OLLAMA_SEED = int(os.environ.get("OLLAMA_SEED", "42"))
 SYSTEM_PROMPT = (
     "Write one or two plain-English sentences describing the data in this "
     "table. Use only the values shown -- do not add, round differently, or "
-    "infer any number not present. State any unit or fiscal year exactly as "
-    "given."
+    "infer any number not present. State any unit exactly as given. Do not "
+    "state a fiscal year, date or period unless a column in the table shows it: "
+    "the period is stated separately."
 )
 
 

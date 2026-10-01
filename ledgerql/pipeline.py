@@ -41,6 +41,7 @@ from ledgerql import classify as classify_module
 from ledgerql import consensus as consensus_module
 from ledgerql import entity_link as entity_link_module
 from ledgerql import execute as execute_module
+from ledgerql import frame as frame_module
 from ledgerql import generate as generate_module
 from ledgerql import guardrails as guardrails_module
 from ledgerql import intent as intent_module
@@ -377,9 +378,34 @@ def _answer_from(
     """Write the answer from a winning result, verify it, and finish. Shared by
     the consensus path and the repaired path so both are gated identically."""
     winner = ExecutionResult(columns=columns, rows=rows, truncated=truncated)
-    answer_text = answer_module.write_answer(winner)
+    writer_text = answer_module.write_answer(winner)
 
-    verify_result = verify_module.verify(answer_text, columns, rows, sql=sql)
+    # The framing states what the answer assumed (the period, a resolved name, a term read as a
+    # concept). It gets the question, the SQL and the result's *shape*, never a value, and is
+    # deterministic (ledgerql/frame.py). The verifier then runs on the concatenated text, told
+    # which year and day labels the framing stated, so a year the writer invents still fails.
+    frame = (
+        frame_module.frame_answer(
+            question,
+            sql,
+            frame_module.ResultShape(columns, len(rows)),
+            db_path=_DB_PATH.get(),
+        )
+        if sql
+        else frame_module.Frame()
+    )
+    answer_text = " ".join(t for t in (writer_text, frame.text) if t)
+    if frame.text:
+        verify_result = verify_module.verify(
+            answer_text,
+            columns,
+            rows,
+            sql=sql,
+            context_years=frame.years,
+            context_numbers=frame.numbers,
+        )
+    else:
+        verify_result = verify_module.verify(answer_text, columns, rows, sql=sql)
     if not verify_result.ok:
         return _finish(
             question,
@@ -407,6 +433,7 @@ def _answer_from(
         rows=rows,
         truncated=truncated,
         answer=answer_text,
+        assumptions=[c.text for c in frame.clauses if c.assumption],
         confidence=confidence,
         repair=repair,
         candidates=candidates,
@@ -436,6 +463,7 @@ def _finish(
     truncated: bool = False,
     error: str | None = None,
     answer: str | None = None,
+    assumptions: list[str] | None = None,
     confidence: float | None = None,
     repair: dict | None = None,
     candidates: list[dict] | None = None,
@@ -458,6 +486,12 @@ def _finish(
         "confidence": confidence,
         "repair": repair,
         "refusal": _refusal_text(answer, reason_code, question),
+        # The three terminal states: ANSWER, ANSWER_WITH_ASSUMPTION (the answer plus a stated
+        # assumption: a period resolved, a term read as a concept, a name resolved) and ABSTAIN.
+        "state": (
+            "ABSTAIN" if answer is None else ("ANSWER_WITH_ASSUMPTION" if assumptions else "ANSWER")
+        ),
+        "assumptions": list(assumptions or []),
     }
     if candidates is not None:
         result["candidates"] = candidates
@@ -478,6 +512,8 @@ def _finish(
             "confidence": confidence,
             "reason_code": reason_code,
             "refusal": result["refusal"],
+            "state": result["state"],
+            "assumptions": result["assumptions"],
             "repair": repair,
             "candidates": candidates,
             "latency_ms": latency_ms,

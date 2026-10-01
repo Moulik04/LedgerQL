@@ -87,3 +87,11 @@ def test_write_answer_system_prompt_instructs_grounding_only():
     result = ExecutionResult(columns=["x"], rows=[(1,)])
     answer.write_answer(result, client=client)
     assert "do not add" in client.last_call["system"].lower()
+
+
+def test_the_writer_is_told_not_to_state_a_period_the_table_does_not_show():
+    from ledgerql import answer
+
+    prompt = answer.SYSTEM_PROMPT.lower()
+    assert "do not state a fiscal year, date or period" in prompt
+    assert "unless" in prompt and "column" in prompt
