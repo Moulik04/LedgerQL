@@ -924,3 +924,43 @@ def test_entity_linking_is_off_by_default_and_passes_a_hint_only_when_enabled(mo
     monkeypatch.setattr(pipeline, "_entity_hint", lambda question, db_path: "HINT\n\n")
     pipeline.ask("What is The Coca-Cola Company's ticker symbol?")
     assert seen == [{"entity_hint": "HINT\n\n"}]
+
+
+def test_an_abstain_carries_a_deterministic_refusal_sentence_and_an_answer_carries_none(
+    monkeypatch,
+):
+    records = _patch_audit(monkeypatch)
+    monkeypatch.setattr(
+        classify_module,
+        "classify",
+        lambda q: ClassifyResult(verdict="OUT_OF_SCOPE", explanation="e"),
+    )
+    result = pipeline.ask("Should I buy Tesla stock?")
+    assert result["answer"] is None and result["reason_code"] == "OUT_OF_SCOPE"
+    assert result["refusal"] and "outside what this database can answer" in result["refusal"]
+    assert records[0]["refusal"] == result["refusal"]  # the audit trail keeps what the user saw
+
+
+def test_the_refusal_names_a_documented_gap_when_the_question_matches_one(monkeypatch):
+    _patch_audit(monkeypatch)
+    monkeypatch.setattr(
+        classify_module,
+        "classify",
+        lambda q: ClassifyResult(verdict="SCHEMA_MISMATCH", explanation="e"),
+    )
+    result = pipeline.ask(
+        "Break down Apple's fiscal 2024 revenue by geographic region.",
+        db_path="tests/fixtures/eval_fixture.duckdb",
+    )
+    assert "geographic breakdowns" in result["refusal"]
+
+
+def test_every_reason_code_the_pipeline_can_emit_has_a_refusal_template():
+    from ledgerql import refusal
+
+    emitted = {"OUT_OF_SCOPE", "SCHEMA_MISMATCH", "AMBIGUOUS", "NO_DATA", "COST_LIMIT",
+               "LOW_AGREEMENT", "UNGROUNDED_ANSWER", "EXEC_ERROR"}  # fmt: skip
+    source = open("ledgerql/pipeline.py").read() + open("ledgerql/guardrails.py").read()
+    for code in set(__import__("re").findall(r'reason_code="([A-Z_]+)"', source)):
+        assert code in refusal.TEMPLATES, code
+    assert emitted <= set(refusal.TEMPLATES)

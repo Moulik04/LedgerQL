@@ -30,6 +30,7 @@ back): it is NO_DATA. A generator that refuses in SQL (`SELECT NULL ... WHERE
 1 = 0`) is mapped to SCHEMA_MISMATCH structurally and is not repaired.
 """
 
+import contextvars
 import functools
 import os
 import time
@@ -43,6 +44,7 @@ from ledgerql import execute as execute_module
 from ledgerql import generate as generate_module
 from ledgerql import guardrails as guardrails_module
 from ledgerql import intent as intent_module
+from ledgerql import refusal as refusal_module
 from ledgerql import repair as repair_module
 from ledgerql import result_shape as result_shape_module
 from ledgerql import schema_index
@@ -60,8 +62,14 @@ def _entity_hint(question: str, db_path: str | None) -> str:
     return entity_link_module.hint_for(question, entity_link_module.linker_for(db_path))
 
 
+_DB_PATH: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "ledgerql_db_path", default=None
+)
+
+
 def ask(question: str, db_path: str | None = None) -> dict:
     start = time.monotonic()
+    _DB_PATH.set(db_path)  # `_finish` needs it to explain an abstain from the data
 
     try:
         # Stage 0, before classify: a deterministic check on the question
@@ -405,6 +413,17 @@ def _answer_from(
     )
 
 
+def _refusal_text(answer: str | None, reason_code: str | None, question: str) -> str | None:
+    """The deterministic sentence telling the user why an abstain happened (ledgerql/refusal.py:
+    templates and a documented-gaps registry, no model). None when the question was answered."""
+    if answer is not None or reason_code is None:
+        return None
+    try:
+        return refusal_module.explain(reason_code, question, db_path=_DB_PATH.get()).text
+    except ValueError:  # a reason code with no template: say so rather than fail the request
+        return "The question was not answered."
+
+
 def _finish(
     question: str,
     start: float,
@@ -438,6 +457,7 @@ def _finish(
         "guardrail_events": guardrail_events,
         "confidence": confidence,
         "repair": repair,
+        "refusal": _refusal_text(answer, reason_code, question),
     }
     if candidates is not None:
         result["candidates"] = candidates
@@ -457,6 +477,7 @@ def _finish(
             "answer": answer,
             "confidence": confidence,
             "reason_code": reason_code,
+            "refusal": result["refusal"],
             "repair": repair,
             "candidates": candidates,
             "latency_ms": latency_ms,

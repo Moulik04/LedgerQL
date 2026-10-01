@@ -194,6 +194,7 @@ def run(gold_path: Path, db_path: str, judge=None) -> dict:
             "rows": result["rows"],
             "truncated": result["truncated"],
             "reason_code": result.get("reason_code"),
+            "refusal": result.get("refusal"),
             "guardrail_events": result.get("guardrail_events", []),
             "confidence": result.get("confidence"),
             "repair": result.get("repair"),
@@ -226,7 +227,11 @@ def run(gold_path: Path, db_path: str, judge=None) -> dict:
         # wrong value is never "correct with the assumption stated" (abstain_scoring).
         if case["id"] in rubric_items:
             graded = must_state.grade_case(
-                rubric_items[case["id"]], result["answer"], None, judge, case["question"]
+                rubric_items[case["id"]],
+                result["answer"],
+                result.get("refusal"),
+                judge,
+                case["question"],
             )
             record["rubric"] = [
                 {"item": r.item, "passed": r.passed, "decided_by": r.decided_by,

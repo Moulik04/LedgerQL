@@ -1,0 +1,58 @@
+[
+  {
+    "id": "dual_class_ticker",
+    "pattern": "\\b(GOOG|FOX|NWS)\\b",
+    "condition": "dual_class",
+    "text": "Only the canonical ticker {canonical} is loaded for this company; {mention} is another share class and is not a separate row.",
+    "source": "docs/schema.md",
+    "source_quote": "only the canonical ticker (e.g., GOOGL) will match"
+  },
+  {
+    "id": "staging_tables",
+    "pattern": "\\b(stg_(sub|num|tag)|staging)\\b",
+    "condition": null,
+    "text": "The staging tables (stg_sub, stg_num, stg_tag) exist only for debugging and are never exposed to query generation, so they cannot be queried.",
+    "source": "docs/schema.md",
+    "source_quote": "exist purely for debugging data-quality questions"
+  },
+  {
+    "id": "no_8k_filings",
+    "pattern": "\\b8-K\\b",
+    "condition": "no_8k_rows",
+    "text": "No 8-K filings are loaded for {company}: the forms present for it are {forms}.",
+    "source": "docs/schema.md",
+    "source_quote": "One row per SEC submission (any form type)"
+  },
+  {
+    "id": "headcount",
+    "pattern": "\\b(employees?|headcount|workforce)\\b",
+    "condition": null,
+    "text": "Employee counts are not in this database: it draws only on the primary financial statements of 10-K filings, which do not include headcount.",
+    "source": "docs/schema.md",
+    "source_quote": "one row per reported numeric fact from a 10-K's primary financial statements"
+  },
+  {
+    "id": "annual_only",
+    "pattern": "\\bquarter(s|ly)?\\b|\\bQ[1-4]\\b",
+    "condition": null,
+    "text": "This database holds annual figures only (10-K filings, fiscal-year periods); quarterly figures are not loaded.",
+    "source": "docs/schema.md",
+    "source_quote": "annual figures only"
+  },
+  {
+    "id": "no_dimensional_breakdowns",
+    "pattern": "\\b(segments?|geograph\\w*|region(al|s)?|countr(y|ies))\\b",
+    "condition": null,
+    "text": "This database holds consolidated, non-dimensional values only, so segment and geographic breakdowns are not available: they are excluded by design.",
+    "source": "docs/schema.md",
+    "source_quote": "no product-line or geographic breakdowns"
+  },
+  {
+    "id": "no_revenue_tag",
+    "pattern": "\\b(revenues?|sales|margins?)\\b",
+    "condition": "no_revenue_rows",
+    "text": "{company} has no revenue figure under the standard revenue tags in this database. An absent tag means the figure was not reported under a known tag, and bank holding companies in particular generally don't file a single Revenues-style tag, so revenue-based figures such as revenue or net margin cannot be computed for {company}. This is a documented gap, not missing data.",
+    "source": "docs/schema.md",
+    "source_quote": "bank holding companies (e.g. JPMorgan) generally don't file a single Revenues-style tag"
+  }
+]
