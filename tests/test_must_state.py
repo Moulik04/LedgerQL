@@ -139,3 +139,39 @@ def test_judge_check_reports_recall_and_precision_on_constructed_answers():
     assert out["n"] == 3 and out["recall"] == 1.0 and out["precision"] == 1.0
     always_no = M.judge_check(checks, patterns, judge=lambda q, a, t: False)
     assert always_no["recall"] == 0.0 and always_no["false_negatives"] == 2
+
+
+def test_the_blind_sheet_has_the_answers_and_items_but_none_of_the_labels_or_notes():
+    records = {"run": [{"id": "X", "answer": "In fiscal year 2024 it was 1", "question": "q?"}]}
+    labels = [{"run": "run", "case": "X", "item": 0, "label": True, "note": "SECRET NOTE"}]
+    rows = M.build_blind(records, {"X": [ITEM]}, labels, seed=1)
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["answer"] == "In fiscal year 2024 it was 1" and row["item_text"] == ITEM["text"]
+    assert row["question"] == "q?" and row["label"] is None
+    assert "SECRET" not in json.dumps(rows) and "True" not in json.dumps(rows)
+
+
+def test_the_blind_sheet_order_is_shuffled_but_reproducible():
+    records = {"r": [{"id": "X", "answer": f"a{i}", "question": "q"} for i in range(1)]}
+    labels = [{"run": "r", "case": "X", "item": 0, "label": True, "note": ""}]
+    many = [{"run": "r", "case": "X", "item": 0, "label": True, "note": ""}] * 1
+    assert M.build_blind(records, {"X": [ITEM]}, many, 3) == M.build_blind(
+        records, {"X": [ITEM]}, labels, 3
+    )
+
+
+def test_agreement_reports_per_item_overall_and_every_disagreement_in_both_comparisons():
+    patterns = {"X": [ITEM]}
+    records = {"r": [{"id": "X", "answer": "It was 1", "question": "q"}]}  # no fiscal year stated
+    claude = [{"run": "r", "case": "X", "item": 0, "label": True, "note": ""}]
+    blind = [{"run": "r", "case": "X", "item": 0, "label": False, "note": "my read"}]
+    out = M.agreement(blind, claude, records, patterns)
+    assert out["n"] == 1
+    assert out["mj_vs_claude"] == {"n": 1, "agree": 0}  # the first labeller said True, MJ False
+    assert out["mj_vs_grader"] == {"n": 1, "agree": 1}  # the grader said False, with MJ
+    (d,) = out["disagreements"]  # listed because the first labeller differs from MJ
+    assert (d["case"], d["mj"], d["claude"], d["grader"]) == ("X", False, True, False)
+    assert out["per_item"][("X", 0)] == {"n": 1, "mj_claude": 0, "mj_grader": 1}
+    blank = M.agreement([{**blind[0], "label": None}], claude, records, patterns)
+    assert blank["unlabelled"] == 1 and blank["n"] == 0

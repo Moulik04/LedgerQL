@@ -1,3 +1,4 @@
+# ruff: noqa: E501  (report format strings are single lines)
 """The `answer_must_state` grader.
 
 Twenty-three gold cases carry rubric items: free-text sentences the answer must state (which
@@ -235,16 +236,46 @@ def _format_calibration(out: dict, title: str) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _load_runs(reports_dir: Path) -> dict[str, list[dict]]:
+    """The two measured Phase 5 runs, each record carrying its question."""
+    questions = {}
+    for line in open(Path(__file__).resolve().parent / "gold.jsonl"):
+        case = json.loads(line)
+        questions[case["id"]] = case["question"]
+    runs = {}
+    for name in ("qwen3_30b", "qwen25_32b"):
+        path = reports_dir / f"eval_bridges2_{name}_measured.jsonl"
+        runs[name] = [json.loads(x) for x in path.read_text().splitlines() if x.strip()]
+        for r in runs[name]:
+            r["question"] = questions.get(r["id"], "")
+    return runs
+
+
 def main(argv: list[str] | None = None) -> int:
     import argparse
 
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("command", choices=["calibrate", "judge-check"])
+    ap.add_argument("command", choices=["calibrate", "judge-check", "blind", "agree"])
+    ap.add_argument("--blind-file", type=Path, default=BLIND_PATH)
     ap.add_argument("--reports-dir", type=Path, default=Path("reports"))
     ap.add_argument("--judge", action="store_true", help="also ask the local judge (Ollama)")
     ap.add_argument("--judge-model", default="llama3.1:8b")
     ap.add_argument("--write", type=Path)
     args = ap.parse_args(argv)
+    if args.command in ("blind", "agree"):
+        runs, patterns = _load_runs(args.reports_dir), load_patterns()
+        if args.command == "blind":
+            rows = build_blind(runs, patterns, load_labels())
+            args.blind_file.write_text("".join(json.dumps(r) + "\n" for r in rows))
+            print(f"wrote {args.blind_file}: {len(rows)} rows, no labels")
+            return 0
+        blind = [json.loads(x) for x in args.blind_file.read_text().splitlines() if x.strip()]
+        judge = OllamaJudge(args.judge_model) if args.judge else None
+        text = _format_agreement(agreement(blind, load_labels(), runs, patterns, judge))
+        if args.write:
+            args.write.write_text(text)
+        print(text)
+        return 0
     if args.command == "judge-check":
         checks = [json.loads(x) for x in CHECKS_PATH.read_text().splitlines() if x.strip()]
         patterns = load_patterns()
@@ -266,23 +297,7 @@ def main(argv: list[str] | None = None) -> int:
             args.write.write_text(text)
         print(text)
         return 0
-    runs = {
-        name: [
-            json.loads(line)
-            for line in (args.reports_dir / f"eval_bridges2_{name}_measured.jsonl")
-            .read_text()
-            .splitlines()
-            if line.strip()
-        ]
-        for name in ("qwen3_30b", "qwen25_32b")
-    }
-    questions = {}
-    for line in open(Path(__file__).resolve().parent / "gold.jsonl"):
-        case = json.loads(line)
-        questions[case["id"]] = case["question"]
-    for records in runs.values():
-        for r in records:
-            r["question"] = questions.get(r["id"], "")
+    runs = _load_runs(args.reports_dir)
     judge = OllamaJudge(args.judge_model) if args.judge else None
     out = calibrate(runs, load_patterns(), load_labels(), judge)
     text = _format_calibration(out, "# answer_must_state: calibration against hand labels")
@@ -327,6 +342,125 @@ def judge_check(checks: list[dict], patterns: dict[str, list[dict]], judge) -> d
         "false_positives": fp,
         "unparsed": unparsed,
     }
+
+
+BLIND_PATH = Path(__file__).resolve().parent / "must_state_labels_blind.jsonl"
+
+
+def build_blind(
+    records_by_run: dict[str, list[dict]],
+    patterns: dict[str, list[dict]],
+    labels: list[dict],
+    seed: int = 20260930,
+) -> list[dict]:
+    """The same answers and rubric items as `labels`, in shuffled order, with the full answer text
+    and no label or note, for a second person to label without seeing the first labeller's."""
+    import random
+
+    by_key = {(run, r["id"]): r for run, records in records_by_run.items() for r in records}
+    rows = []
+    for lab in labels:
+        rec = by_key[(lab["run"], lab["case"])]
+        item = patterns[lab["case"]][lab["item"]]
+        rows.append(
+            {
+                "answer_id": f"{lab['run']}:{lab['case']}:{lab['item']}",
+                "run": lab["run"],
+                "case": lab["case"],
+                "item": lab["item"],
+                "question": rec.get("question", ""),
+                "item_text": item["text"],
+                "answer": rec["answer"],
+                "label": None,
+                "note": "",
+            }
+        )
+    random.Random(seed).shuffle(rows)
+    return rows
+
+
+def agreement(
+    blind: list[dict],
+    claude_labels: list[dict],
+    records_by_run: dict[str, list[dict]],
+    patterns: dict[str, list[dict]],
+    judge=None,
+) -> dict:
+    """MJ's blind labels against the grader and against the first labeller, per item and overall,
+    with every disagreement listed for adjudication. Nothing is adjusted here."""
+    claude = {(r["run"], r["case"], r["item"]): r["label"] for r in claude_labels}
+    by_key = {(run, r["id"]): r for run, recs in records_by_run.items() for r in recs}
+    rows, unlabelled = [], 0
+    for b in blind:
+        if b["label"] is None:
+            unlabelled += 1
+            continue
+        key = (b["run"], b["case"], b["item"])
+        rec = by_key[(b["run"], b["case"])]
+        graded = grade_item(
+            patterns[b["case"]][b["item"]], rec["answer"], None, judge, rec.get("question", "")
+        )
+        rows.append(
+            {
+                "run": b["run"], "case": b["case"], "item": b["item"], "mj": b["label"],
+                "claude": claude.get(key), "grader": graded.passed,
+                "pattern": graded.pattern_pass, "judge": graded.judge_pass,
+                "decided_by": graded.decided_by, "mj_note": b.get("note", ""),
+                "answer": rec["answer"],
+            }
+        )  # fmt: skip
+
+    def tally(field):
+        gradable = [r for r in rows if r[field] is not None]
+        return {"n": len(gradable), "agree": sum(r[field] == r["mj"] for r in gradable)}
+
+    per_item: dict[tuple, dict] = {}
+    for r in rows:
+        cell = per_item.setdefault((r["case"], r["item"]), {"n": 0, "mj_claude": 0, "mj_grader": 0})
+        cell["n"] += 1
+        cell["mj_claude"] += r["claude"] == r["mj"]
+        cell["mj_grader"] += r["grader"] == r["mj"]
+    return {
+        "n": len(rows),
+        "unlabelled": unlabelled,
+        "mj_vs_claude": tally("claude"),
+        "mj_vs_grader": tally("grader"),
+        "per_item": per_item,
+        "disagreements": [r for r in rows if r["claude"] != r["mj"] or r["grader"] != r["mj"]],
+    }
+
+
+def _format_agreement(out: dict) -> str:
+    c, g = out["mj_vs_claude"], out["mj_vs_grader"]
+    lines = [
+        "# answer_must_state: MJ's blind labels against the grader and the first labeller",
+        "",
+        f"{out['n']} labelled ({out['unlabelled']} left blank). **MJ vs the grader:** {g['agree']} of "
+        f"{g['n']} gradable ({g['agree'] / g['n']:.0%}). **MJ vs the first labeller:** {c['agree']} of "
+        f"{c['n']} ({c['agree'] / c['n']:.0%}). Patterns are not adjusted until MJ has adjudicated "
+        "the disagreements below.",
+        "",
+        "## Per item",
+        "",
+        "| case | item | n | MJ = first labeller | MJ = grader |",
+        "|---|---|---|---|---|",
+    ]
+    for (case, item), cell in sorted(out["per_item"].items()):
+        lines.append(
+            f"| {case} | {item} | {cell['n']} | {cell['mj_claude']} | {cell['mj_grader']} |"
+        )
+    lines += ["", "## Every disagreement (for MJ to adjudicate)", ""]
+    for r in out["disagreements"]:
+        lines += [
+            f"### {r['run']} {r['case']}[{r['item']}]: MJ {r['mj']}, first labeller {r['claude']}, "
+            f"grader {r['grader']} (pattern {r['pattern']}, judge {r['judge']}, decided by {r['decided_by']})",
+            "",
+            f"Answer: {r['answer']}",
+            "",
+            f"MJ's note: {r['mj_note'] or '(none)'}",
+            "",
+        ]
+    return "\n".join(lines) + "\n"
 
 
 if __name__ == "__main__":
