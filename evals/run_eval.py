@@ -199,6 +199,8 @@ def run(gold_path: Path, db_path: str, judge=None, only: set[str] | None = None)
             "truncated": result["truncated"],
             "reason_code": result.get("reason_code"),
             "refusal": result.get("refusal"),
+            "state": result.get("state"),
+            "assumptions": result.get("assumptions"),
             "guardrail_events": result.get("guardrail_events", []),
             "confidence": result.get("confidence"),
             "repair": result.get("repair"),

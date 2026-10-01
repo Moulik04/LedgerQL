@@ -155,3 +155,14 @@ def test_main_reproduces_the_real_committed_30b_report_exactly(capsys):
     # Always print the count beside it.
     assert "(9/22 abstains that were the right call named the right reason)" in out
     assert "always-abstain baseline precision      33.0%" in out
+
+
+def test_the_third_state_is_read_from_the_record_when_the_pipeline_emits_it():
+    from evals.diagnose_abstains import infer_observed_behaviour
+
+    assert (
+        infer_observed_behaviour({"state": "ANSWER_WITH_ASSUMPTION", "answer": "x"})
+        == "ANSWER_WITH_ASSUMPTION"
+    )
+    assert infer_observed_behaviour({"state": "ABSTAIN", "answer": None}) == "ABSTAIN"
+    assert infer_observed_behaviour({"answer": "x"}) == "ANSWER"  # older records: derived as before

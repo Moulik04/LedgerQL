@@ -108,14 +108,12 @@ def infer_observed_behaviour(rec: dict) -> str | None:
     always None, and every downstream metric silently computed over zero
     matching records (nan/all-zero output, not an error). Falls back to
     deriving it from the real `answer` field: today's pipeline only has
-    two terminal states (ANSWER or ABSTAIN-with-a-reason -- the third,
-    ANSWER_WITH_ASSUMPTION, is not emittable yet, see
-    PHASE_5_5_MASTER_PROMPT.md Task 2), so that column of every table
-    below is legitimately all-zero until that task lands, not a bug.
-    Checks the explicit field first, for forward-compatibility once a
-    later task adds one.
+    two terminal states (ANSWER or ABSTAIN-with-a-reason), so the
+    ANSWER_WITH_ASSUMPTION column of every table below is legitimately
+    all-zero for those records, not a bug. Since Task 2 the pipeline emits
+    the third state and records it as `state`; that field is read first.
     """
-    explicit = get(rec, "observed_behavior", "observed", "behavior")
+    explicit = get(rec, "state", "observed_behavior", "observed", "behavior")
     if explicit is not None:
         return norm_behaviour(explicit)
     return "ABSTAIN" if rec.get("answer") is None else "ANSWER"
@@ -210,6 +208,7 @@ def main(argv: list[str] | None = None) -> int:
             "answer": r.get("answer"),
             "reason_code": r.get("reason_code"),
             "execution_correct": r.get("execution_correct"),
+            **({"rubric_pass": r["rubric_pass"]} if "rubric_pass" in r else {}),
         }
         for r in recs
     ]
