@@ -4,5 +4,5 @@
 
 | grader | recall | precision | false negatives | false positives | unparsed |
 |---|---|---|---|---|---|
-| judge | 0.7 | 0.875 | 3 | 1 | 0 |
+| judge | 0.6 | 0.8571428571428571 | 4 | 1 | 0 |
 | pattern | 0.9 | 1.0 | 1 | 0 | 0 |

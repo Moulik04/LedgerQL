@@ -19,24 +19,24 @@ Each record's own winner rows, scored as `run_eval` scores them, in the three co
 
 `answered correctly` is split by whether the prose states the assumption (`answer_must_state`, `evals/must_state.py`; patterns decide most items, a local judge decides the five judge-primary ones, and without a judge those are *not assessed*; J02 and G04 have no rubric items at all): **the headline is `stated`**. An abstain is reported on its own, never as handled.
 
-| run | config | version | answered correctly | of which **stated** | not stated | no rubric / not gradable | abstained | answered wrong |
-|---|---|---|---|---|---|---|---|---|
-| Qwen3-30B (measured) | shipped (repair off) | v1 | 2 | **0** | 2 | 0 | 6 | 11 |
-| Qwen3-30B (measured) | shipped (repair off) | v2 strict | 11 | **3** | 6 | 2 | 6 | 2 |
-| Qwen3-30B (measured) | shipped (repair off) | v3 strict | 11 | **3** | 6 | 2 | 6 | 2 |
-| Qwen3-30B (measured) | shipped (repair off) | v3 relaxed | 11 | **3** | 6 | 2 | 6 | 2 |
-| Qwen3-30B (measured) | shipped + year rule | v1 | 0 | **0** | 0 | 0 | 15 | 4 |
-| Qwen3-30B (measured) | shipped + year rule | v2 strict | 2 | **0** | 2 | 0 | 15 | 2 |
-| Qwen3-30B (measured) | shipped + year rule | v3 strict | 2 | **0** | 2 | 0 | 15 | 2 |
-| Qwen3-30B (measured) | shipped + year rule | v3 relaxed | 2 | **0** | 2 | 0 | 15 | 2 |
-| Qwen2.5-32B AWQ (measured) | shipped (repair off) | v1 | 0 | **0** | 0 | 0 | 12 | 7 |
-| Qwen2.5-32B AWQ (measured) | shipped (repair off) | v2 strict | 1 | **0** | 1 | 0 | 12 | 6 |
-| Qwen2.5-32B AWQ (measured) | shipped (repair off) | v3 strict | 1 | **0** | 1 | 0 | 12 | 6 |
-| Qwen2.5-32B AWQ (measured) | shipped (repair off) | v3 relaxed | 3 | **1** | 2 | 0 | 12 | 4 |
-| Qwen2.5-32B AWQ (measured) | shipped + year rule | v1 | 0 | **0** | 0 | 0 | 12 | 7 |
-| Qwen2.5-32B AWQ (measured) | shipped + year rule | v2 strict | 1 | **0** | 1 | 0 | 12 | 6 |
-| Qwen2.5-32B AWQ (measured) | shipped + year rule | v3 strict | 1 | **0** | 1 | 0 | 12 | 6 |
-| Qwen2.5-32B AWQ (measured) | shipped + year rule | v3 relaxed | 3 | **1** | 2 | 0 | 12 | 4 |
+| run | config | version | answered correctly | of which **stated** | not stated | no rubric / not gradable | abstained | of which reason stated | answered wrong |
+|---|---|---|---|---|---|---|---|---|---|
+| Qwen3-30B (measured) | shipped (repair off) | v1 | 2 | **0** | 2 | 0 | 6 | 2 | 11 |
+| Qwen3-30B (measured) | shipped (repair off) | v2 strict | 11 | **3** | 6 | 2 | 6 | 2 | 2 |
+| Qwen3-30B (measured) | shipped (repair off) | v3 strict | 11 | **3** | 6 | 2 | 6 | 2 | 2 |
+| Qwen3-30B (measured) | shipped (repair off) | v3 relaxed | 11 | **3** | 6 | 2 | 6 | 2 | 2 |
+| Qwen3-30B (measured) | shipped + year rule | v1 | 0 | **0** | 0 | 0 | 15 | 2 | 4 |
+| Qwen3-30B (measured) | shipped + year rule | v2 strict | 2 | **0** | 2 | 0 | 15 | 2 | 2 |
+| Qwen3-30B (measured) | shipped + year rule | v3 strict | 2 | **0** | 2 | 0 | 15 | 2 | 2 |
+| Qwen3-30B (measured) | shipped + year rule | v3 relaxed | 2 | **0** | 2 | 0 | 15 | 2 | 2 |
+| Qwen2.5-32B AWQ (measured) | shipped (repair off) | v1 | 0 | **0** | 0 | 0 | 12 | 2 | 7 |
+| Qwen2.5-32B AWQ (measured) | shipped (repair off) | v2 strict | 1 | **0** | 1 | 0 | 12 | 2 | 6 |
+| Qwen2.5-32B AWQ (measured) | shipped (repair off) | v3 strict | 1 | **0** | 1 | 0 | 12 | 2 | 6 |
+| Qwen2.5-32B AWQ (measured) | shipped (repair off) | v3 relaxed | 3 | **1** | 2 | 0 | 12 | 2 | 4 |
+| Qwen2.5-32B AWQ (measured) | shipped + year rule | v1 | 0 | **0** | 0 | 0 | 12 | 2 | 7 |
+| Qwen2.5-32B AWQ (measured) | shipped + year rule | v2 strict | 1 | **0** | 1 | 0 | 12 | 2 | 6 |
+| Qwen2.5-32B AWQ (measured) | shipped + year rule | v3 strict | 1 | **0** | 1 | 0 | 12 | 2 | 6 |
+| Qwen2.5-32B AWQ (measured) | shipped + year rule | v3 relaxed | 3 | **1** | 2 | 0 | 12 | 2 | 4 |
 
 ### Per tier (ANSWER cases), measured runs, shipped (repair off)
 

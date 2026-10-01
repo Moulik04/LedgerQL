@@ -2109,3 +2109,133 @@ until the system says *why* it abstains in prose; that is a product change, not 
 (b) Spot-check the 28 labels (`evals/must_state_labels.jsonl`), especially the four judgement
 calls. (c) Whether the abstain path should emit a reason string. (d) Push the commit and submit
 the two entity-link jobs (the command is below).
+
+---
+
+## 2026-10-01 — CI green, the 80-question held-out set, abstain explanations, the answer framing and the third state
+
+### 1. CI was red for a reason unrelated to any change, and is fixed
+
+CI had failed on every push since 2026-09-22. Reproduced in a fresh clone of HEAD: 5 failures and
+18 errors, all from tests that need `data/ledgerql.duckdb`, a 185 MB file that is gitignored and so
+never exists in CI (`test_data.py`, `test_signal_precheck.py`, `test_comparator_audit.py`, one
+`test_bridges2_scripts.py` check). The tracked `tests/fixtures/eval_fixture.duckdb` is the real mart
+row for row (500 / 4354 / 111714 rows; the four views match), so those tests now use it
+(`LEDGERQL_DB_PATH` still overrides, to verify a fresh build). A fresh clone then passed lint, all
+tests and gold validation, and the pushed commit `8e8e45f` passed all three CI jobs: the first green
+since 09-22. That commit is `898d7b2`, which the entity-link A/B is pinned to, plus a test-only change;
+the A/B is gen-only and unaffected by anything below.
+
+### 2. Held-out: 80 questions, and the headline is pre-registered
+
+MJ chose 80 over 50: held-out questions are single-use and 50 could not confirm the linker's dev
+effect. `evals/heldout_template.jsonl` is now the 80-row template (40 ANSWER, 16 ASSUMPTION, 24
+ABSTAIN; 71 company slots), swapped for the 50-row one **before any question existed** and pinned by
+`heldout_template.sha256`; `evals/heldout_template.md` renders it for writing from. Protocol 6a
+pre-registers the headline: **configuration H** is the full pipeline with Qwen3-Coder-30B-A3B fp16 on
+the `current` prompt, repair off, the year verifier on, entity linking on **iff** P1 and P2 both meet the
+"helps" criterion. The four README headline figures are the hallucinated-number rate including years,
+the confidently-wrong rate, coverage, and the agree-policy table (with the 32B), each from H, once, on
+this set, in a fixed order. H is Claude's proposal; MJ may amend it before the questions are written.
+`run_eval --gold` now refuses an unfrozen held-out file, and the pipeline job scores against the frozen
+v3 gold unless told otherwise.
+
+### 3. Blind labels
+
+`evals/must_state_labels_blind.jsonl` has the same 28 answers and rubric items (shuffled, full answer
+text, no labels, no notes). After MJ fills it, `python -m evals.must_state agree` reports agreement with
+the grader and with the first labeller, per item and overall, and lists every disagreement.
+**Patterns are not adjusted until MJ has adjudicated those.** The first labeller's 28 labels and the
+patterns were committed earlier and are unchanged.
+
+### 4. Abstain explanations (deterministic, no model)
+
+`ledgerql/refusal.py`: one template per reason code (the eight in `evals/README.md` section 2), filled
+only from the question and the entity linker (company, fiscal period), and a registry of documented gaps
+(`ledgerql/known_gaps.json`) that takes over when a question matches one: a company with no revenue tag,
+no segment or geographic breakdowns, annual figures only, staging tables not queryable, a dual-class
+ticker, no 8-K for a company. Every registry entry carries a quotation that a test finds in
+`docs/schema.md`; triggers that depend on data are decided by the database. Two corrections to my first
+draft came from the data: `filings` does contain 8-Ks (26), so the 8-K sentence is derived per company
+from the forms it actually has; and many companies lack a revenue row without being banks, so the revenue
+sentence says an absent tag means "not reported under a known tag" and names banks only as the documented
+case, never asserting that a given company is one. Tests: every reason code has a template; over all 103
+gold questions and every code, no sentence contains a number that is not in the question or the linker's
+output; the module imports no model client. The pipeline returns `refusal`, and the audit record keeps it.
+
+**Re-graded.** Replayed on the recorded abstains of both Phase 5 runs (the text is a pure function of the
+reason code, the question and the database), every abstain on a case with a refusal item states it:
+13 of 13 (30B: `R07`, `U06`, `M07`, `S11`, `H02`, `H04`, `H06`; 32B: `T06`, `R07`, `U06`, `S11`, `H04`,
+`H06`), `R07` and `H06` by the judge. On the **live local 7B** (qwen2.5-coder:7b through the real
+pipeline, the eight refusal cases) it abstained on all eight; the six refusal items (`T06`, `U06`, `M07`,
+`S11`, `H02`, `H04`) pass on its actual refusal text by patterns, and `R07` and `H06` pass by the judge, so
+the "state the reason" half of `R07` is now gradable and met. The Phase 5 report counts an abstain whose
+refusal states the reason beside the answered-with-assumption headline (`reports/gold_v2_rescore.md`).
+**Caveat:** the registry was written with those dev rubric items in view, so this is optimistic; the
+held-out set measures how often a question falls through to the generic sentence.
+
+### 5. Tasks 2 and 3: the third state and the framing
+
+**What was built.** `ledgerql/frame.py`: `frame_answer(question, sql, result_shape)` states what an answer
+assumed (the fiscal year resolved from "most recent" with the date that period ended, a bare year read as a
+fiscal year, the metric a ranking used, a loose term read as a concept, a brand name resolved, the years a
+sum covers, a balance that is not summed, a stated scale, the raw unit). The writer is unchanged except its
+prompt now says not to state a period the table does not show (the 30B stated "fiscal year 2022" in 17 of
+55 answers over data that starts in 2024). `ask()` returns `state` (`ANSWER`, `ANSWER_WITH_ASSUMPTION`,
+`ABSTAIN`) and `assumptions`; the verifier runs on the writer's text plus the framing; the diagnostic's 3x3
+matrix reads `state`.
+
+**Three departures from the Task 2/3 text, with reasons.** (1) *The framing is deterministic, not a second
+model call.* Its hard part is the period, which is a lookup keyed by the SQL's own filters (and "most
+recent" resolves by a query), not language; nothing is sampled, so there is nothing to reject and
+regenerate. (2) *It may state numerals.* The text said to reject any numeral, but "fiscal year 2025" is a
+numeral and is exactly what the rubric asks for. What it must never see or state is a financial **value**:
+it receives the result's column names and row count only, and the labels it states (a fiscal year, the date
+a period ended) come from the question, the SQL or a keyed database lookup. The verifier is told which
+year and day labels the framing stated (`verify(..., context_years, context_numbers)`), so a year the writer
+invents still fails. (3) *No confidence band.* The text puts the middle band between fitted thresholds, and
+the calibrator that fits them was never built (DECISIONS 2026-09-29 section 3), so the state is emitted from
+under-specification alone.
+
+**What it measures.** Baseline: 0 of 19 assumption cases answered correctly with the assumption stated, on
+both models, under the year rule.
+
+- *Framing alone, replayed on the recorded winning SQL* (`evals/replay_frame.py`; no GPU): the frame states
+  every rubric item on 9 of the 11 answered assumption cases of the 30B and 4 of the 7 of the 32B. The misses
+  are answers to a different question (the 32B summing a balance or returning both years) or judge-decided
+  items; the framing says nothing rather than something false.
+- *Live, end to end on the local 7B* (the pipeline with the new writer prompt, the framing and the year
+  verifier; the 19 assumption cases; strict v3): **all three states are emitted** (7
+  `ANSWER_WITH_ASSUMPTION`, 9 `ABSTAIN`, 3 `ANSWER`); 6 answered correctly, **of which 4 state their
+  assumption** (`L04`, `U02`, `M06`, `M08`) and 2 have no rubric items (`J02`, `G04`); 9 abstained, of which
+  the two documented-gap cases (`R07`, `H06`) state the reason; 4 answered wrong. Under the relaxed
+  comparator 8 are correct and 6 state it. **Ablation on the same run:** removing the framing text and
+  re-grading leaves **0** stated (1 relaxed). So the framing, not the writer, is what produces the
+  statements. The 7B's pre-change figure was not measured, so the ablation is the control for this model; the
+  writer-prompt change itself cannot be ablated without another run.
+- *Acceptance named in the text* (`M01`, `M02`, `M06`, `M08`, `U02`, `U07` score 1.0): on the 7B, `M06`,
+  `M08`, `U02` do under strict, `U07` under relaxed (it returns `fiscal_year` beside the value, which strict
+  v3 penalises), and `M01` and `M02` abstained (the classifier's `OUT_OF_SCOPE`, and `LOW_AGREEMENT`), a
+  model-side outcome. That is **not met on the 7B**; the 30B and 32B pipeline runs are what to judge it on.
+
+**Limits, stated.** The clause rules and the registry were written with the dev rubric items in view and are
+tuned to what those ask; the dev figures are optimistic and the held-out set is where generality is measured
+(the generic fallback sentence and "no assumption stated" are the failures to count there). Some answers have
+no single assumption to state. The strict comparator still marks a right value wrong when the model returns
+`fiscal_year` beside it; that is the projection lever, separate from these tasks. The live figures are
+one model, one seed set (N=5), on the 19 development cases.
+
+**The judge, re-validated.** It returned empty replies once the machine was under memory pressure (Metal
+out-of-memory at the default context), so its context is now 1024 tokens (`JUDGE_NUM_CTX`). Re-run at that
+setting on the 20 constructed answers: **recall 0.60, precision 0.86** (0.70 and 0.875 at the default
+context), against 0.90 and 1.0 for the patterns on the same items (which were written beside them, so
+optimistic). The judge's weakness is why it decides only five items and why nothing in a headline depends on
+it yet; R07 and H06's reason (judge-decided) is also stated by the pattern, so those two agree.
+
+### 6. Open for MJ
+
+(a) Fill `evals/must_state_labels_blind.jsonl`; run `python -m evals.must_state agree`. (b) Amend H (protocol
+6a) before writing questions, or accept it. (c) Write the 80 questions from `evals/heldout_template.md`.
+(d) The GPU pipeline runs for Tasks 2 and 3 (30B and 32B): submit `run_qwen3_coder_30b_fp16.sbatch` and
+`run_qwen25_coder_32b_awq.sbatch` with `scripts/bridges2/submit.sh <commit>` as for the A/B (they now score
+against the frozen v3 gold); then `python -m evals.summarize_run reports/runs/<job> --judge`.
