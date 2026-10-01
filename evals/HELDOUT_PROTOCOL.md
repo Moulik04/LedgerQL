@@ -147,8 +147,9 @@ abstain metrics over the ABSTAIN cases.
 **Statistics.** Paired at the case level. For P1 and P2: the net number of cases gained minus
 lost, a 95% bootstrap CI over cases, and an exact sign test. A claim that linking *helps* needs
 the CI to exclude zero **and** the sign test below 0.05. Missing it is reported as "not shown",
-never as "no effect". No parameter or prompt is tuned on this set; a change made after seeing its
-results is exploratory and says so.
+never as "no effect". **P1 and P2 measure the linker's effect on held-out data; they do not choose
+H's configuration** (6a). No parameter or prompt is tuned on this set; a change made after seeing
+its results is exploratory and says so.
 
 **Power, stated plainly.** Paired binary outcomes and an exact sign test need at least six net
 discordant cases in one direction to reach p < 0.05. On the dev set the linker gained four cases
@@ -159,12 +160,40 @@ A result short of that is reported as "not shown".
 ### 6a. Pre-registered headline: which configuration becomes the README figures
 
 Fixed now, before any question exists, so the headline cannot be chosen after seeing results.
+Amended 2026-10-01 at MJ's request in two ways: H is pinned to code, and the linker setting is no
+longer chosen from held-out results.
 
-- **The headline configuration H**: the full pipeline (classify, N=5 generation, guard, vote,
-  verify, answer) with **Qwen3-Coder-30B-A3B fp16** on the pipeline's own `current` prompt,
-  `exec_error` repair **off**, the year verifier **on**, and entity linking **on if and only if
-  P1 and P2 both meet the "helps" criterion above, otherwise off**. The agree-policy table pairs
-  H's model with Qwen2.5-32B AWQ run the same way.
+- **The headline configuration H1** is declared in `evals/heldout_config.json`: the full pipeline
+  (classify, N=5 generation, guard, vote, verify, answer) with **Qwen3-Coder-30B-A3B fp16** on the
+  pipeline's own `current` prompt, `exec_error` repair **off**, the year verifier **on**. The
+  agree-policy table pairs it with **Qwen2.5-32B AWQ** run the same way; the 32B configuration is
+  the same commit, code tree, settings and linker decision.
+- **H is a code state, not a description.** "The full pipeline" means the code at commit
+  `97c69949a491d97146635c0dd45fd55d934f8a1c` and, precisely, the git tree hash of `ledgerql/`
+  (`95ad19d17eeac9debf36e48903d4d6371962373d`), which changes if and only if the pipeline code
+  changes. That includes `intent.py`, the NO_DATA rule and tautology check (`result_shape.py`,
+  `pipeline.py`), the abstain templates and registry (`refusal.py`, `known_gaps.json`),
+  `frame_answer` (`frame.py`) and the year verifier (`verify.py`). **Any later change under
+  `ledgerql/` is a new configuration** that needs its own declaration (a new entry with its own id;
+  declarations are never edited) before any held-out run. This is enforced, not trusted: a test
+  fails if `ledgerql/` differs from the active declaration, and `run_eval` and `gen_only_eval`
+  refuse any held-out run whose code tree or linker environment differs from it
+  (`evals/heldout_config.py`). The held-out file is added in a later commit than 97c6994, which is
+  fine: what is pinned is the pipeline code, by tree hash.
+- **The linker setting is decided from dev data and fixed before any held-out run.** It is **not**
+  conditional on P1 and P2: that would choose H's configuration from the held-out results and then
+  report H's headline on those same results, which is selection on the test set. Instead, the
+  dev A/B (gen-only, the DDL prompt, Qwen3-30B and XiYanSQL-32B, with and without `--entity-link`,
+  same seeds, scored against the frozen gold v3) decides it, by a rule fixed here **before that
+  run's results exist**: **linking is on iff Qwen3-30B's net pass@1 gain is at least +2 cases
+  (strict v3, the 50 `ANSWER` cases, N=5, the vote's pick, with minus without) and XiYanSQL-32B's
+  net pass@1 gain is not negative; otherwise off.** The decision and its reason are then recorded
+  in `heldout_config.json` (`entity_link.decision`, `entity_link.reason`) and in `DECISIONS.md`
+  before any held-out run; until they are, held-out runs are refused. Two limits to state with it:
+  the dev set is contaminated for the linker (it was built with those questions in view, which biases
+  toward on), and the dev A/B uses the DDL prompt while H uses the `current` prompt. P1 and P2 then
+  report, on held-out data, whether the linker helps; if they disagree with the dev decision, that
+  is reported, and H is not changed.
 - **The four headline figures**, each defined as in `evals/README.md` section 5 and computed by
   `evals/run_eval.py`, and reported once, from H, on this set:
   1. the **hallucinated-number rate including years**, with the year verifier on;
@@ -174,12 +203,13 @@ Fixed now, before any question exists, so the headline cannot be chosen after se
      answers, correct and confidently-wrong before and after, as in DECISIONS 2026-09-29.
   Beside them, always: execution accuracy and the assumption cases answered correctly *with
   the assumption stated*.
-- **Order.** Gen-only P1/P2 and the P3 cells first; then H is chosen by the rule above; then H
-  and the 32B pipeline run **once each**; then the figures are written into the README with this
-  set named as their source. The 103 dev cases keep their figures, labelled "development set".
+- **Order.** The dev A/B is read and the linker decision recorded; then the held-out set is frozen;
+  then gen-only P1/P2 and the P3 cells; then H and the 32B pipeline run **once each**; then the
+  figures are written into the README with this set named as their source. The 103 dev cases keep
+  their figures, labelled "development set".
 - **Any other configuration's** held-out numbers are exploratory and are labelled so. If H cannot
-  be run as specified, the reason and the replacement are written to the run log *before* the
-  replacement is run.
+  be run as specified, the reason and the replacement are declared (a new entry in
+  `heldout_config.json` and in the run log) *before* the replacement is run.
 
 ## 7. Run log
 
@@ -190,7 +220,7 @@ configuration is run once for its confirmatory comparison.
 ## 8. Decided
 
 1. **80 questions** (MJ, 2026-10-01).
-2. The pre-registered headline in 6a (added at MJ's request; the choice of H is Claude's proposal
-   and MJ may amend it **before** the questions are written).
+2. The pre-registered headline in 6a, amended by MJ: H pinned to a code tree, and the linker decided from
+   the dev A/B by a rule fixed before its results.
 3. Still open: whether an `informal` share of one quarter of the mention styles is right (3.2),
    and the four confirmatory comparisons in 6.

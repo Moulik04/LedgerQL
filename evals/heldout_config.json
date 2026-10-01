@@ -1,0 +1,43 @@
+[
+  {
+    "id": "H1",
+    "status": "active",
+    "declared": "2026-10-01",
+    "what": "The pipeline configuration whose held-out results become the README headline figures (evals/HELDOUT_PROTOCOL.md 6a).",
+    "code_commit": "97c69949a491d97146635c0dd45fd55d934f8a1c",
+    "ledgerql_tree": "95ad19d17eeac9debf36e48903d4d6371962373d",
+    "code_includes": [
+      "ledgerql/intent.py (the deterministic intent check)",
+      "ledgerql/result_shape.py and ledgerql/pipeline.py (the NO_DATA rule, the tautology check)",
+      "ledgerql/refusal.py and ledgerql/known_gaps.json (the abstain templates)",
+      "ledgerql/frame.py (frame_answer) and ledgerql/verify.py (the year verifier)",
+      "ledgerql/entity_link.py (present; used only if the decision below is on)"
+    ],
+    "models": {
+      "primary": "Qwen/Qwen3-Coder-30B-A3B-Instruct",
+      "policy_partner": "Qwen/Qwen2.5-Coder-32B-Instruct-AWQ"
+    },
+    "jobs": {
+      "primary": "scripts/bridges2/run_qwen3_coder_30b_fp16.sbatch",
+      "policy_partner": "scripts/bridges2/run_qwen25_coder_32b_awq.sbatch"
+    },
+    "settings": {
+      "prompt": "current (the pipeline's own)",
+      "candidates": 5,
+      "consensus_temperature": 0.7,
+      "seed": 42,
+      "exec_error_repair": "off",
+      "year_verifier": "on",
+      "low_agreement_threshold": 0.6,
+      "scored_against": "the frozen held-out gold (strict, gold v3 rules)"
+    },
+    "entity_link": {
+      "decision": null,
+      "decided_from": "dev A/B (gen-only, gold v3), never from held-out results",
+      "rule": "on iff, in the dev A/B, Qwen3-30B's net pass@1 gain is at least +2 cases (strict v3, the 50 ANSWER cases, N=5, the vote's pick, with minus without linking) AND XiYanSQL-32B's net pass@1 gain is not negative; otherwise off",
+      "reason": null,
+      "setting": "LEDGERQL_ENTITY_LINK=1 for on; unset for off"
+    },
+    "note": "The 32B configuration for the agree-policy table is the same commit, tree, settings and linker decision. A change under ledgerql/ is a new configuration: append a declaration with its own id; never edit this one."
+  }
+]

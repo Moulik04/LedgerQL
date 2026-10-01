@@ -313,20 +313,29 @@ smoke-tests first (unlinked, dev gold), then writes `gen_only_omnisql.jsonl` and
 (default: the frozen `evals/gold_v3.jsonl`).
 
 ```bash
-# on the laptop: commit, push, then
-git rev-parse HEAD                     # the full 40-character hash
-# on the login node:
-scripts/bridges2/submit.sh <full-40-char-commit> \
-    run_qwen3_coder_30b_entitylink.sbatch run_xiyansql_32b_entitylink.sbatch
+# on the login node. One command, four jobs, all pinned to 97c6994 (what origin/main is at):
+# the two entity-link A/B jobs and the 30B and 32B pipeline jobs for Tasks 2 and 3.
+scripts/bridges2/submit.sh 97c69949a491d97146635c0dd45fd55d934f8a1c \
+    run_qwen3_coder_30b_entitylink.sbatch run_xiyansql_32b_entitylink.sbatch \
+    run_qwen3_coder_30b_fp16.sbatch run_qwen25_coder_32b_awq.sbatch
 ```
+
+`submit.sh` pulls `origin/main` and asserts HEAD equals the hash, so **do not push anything to
+`main` between reading this and submitting**, or it refuses.
 
 Retrieve each job's directory (`run_meta.json` records the commit and `entity_link_ab`), then
-score it offline, per model:
+score it offline, per model, then apply the pre-registered linker rule:
 
 ```bash
-python -m evals.entity_link_eval --run-dir reports/runs/<jobid> --model qwen3_30b \
+python -m evals.entity_link_eval --run-dir reports/runs/<30b jobid> --model qwen3_30b \
     --pack-to reports/entity_link_ab_qwen3_30b.jsonl --write reports/entity_link_ab_qwen3_30b.md
+python -m evals.entity_link_eval --run-dir reports/runs/<xiyan jobid> --model xiyan_32b \
+    --pack-to reports/entity_link_ab_xiyan_32b.jsonl --write reports/entity_link_ab_xiyan_32b.md
+python -m evals.heldout_config          # applies the rule fixed in the protocol; prints on/off and why
 ```
+
+The decision and its reason are then recorded in `evals/heldout_config.json`, the protocol and
+`DECISIONS.md` in one commit, before any held-out run.
 
 **The held-out repeat.** Once `evals/heldout_v1.jsonl` and its `heldout_v1.sha256` are committed
 (`evals/HELDOUT_PROTOCOL.md` section 5), submit the same two jobs with

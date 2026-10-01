@@ -2239,3 +2239,50 @@ it yet; R07 and H06's reason (judge-decided) is also stated by the pattern, so t
 (d) The GPU pipeline runs for Tasks 2 and 3 (30B and 32B): submit `run_qwen3_coder_30b_fp16.sbatch` and
 `run_qwen25_coder_32b_awq.sbatch` with `scripts/bridges2/submit.sh <commit>` as for the A/B (they now score
 against the frozen v3 gold); then `python -m evals.summarize_run reports/runs/<job> --judge`.
+
+---
+
+## 2026-10-01 (later) — H is pinned to code, the linker is not chosen from held-out data, and the CI rule
+
+**MJ accepted** `frame_answer` as deterministic code and the year/date-label exception to "no numerals".
+
+**1. CI is part of "pushed".** CI was red for nine days because nobody read it. `CLAUDE.md` now carries
+StockUp's standing rule: after every push, check the Actions run for that commit and do not report
+"pushed" until it is green; a fresh clone of HEAD reproduces CI exactly, so run the suite there first.
+
+**2. H is pinned to one code state.** `evals/heldout_config.json` declares H1: commit
+`97c69949a491d97146635c0dd45fd55d934f8a1c` and the git tree hash of `ledgerql/`
+(`95ad19d17eeac9debf36e48903d4d6371962373d`), which includes `intent.py`, the NO_DATA rule and tautology
+check, the abstain templates and registry, `frame_answer` and the year verifier. The 32B configuration for
+the agree-policy table is the same commit, tree, settings and linker decision. Declarations are append-only;
+**any later change under `ledgerql/` is a new configuration** that needs its own declaration before any
+held-out run. This is enforced: a test fails if `ledgerql/` differs from the active declaration, and
+`run_eval` and `gen_only_eval` refuse a held-out run whose code tree or `LEDGERQL_ENTITY_LINK` differs
+from it. The held-out file arrives in a later commit than 97c6994; what is pinned is the pipeline code.
+
+**3. The conditional linker is removed.** "On iff P1 and P2 help" chose H's configuration from held-out
+results and then reported H's headline on the same results: selection on the test set. The linker setting
+is now decided from the **dev A/B** by a rule fixed before that run's results exist: *on iff Qwen3-30B's
+net pass@1 gain is at least +2 cases (strict v3, 50 `ANSWER` cases, N=5, the vote's pick) and
+XiYanSQL-32B's net gain is not negative; otherwise off.* `python -m evals.heldout_config` applies exactly
+that rule to the two A/B evidence files; the decision and its reason are then recorded in the declaration,
+the protocol and here, in one commit, before any held-out run (held-out runs are refused until they are).
+P1 and P2 only report the linker's effect on held-out data; if they disagree with the dev decision that is
+reported and H does not change. Two limits go with the decision: the dev set is contaminated for the linker
+(built with those questions in view, which biases toward on), and the A/B uses the DDL prompt while H uses
+`current`.
+
+**4. The entity-link jobs' code path is unchanged between `898d7b2` and `97c6994`.** Every file the
+gen-only job executes is byte-identical (`gen_only_eval.py`, `gen_prompts.py`, `entity_link.py`,
+`generate.py`, `guardrails.py`, `execute.py`, `consensus.py`, `schema_index.py`, `llm_backends.py`,
+`scoring.py`, the gold files, both entity-link sbatch files, `submit.sh`, `assert_commit.sh`,
+`pyproject.toml`, `uv.lock`); the only changed line in `run_model_eval.sh` is in the pipeline branch,
+which a gen-only job never takes. `gen_only_eval` imports `pipeline`, which did change, so it was also
+checked empirically at both commits in separate worktrees: the exact messages sent for the 50 `ANSWER`
+cases, linked and unlinked, hash identically (`8b739f0ab33fc553` over 100 prompts), as do the seed,
+temperature, N, max tokens, `pipeline._candidate_log` and `extract_sql`.
+
+**5. One submission command, on `97c6994`** (`docs/bridges2.md`): the two entity-link A/B jobs and the 30B
+and 32B pipeline jobs for Tasks 2 and 3, in a single `submit.sh` call. These amendments are committed
+locally and **not pushed**, so that `origin/main` stays at `97c6994` and `submit.sh` does not refuse; push
+after submitting, then check CI.

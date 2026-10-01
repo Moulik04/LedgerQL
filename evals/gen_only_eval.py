@@ -40,7 +40,7 @@ from pathlib import Path
 import duckdb
 import httpx
 
-from evals import gen_prompts, scoring
+from evals import gen_prompts, heldout_config, scoring
 from evals.gen_prompts import PROFILES, SchemaInfo
 from evals.passn_scoring import GOLD_PATH, compute_pass_at_n, load_jsonl
 from evals.scoring import case_matches
@@ -341,6 +341,9 @@ def main(argv: list[str] | None = None) -> int:
         ap.error("--model (or $OLLAMA_MODEL) is required")
 
     scoring.require_frozen(args.gold)
+    heldout_config.require_declared(
+        args.gold
+    )  # ... and unless the code is the declared configuration
     gold = load_jsonl(args.gold)
     cases = select_cases(gold, set(args.cases.split(",")) if args.cases else None)
     if args.smoke:
