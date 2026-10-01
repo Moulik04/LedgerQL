@@ -1,8 +1,12 @@
-"""Phase 1 acceptance tests: run `make data` first to build
-data/ledgerql.duckdb, then `make test` (or `pytest tests/test_data.py`)
-to verify it. Each figure below is hand-verified against the company's
+"""Phase 1 acceptance tests. Each figure below is hand-verified against the company's
 real 10-K filing — see docs/superpowers/plans/2026-09-02-phase1-data.md
 for the source accession numbers.
+
+They run against the tracked fixture `tests/fixtures/eval_fixture.duckdb`, which is the real
+mart (`companies`, `filings`, `financial_facts` and the four concept views, copied verbatim and
+row-for-row identical) without the raw staging tables, so CI can run them. To verify a build
+you made yourself instead, point them at it:
+`LEDGERQL_DB_PATH=data/ledgerql.duckdb pytest tests/test_data.py`.
 """
 
 import os
@@ -13,11 +17,9 @@ import pytest
 
 from tests.support import require_fixture
 
-# Mirror ledgerql/data/build.py's default-path resolution exactly, so these
-# acceptance tests verify whatever database `make data` actually built.
 DB_PATH = Path(
     os.environ.get(
-        "LEDGERQL_DB_PATH", str(Path(__file__).parent.parent / "data" / "ledgerql.duckdb")
+        "LEDGERQL_DB_PATH", str(Path(__file__).parent / "fixtures" / "eval_fixture.duckdb")
     )
 )
 
@@ -26,7 +28,7 @@ DB_PATH = Path(
 def con():
     # A missing database FAILS these tests (it used to skip them, which reported
     # green on a fresh clone without verifying a single figure).
-    require_fixture(DB_PATH, hint="Build it with `make data` first.")
+    require_fixture(DB_PATH, hint="Rebuild it with scripts/build_eval_fixture.py.")
     connection = duckdb.connect(str(DB_PATH), read_only=True)
     yield connection
     connection.close()

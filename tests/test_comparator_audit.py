@@ -106,7 +106,7 @@ def test_real_reports_are_scored_by_the_same_comparator_as_recorded():
     from evals.comparator_audit import gold_results, strict_matches_recorded
 
     cases = {c["id"]: c for c in load_jsonl(require_fixture("evals/gold.jsonl"))}
-    gold = gold_results(cases, str(require_fixture("data/ledgerql.duckdb")))
+    gold = gold_results(cases, str(require_fixture("tests/fixtures/eval_fixture.duckdb")))
     for model in ("qwen3_30b", "qwen25_32b"):
         per_case = load_jsonl(
             require_fixture(Path(f"reports/eval_bridges2_{model}_measured.jsonl"))

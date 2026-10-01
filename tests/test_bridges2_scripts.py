@@ -276,7 +276,7 @@ def test_each_bakeoff_job_sets_a_context_length_that_fits_its_longest_prompt(job
     from ledgerql import schema_index
     from tests.support import require_fixture
 
-    db = str(require_fixture("data/ledgerql.duckdb"))
+    db = str(require_fixture("tests/fixtures/eval_fixture.duckdb"))
     schema, context = gen_prompts.introspect(db), schema_index.get_schema_context()
     chars = max(
         len(m["content"])

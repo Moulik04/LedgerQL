@@ -15,7 +15,7 @@ from evals.signal_precheck import (
 from tests.support import require_fixture
 
 REPORTS = Path("reports")
-DB = Path("data/ledgerql.duckdb")
+DB = Path("tests/fixtures/eval_fixture.duckdb")  # the real mart, tracked (row-identical)
 GOLD = Path("evals/gold.jsonl")
 
 
