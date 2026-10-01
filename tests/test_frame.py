@@ -181,3 +181,28 @@ def test_a_missing_database_yields_only_what_the_sql_and_question_support():
 def test_a_query_the_framer_cannot_parse_gets_no_framing_not_a_crash():
     f = F.frame_answer("q", "this is not sql (", F.ResultShape([], 0), db_path=DB)
     assert f.text == "" and not f.assumed
+
+
+def test_a_ranking_by_an_aggregate_of_value_under_an_alias_still_says_which_metric_and_which_years():
+    sql = (
+        "SELECT c.name, c.ticker, MAX(f.value) AS max_value FROM companies AS c "
+        "JOIN v_total_assets AS f ON c.cik = f.cik GROUP BY c.name, c.ticker "
+        "ORDER BY max_value DESC LIMIT 1"
+    )
+    f = F.frame_answer(
+        "Which is the biggest company in the database?", sql, F.ResultShape([], 1), db_path=DB
+    )
+    assert f.assumed
+    assert "'Biggest' was measured by total assets" in f.text
+    assert "All fiscal years on record were considered." in f.text
+
+
+def test_a_ranking_that_names_its_metric_adds_no_metric_clause():
+    sql = "SELECT name FROM v_revenue WHERE fiscal_year=2024 ORDER BY value DESC LIMIT 10"
+    f = F.frame_answer(
+        "Which 10 companies had the highest revenue in fiscal year 2024?",
+        sql,
+        F.ResultShape([], 10),
+        db_path=DB,
+    )
+    assert "measured by" not in f.text

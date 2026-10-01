@@ -137,18 +137,24 @@ def _facts(sql: str) -> _Facts | None:
                     fy.append(int(float(v.this)))
     latest = any(_col(m.this, "fiscal_year") for m in tree.find_all(exp.Max))
     ranks = False
+    top = tree.find(exp.Select)
+    projections = list(top.expressions) if top is not None else []
+    # Output names that are (an aggregate of) the `value` column: `MAX(value) AS max_value`.
+    value_aliases = {
+        p.alias.lower()
+        for p in projections
+        if p.alias and any(_col(c, "value") for c in p.find_all(exp.Column))
+    }
     for order in tree.find_all(exp.Order):
         for key in order.expressions:
             inner = key.this if isinstance(key, exp.Ordered) else key
             desc = bool(isinstance(key, exp.Ordered) and key.args.get("desc"))
             if desc and _col(inner, "fiscal_year"):
                 latest = True
-            if (
-                desc
-                and (_col(inner, "value") or isinstance(inner, exp.Column))
-                and not _col(inner, "fiscal_year")
-            ):
-                ranks = ranks or _col(inner, "value")
+            elif desc and isinstance(inner, exp.Column):
+                ranks = (
+                    ranks or inner.name.lower() == "value" or inner.name.lower() in value_aliases
+                )
     tickers = list(_TICKER_EQ.findall(sql))
     for group in _TICKER_IN.findall(sql):
         tickers += re.findall(r"'([^']+)'", group)
@@ -158,8 +164,6 @@ def _facts(sql: str) -> _Facts | None:
         if isinstance(right, exp.Literal) and not right.is_string:
             if float(right.this) in (1e9, 1e6):
                 scale = float(right.this)
-    top = tree.find(exp.Select)
-    projections = list(top.expressions) if top is not None else []
     return _Facts(
         views=views,
         uses_filings=uses_filings,
@@ -340,6 +344,9 @@ def frame_answer(
                     True,
                 )
             )
+
+    if facts.ranks and view and not tickers and not facts.fy_literals and not facts.latest:
+        clauses.append(Clause("period", "All fiscal years on record were considered.", True))
 
     # --- a stated scale, and the raw unit ---------------------------------------------------
     if facts.scale is not None:
