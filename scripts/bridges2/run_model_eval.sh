@@ -72,6 +72,23 @@ mkdir -p "$HF_HOME"
 # four jobs overwrite each other (a failed job's server log was unrecoverable).
 VLLM_OUT="vllm_server_${SLURM_JOB_ID:-manual}.out"
 VLLM_ERR="vllm_server_${SLURM_JOB_ID:-manual}.err"
+# Jobs share nodes (GPU-shared partition), and every job used to serve on one fixed port. Two jobs on one
+# node then talk to each other's server: 47314850's smoke requests were answered by 47314848's
+# server (404, wrong model), and 47314853's own server failed to bind and it ran against another
+# job's server until that job exited, leaving 27 of 103 records as "connection refused". So each
+# job picks a port nothing is listening on, and checks below that the server it reaches is its own.
+pick_free_port() {
+    python3 - <<'PY'
+import socket
+
+s = socket.socket()
+s.bind(("0.0.0.0", 0))
+print(s.getsockname()[1])
+s.close()
+PY
+}
+PORT=$(pick_free_port)
+export VLLM_PORT="$PORT"
 echo "Starting vllm serve for $REPO_ID (tensor-parallel-size=$TP_SIZE)..."
 echo "First run downloads the checkpoint into \$LOCAL ($LOCAL) -- this can take a while on top of model-load time."
 # --max-model-len caps KV cache reservation. Found for real: Qwen3-Coder's
@@ -84,7 +101,7 @@ echo "First run downloads the checkpoint into \$LOCAL ($LOCAL) -- this can take 
 # MAX_MODEL_LEN overrides the 8192 default; the generation-only bake-off jobs set
 # it per job, sized from their longest prompt (see the *_genonly.sbatch files).
 "$VLLM_PYTHON/vllm" serve "$REPO_ID" \
-    --port 8000 \
+    --port "$PORT" \
     --tensor-parallel-size "$TP_SIZE" \
     --max-model-len "${MAX_MODEL_LEN:-8192}" \
     ${VLLM_EXTRA_ARGS:-} \
@@ -104,7 +121,7 @@ for i in $(seq 1 360); do
         cat "$VLLM_ERR" >&2 || true
         exit 1
     fi
-    if curl -sf http://localhost:8000/health >/dev/null 2>&1; then
+    if curl -sf http://localhost:$PORT/health >/dev/null 2>&1; then
         echo "vllm is ready."
         break
     fi
@@ -119,6 +136,14 @@ for i in $(seq 1 360); do
     fi
     sleep 5
 done
+
+# The server on this port must be this job's own model. /health only says *something* is serving.
+if ! curl -sf "http://localhost:$PORT/v1/models" | grep -q "\"$REPO_ID\""; then
+    echo "STOP: the server on port $PORT does not serve $REPO_ID. Models it reports:" >&2
+    curl -s "http://localhost:$PORT/v1/models" >&2 || true
+    exit 1
+fi
+echo "Confirmed: port $PORT serves $REPO_ID."
 
 echo "Confirming GPU(s) are actually being used (not silently falling back to CPU)..."
 nvidia-smi --query-gpu=index,name,memory.used,memory.total --format=csv
@@ -139,7 +164,7 @@ if [ "${EVAL_MODE:-pipeline}" = "gen_only" ]; then
     FIRST_PROFILE="${PROFILES%% *}"
     echo "Smoke test: profile $FIRST_PROFILE, 3 cases x 2 candidates ..."
     uv run python -m evals.gen_only_eval --profile "$FIRST_PROFILE" --model "$REPO_ID" \
-        --host http://localhost:8000 --db data/ledgerql.duckdb --out "$OUT/smoke" \
+        --host http://localhost:$PORT --db data/ledgerql.duckdb --out "$OUT/smoke" \
         --smoke 3 --n 2 | tee "$OUT/smoke.log" || smoke_status=${PIPESTATUS[0]}
     if [ "${smoke_status:-0}" -ne 0 ]; then
         echo "Smoke test FAILED (exit $smoke_status). vllm server log tail ($VLLM_ERR):" >&2
@@ -155,20 +180,21 @@ if [ "${EVAL_MODE:-pipeline}" = "gen_only" ]; then
         for profile in $PROFILES; do
             echo "Generation-only eval: profile $profile ..."
             uv run python -m evals.gen_only_eval --profile "$profile" --model "$REPO_ID" \
-                --host http://localhost:8000 --db data/ledgerql.duckdb --out "$OUT" --gold "$GOLD_FILE"
+                --host http://localhost:$PORT --db data/ledgerql.duckdb --out "$OUT" --gold "$GOLD_FILE"
             if [ -n "${ENTITY_LINK_AB:-}" ]; then
                 # Entity-linking A/B: the same server session, the same seeds, the same
                 # cases, only the resolved-companies hint differs.
                 echo "Generation-only eval: profile $profile, WITH --entity-link ..."
                 uv run python -m evals.gen_only_eval --profile "$profile" --model "$REPO_ID" \
-                    --host http://localhost:8000 --db data/ledgerql.duckdb --out "$OUT" --gold "$GOLD_FILE" \
+                    --host http://localhost:$PORT --db data/ledgerql.duckdb --out "$OUT" --gold "$GOLD_FILE" \
                     --entity-link
             fi
         done
     fi
 else
     echo "Running eval with LLM_BACKEND=vllm OLLAMA_MODEL=$REPO_ID -> $OUT ..."
-    LLM_BACKEND=vllm OLLAMA_MODEL="$REPO_ID" uv run python evals/run_eval.py --db data/ledgerql.duckdb --reports-dir "$OUT" \
+    VLLM_HOST="http://localhost:$PORT" LLM_BACKEND=vllm OLLAMA_MODEL="$REPO_ID" \
+        uv run python evals/run_eval.py --db data/ledgerql.duckdb --reports-dir "$OUT" \
         --gold "${GOLD_FILE:-evals/gold_v3.jsonl}"
 fi
 
@@ -179,6 +205,7 @@ cat > "$OUT/run_meta.json" <<META
   "expected_commit": "$EXPECTED_COMMIT",
   "model": "$REPO_ID",
   "eval_mode": "${EVAL_MODE:-pipeline}",
+  "vllm_port": "${PORT:-}",
   "profiles": "${PROFILES:-}",
   "entity_link_ab": "${ENTITY_LINK_AB:-}",
   "gold_file": "${GOLD_FILE:-}",

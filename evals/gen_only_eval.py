@@ -22,8 +22,9 @@ threshold, so it is not comparable to a full-pipeline execution accuracy.
 
 `--smoke K` runs only K cases (the first ANSWER case of each of the first K
 tiers), prints what the model said and what became of it, and exits 3 unless all
-but at most one of them produced an executing candidate with rows: a cheap check
-that the model loads, fits, and emits SQL before the full run spends hours.
+but at most one of them produced a candidate that parses and executes (zero rows
+allowed): a cheap check that the server responds and the model emits runnable SQL
+before the full run spends hours.
 """
 
 from __future__ import annotations
@@ -119,18 +120,26 @@ def smoke_cases(cases: list[dict], k: int) -> list[dict]:
     return picked
 
 
-def _executed_with_rows(record: dict) -> bool:
+def _executed(record: dict) -> bool:
+    """A candidate the model really wrote that parsed, passed the guard and executed. Zero rows is
+    allowed: a wrong entity name literal executes and returns nothing, which is exactly the
+    failure entity linking targets, so it cannot fail the gate that decides whether to run a
+    linked-versus-unlinked comparison. A call error (HTTP status, timeout) is not a candidate."""
     return any(
-        c["guard_ok"] and c["exec_error"] is None and (c["n_rows"] or 0) > 0
+        c["guard_ok"]
+        and c["exec_error"] is None
+        and c["n_rows"] is not None
+        and not str(c.get("finish_reason")).startswith("error:")
         for c in record["candidates"]
     )
 
 
 def smoke_ok(records: list[dict]) -> bool:
-    """All but at most one smoke case produced an executing candidate with rows
-    (a single-case smoke tolerates nothing)."""
+    """All but at most one smoke case has a candidate that parses and executes (a single-case
+    smoke tolerates nothing). The gate answers "does the server respond and do candidates parse
+    and run?", not "are they right": correctness is what the full run measures."""
     need = len(records) - 1 if len(records) >= 2 else 1
-    return sum(_executed_with_rows(r) for r in records) >= need
+    return sum(_executed(r) for r in records) >= need
 
 
 def _safe_generate(generate_fn, messages: list[dict], seed: int) -> Generation:

@@ -2286,3 +2286,121 @@ temperature, N, max tokens, `pipeline._candidate_log` and `extract_sql`.
 and 32B pipeline jobs for Tasks 2 and 3, in a single `submit.sh` call. These amendments are committed
 locally and **not pushed**, so that `origin/main` stays at `97c6994` and `submit.sh` does not refuse; push
 after submitting, then check CI.
+
+---
+
+## 2026-10-02 — First cluster results: shared nodes, a partial run, a measurement bug, and Task 2/3 acceptance
+
+Results from `ledgerql_ab_pipeline_2026-10-01.tgz` (jobs 47314848, 47314850, 47314853, 47314855, all
+commit `97c6994`). The linker rule has **not** been applied: it needs XiYan's result and has no fallback
+for a missing one, and nothing in this entry reads either A/B result. The 30B A/B evidence was packed
+(`reports/entity_link_ab_qwen3_30b.jsonl`) without being scored.
+
+### 1. Verification
+
+| job | role | sacct | verified |
+|---|---|---|---|
+| 47314848 | 30B entity-link A/B | COMPLETED 7:47 | **valid**: 50 records per condition, 250 candidates each, every finish `stop`, same case order, 29 of 50 linked records carry a hint, commit `97c6994`, smoke passed |
+| 47314850 | XiYan entity-link A/B | FAILED 3:0 at 3:54 | smoke gate, **no results** (see 2) |
+| 47314853 | 30B pipeline | COMPLETED 3:45 | **PARTIAL**: 103 records but 27 are `Connection refused` (see 2) |
+| 47314855 | 32B pipeline | COMPLETED 6:09 | **valid**: 103 records, own server, 599 requests all `200 OK`, no infrastructure errors |
+
+**The 30B pipeline run was fast because it was partial**, as suspected. Its 27 failed records are the
+last 27 of 103 in gold order (`O07`, `O08`, `S07` to `S11`, `H01` to `H08`, `G01` to `G06`, `C01` to
+`C06`): 11 `ANSWER`, 3 assumption (`H06`, `G04`, `G05`) and 13 `ABSTAIN` cases. Its figures cover the other 76.
+
+### 2. Diagnosis: not the zero-row gate. A port collision.
+
+**The hypothesis does not hold for XiYan.** The smoke candidates did not return zero rows: all six
+requests got `HTTP 404`, `The model XGenerationLab/XiYanSQL-QwenCoder-32B-2504 does not exist`. XiYan's
+own vLLM server logged **zero** requests, and the 30B job's server (pid 19303) logged exactly six `404 Not
+Found` at 12:37:40, which are XiYan's six smoke requests. Both jobs were on one node and every job served
+on port 8000, so XiYan's client reached the 30B's server. Its `/health` check passed for the same reason
+(`vllm is ready` was the other job's server). The 30B pipeline job hit the same collision from the other
+side: its server failed with `OSError: [Errno 98] Address already in use`, it ran against 47314848's server
+(about 460 of that server's 968 requests are its traffic), and when 47314848 finished at 12:41:34 the
+remaining records were `Connection refused`. The 32B job started after 47314848 ended and was alone.
+
+**Fix (infrastructure only; `ledgerql/` is untouched, so H1's tree is unchanged):** each job picks a free
+port, and checks before any request that the server on it lists its own model, stopping otherwise;
+`run_eval` counts infrastructure failures per record and exits 4, so a partial run is FAILED in `sacct`.
+Tests pin all three (`test_bridges2_scripts.py`, `test_run_eval.py`).
+
+**The smoke gate change, made on different evidence, disclosed as such.** I also changed the gate to
+accept a candidate that parses and executes with zero rows (a call error, an unparseable candidate or an
+execution error still fail it). XiYan's failure did not come from the gate, but the OmniSQL lens you asked
+for does: see 3. The gate answers "does the server respond and do candidates run?", which is what a
+smoke test is for, and a wrong entity literal returning nothing is exactly what the linker A/B measures.
+It lives in the harness (`evals/gen_only_eval.py`), not `ledgerql/`; revert it if you disagree.
+
+### 3. OmniSQL, re-read: the record is corrected, and one hypothesis is open
+
+*Second attempt (47275443): the gate caused it.* Its three smoke cases, as recorded: `L01` both candidates
+executed and returned zero rows (`name = 'Apple'`); `A01` both failed to bind (invented `qtrs`, `tag`);
+`J01` one correct candidate, one invented `fiscal_year`. Under the old gate (needs rows) that is 1 of 3, a
+failure; under the corrected gate it is **2 of 3, a pass** (`L01` and `J01` pass, `A01` does not).
+So the DECISIONS entry that says the gate "worked as a quality filter" is **wrong as stated**: it stopped
+a model on a rule about rows, not quality. What remains true is genuine: `A01`'s two candidates both
+invented columns, which is quality evidence, and it is why the model was not obviously worth the
+allocation. The model was never run; whether it deserves a run is still open.
+
+*First attempt (47274010): probably also a port collision, unconfirmable.* Every one of its six smoke
+requests was an HTTP error and the server log was overwritten before the status was kept. It ran at
+18:53 local while the XiYan and 32B bake-off jobs were still running (they finished 18:55 and 18:59), so
+the same mechanism fits: its `/health` passed and its GPU was loaded, yet it never got a reply from its
+own server. It cannot be proven now.
+
+### 4. A measurement bug in my own evaluator, found while reading the results, and fixed
+
+The 30B pipeline run's own report says **14.3%** hallucinated-number rate; the 32B's says 6.8%. Both are
+wrong. `run_eval`'s metric verified each answer without the year and day labels the framing states, so it
+counted "fiscal year 2025 (period ended June 30, 2025)" as invented numbers (every flagged case was a
+framing label). The pipeline had verified the same text correctly. `run_eval` now recomputes the framing
+(a pure function of the question, the winning SQL and the result shape) and verifies as the pipeline did
+(`verify_as_pipeline`), and `summarize_run` recomputes the figure from recorded answers. Recomputed, both
+runs are **0.0%** (0 of 42 and 0 of 44 answered). **The run reports' 14.3% and 6.8% should not be quoted.**
+This would have corrupted held-out headline figure 1, and is fixed in `evals/`, so H1's tree is unchanged.
+A year the writer invents is still flagged (tested).
+
+### 5. Task 2/3 acceptance (linker off in both runs; strict gold v3; `reports/pipeline_acceptance.md`)
+
+| | 30B (47314853, **76 of 103 records**) | 32B (47314855, all 103) |
+|---|---|---|
+| states emitted | ANSWER 32, ASSUMPTION 10, ABSTAIN 34 | 38, 6, 59 |
+| hallucinated-number rate incl. years | **0.0%** (0/42) | **0.0%** (0/44) |
+| execution accuracy, `ANSWER` cases that ran | 22/39 strict (29/39 relaxed) | 29/50 strict (37/50 relaxed) |
+| confidently wrong / answered | 12/42 | 15/44 |
+| coverage, answered / answerable | 41/55 | 41/69 |
+| **assumption cases answered correctly with the assumption stated** (baseline 0 of 19) | **8 of the 16 that ran** (answered correctly 9; 0 not stated) | **1 of 19** |
+| same, framing text removed from the same records | 0 | 0 |
+| abstained / reason stated | 4 / 1 | 12 / 2 |
+
+- *Task 2.* All three states are emitted; the 3x3 matrix has mass in the middle row and column on both
+  (30B: 10 `ASSUMPTION`-observed; 32B: 6). **The six named cases do not all score 1.0.** The 30B scores
+  `M06`, `M08`, `U02`, `U07`; `M01` returns the whole series (both years) where the gold wants the latest
+  value, a real failure, and the framing correctly states nothing because no period was assumed; `M02`
+  scores 0 but see below. The 32B scores only `U02`: `M06` and `M08` return the right value with extra
+  columns (`ticker, fiscal_year, value`), which strict v3 rejects and relaxed accepts; `M01` returns the
+  series; `U07` abstained. **`M02` is a gold limit:** both models answer by total assets and, with the
+  framing, state "'Biggest' was measured by total assets", which is exactly the alternative the gold's own
+  `accept_alternatives` accepts ("using total_assets instead, if stated"), but the comparator encodes only
+  the revenue answer and gold is frozen, so it scores 0 (listed in `KNOWN_GOLD_ISSUES.md`). Crediting it by
+  the gold's own text would make the 30B 5 of 6 and the 32B 2 of 6. **Not met on either model.**
+- *Task 3.* The hallucinated-number rate stays 0.0%. The rubric pass rate rises on the named tiers
+  (records stating every item, baseline run then this run, same cases): `unit_period` 1/6 to 5/6 (30B) and 1/6
+  to 4/6 (32B); `ambiguous` 0/5 to 3/5 and 1/5 to 2/5; `schema_bait` 0/3 to 3/3 on the 32B (the 30B's three
+  fell in the lost records). The 32B's `ambiguous` gain is one case. The ablation (0 stated without the
+  framing) is the control. **Met on both, modestly for the 32B's `ambiguous` tier.**
+- *Why the 32B scores so low* is not the framing: it abstains on 12 of 19 assumption cases (`NO_DATA` 7,
+  `LOW_AGREEMENT` 4, `EXEC_ERROR` 1) and returns extra columns on `M06`/`M08`. The framing produces a
+  statement whenever there is an answer to attach it to.
+- *Limits.* The 30B figures are on 76 records (3 assumption cases, `H06`, `G04` and `G05`, were lost) and
+  must be re-run for a complete result. The judge decides only five items (recall 0.60, precision 0.86 on
+  constructed answers). The registry and clause rules were written with these dev items in view, so the
+  dev numbers are optimistic; held-out data is where they are measured.
+
+### 6. Resubmission
+
+The XiYan entity-link job is resubmitted alone; the 30B pipeline needs a rerun too (a complete run is
+what a headline figure needs). Commands are given once the fix is pushed and CI is green. The harness
+change does not touch generation, so the XiYan A/B stays comparable to the 30B's.

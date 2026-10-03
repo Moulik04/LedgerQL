@@ -342,3 +342,53 @@ def test_the_pipeline_job_scores_against_the_frozen_gold_unless_told_otherwise()
     start = text.index("uv run python evals/run_eval.py")
     command = text[start : text.index("\nfi", start)]  # the invocation, with its continuation
     assert '--gold "${GOLD_FILE:-evals/gold_v3.jsonl}"' in command
+
+
+def test_the_job_body_never_hard_codes_port_8000_because_jobs_share_nodes():
+    """Jobs 47314848 and 47314850 ran on one node: XiYan's smoke requests were answered by the
+    30B's server (404, wrong model) and the 30B pipeline job's own server failed to bind
+    ("Address already in use") and ran against another job's server until it exited."""
+    text = (SCRIPTS / "run_model_eval.sh").read_text()
+    assert "8000" not in text
+    assert "$PORT" in text
+    assert '--port "$PORT"' in text
+    assert "http://localhost:$PORT" in text
+
+
+def test_the_job_picks_a_free_port_and_checks_the_server_it_reaches_is_its_own_model():
+    text = (SCRIPTS / "run_model_eval.sh").read_text()
+    assert "pick_free_port" in text
+    probe = text.index("PORT=$(pick_free_port")
+    serve = text.index('"$VLLM_PYTHON/vllm" serve')
+    assert probe < serve  # the port is chosen before the server is started
+    ready = text.index("vllm is ready.")
+    identity = text.index("/v1/models")
+    smoke = text.index("--smoke")
+    assert ready < identity < smoke  # identity is checked after readiness and before any request
+    assert (
+        '"$REPO_ID"' in text[identity : identity + 300]
+        or "$REPO_ID" in text[identity : identity + 300]
+    )
+    assert "exit 1" in text[identity : identity + 700]  # a mismatch stops the job
+
+
+def test_the_pipeline_job_exports_the_chosen_port_to_the_pipeline_client():
+    text = (SCRIPTS / "run_model_eval.sh").read_text()
+    start = text.index("uv run python evals/run_eval.py")
+    assert 'VLLM_HOST="http://localhost:$PORT"' in text[start - 200 : start + 50]
+
+
+def test_pick_free_port_returns_a_bindable_port_and_two_calls_can_differ(tmp_path):
+    import re
+    import socket
+
+    text = (SCRIPTS / "run_model_eval.sh").read_text()
+    fn = re.search(r"pick_free_port\(\) \{.*?\n\}", text, re.S).group(0)
+    script = tmp_path / "t.sh"
+    script.write_text(fn + "\npick_free_port\n")
+    out = subprocess.run(["bash", str(script)], capture_output=True, text=True, check=True)
+    port = int(out.stdout.strip())
+    assert 1024 < port < 65536
+    s = socket.socket()
+    s.bind(("0.0.0.0", port))  # it really is free
+    s.close()

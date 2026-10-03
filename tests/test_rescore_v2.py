@@ -146,3 +146,15 @@ def test_an_old_abstain_record_with_no_refusal_text_gets_the_deterministic_one_r
     assert R.assumption_split([score])["v3"]["abstained_reason_stated"] == 1
     (none,) = R.score_report([rec], gold)  # without a judge the judge-primary item is not assessed
     assert none.rubric_pass is None
+
+
+def test_a_baseline_run_does_not_get_the_new_refusal_text_replayed_onto_its_abstains(gold):
+    rec = {
+        "id": "R07", "tier": "ratio", "expected": "ANSWER_WITH_ASSUMPTION", "answer": None,
+        "reason_code": "NO_DATA", "rows": None, "execution_error": None,
+    }  # fmt: skip
+    yes = lambda q, a, t: True  # noqa: E731 - R07's item is judge-decided
+    (replayed,) = R.score_report([rec], gold, judge=yes)
+    assert replayed.rubric_pass is True  # the registry's sentence states the documented gap
+    (baseline,) = R.score_report([rec], gold, judge=yes, replay_refusal=False)
+    assert baseline.rubric_pass is None  # an old abstain had no text, so there is nothing to grade

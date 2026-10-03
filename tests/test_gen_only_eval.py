@@ -174,13 +174,41 @@ def test_smoke_takes_the_first_answer_case_of_each_of_the_first_k_tiers():
     assert [c["id"] for c in smoke_cases(select_cases(CASES), 1)] == ["A1"]
 
 
-def test_smoke_passes_when_all_but_at_most_one_case_execute_and_return_rows():
-    ok = {"candidates": [{"guard_ok": True, "exec_error": None, "n_rows": 1}]}
-    bad = {"candidates": [{"guard_ok": False, "exec_error": None, "n_rows": None}]}
+def _cand(**kw):
+    base = {"guard_ok": True, "exec_error": None, "n_rows": 1, "finish_reason": "stop"}
+    return {"candidates": [{**base, **kw}]}
+
+
+def test_smoke_passes_when_all_but_at_most_one_case_has_a_candidate_that_parses_and_executes():
+    ok = _cand()
+    bad = _cand(guard_ok=False, n_rows=None)
     assert smoke_ok([ok, ok, ok])
     assert smoke_ok([ok, ok, bad])
     assert not smoke_ok([ok, bad, bad])
     assert not smoke_ok([bad])  # k=1 tolerates nothing
+
+
+def test_the_smoke_gate_allows_a_candidate_that_executes_and_returns_no_rows():
+    """A wrong entity literal (`name = 'Apple'`, stored `Apple Inc.`) executes and returns
+    nothing. That is the failure entity linking exists to fix, so the gate, which only asks
+    whether the server responds and candidates parse and run, must not reject it."""
+    zero = _cand(n_rows=0)
+    assert smoke_ok([zero, zero, zero])
+    assert smoke_ok([zero, zero, _cand(guard_ok=False, n_rows=None)])
+
+
+def test_the_smoke_gate_still_rejects_errors_whatever_their_kind():
+    sql_error = _cand(exec_error="Binder Error: no such column", n_rows=None)
+    http_error = _cand(guard_ok=False, n_rows=None, finish_reason="error:HTTPStatusError:404")
+    unparsed = _cand(guard_ok=False, n_rows=None)
+    ok = _cand()
+    for bad in (sql_error, http_error, unparsed):
+        assert not smoke_ok([ok, bad, bad])
+        assert smoke_ok([ok, ok, bad])  # one failing case is still tolerated
+    # a call error is never an executing candidate, even if something downstream looked fine
+    assert not smoke_ok(
+        [ok, _cand(finish_reason="error:ReadTimeout"), _cand(finish_reason="error:ReadTimeout")]
+    )
 
 
 def test_http_generator_posts_the_chat_payload_and_returns_text_and_finish_reason():

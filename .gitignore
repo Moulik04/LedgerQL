@@ -63,6 +63,7 @@ reports/runs/
 !reports/entity_link_ab_*.md
 !reports/must_state_*.md
 !reports/refusal_replay.md
+!reports/pipeline_acceptance.md
 !reports/live7b_*
 !reports/frame_replay.md
 !reports/refusal_7b.md

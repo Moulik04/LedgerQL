@@ -342,3 +342,18 @@ The decision and its reason are then recorded in `evals/heldout_config.json`, th
 `GOLD_FILE=evals/heldout_v1.jsonl` in the environment of `submit.sh`. `run_model_eval.sh` passes
 it to `gen_only_eval --gold`, which refuses a held-out file that is missing its pin or does not
 match it, so no model can run on the set before the freeze.
+
+## Jobs share nodes: ports, identity, and incomplete runs (2026-10-02)
+
+The GPU-shared partition puts several jobs on one node, and every job used to serve vLLM on port 8000.
+First submission of the entity-link A/B and pipeline jobs (47314848, 47314850, 47314853, 47314855), as
+read from their logs: 47314850's smoke requests were answered by 47314848's server (six `404 Not Found`,
+"model XGenerationLab/XiYanSQL-QwenCoder-32B-2504 does not exist"), so its smoke gate failed;
+47314853's own server failed to bind (`Address already in use`) and the job ran against 47314848's server
+until that job ended, leaving 27 of 103 records as `Connection refused`, and still reported COMPLETED.
+
+Now: each job picks a free port (`pick_free_port`), exports it (`VLLM_PORT`, `VLLM_HOST` for the
+pipeline client), and, before any request, checks that `/v1/models` on that port lists its own model
+and stops if not. `run_eval` counts records that failed for infrastructure reasons (connection refused,
+HTTP errors) and **exits 4**, so a partial run shows as FAILED in `sacct`, not COMPLETED. `run_meta.json`
+records the port. A pipeline run's figures are valid only if it exited 0.

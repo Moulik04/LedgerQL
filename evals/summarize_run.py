@@ -17,9 +17,10 @@ import json
 from collections import Counter
 from pathlib import Path
 
-from evals import must_state
+from evals import must_state, run_eval
 from evals import rescore_v2 as R
 from ledgerql import frame as frame_module
+from ledgerql import refusal as refusal_module
 
 DEFAULT_DB = "data/ledgerql.duckdb"
 
@@ -49,6 +50,109 @@ def ablate_frame(records: list[dict], questions: dict[str, str], db_path: str) -
     return out
 
 
+def recompute_hallucination(records: list[dict], questions: dict[str, str], db_path: str) -> dict:
+    """The hallucinated-number rate recomputed from recorded answers, verified exactly as the
+    pipeline verified them (the framing's year and day labels as context). A run made before
+    `run_eval` did this carries a flag that counts those labels as invented numbers."""
+    answered, flagged = 0, []
+    for rec in records:
+        if not rec.get("answer"):
+            continue
+        answered += 1
+        verdict = run_eval.verify_as_pipeline(
+            rec["answer"],
+            rec.get("columns") or [],
+            [tuple(r) for r in (rec.get("rows") or [])],
+            rec.get("generated_sql") or rec.get("sql"),
+            questions.get(rec["id"], ""),
+            db_path,
+        )
+        if not verdict.ok:
+            flagged.append(rec["id"])
+    return {
+        "answered": answered,
+        "flagged": flagged,
+        "rate": len(flagged) / answered if answered else 0.0,
+    }
+
+
+ACCEPTANCE_IDS = ("M01", "M02", "M06", "M08", "U02", "U07")  # PHASE_5_5_MASTER_PROMPT.md Task 2
+
+
+def rubric_rows(
+    records: list[dict],
+    questions: dict[str, str],
+    db_path: str,
+    judge=None,
+    replay_refusal: bool = True,
+) -> list[dict]:
+    """One row per record on a case that has `answer_must_state` items, abstain-expected cases
+    included: its tier and whether its text states every item (True, False, or None if it could not
+    be graded). `replay_refusal=False` grades a run that predates abstain explanations as it was,
+    with no refusal text to grade."""
+    items = must_state.load_patterns()
+    gold = R.load_gold("v3")
+    rows = []
+    for rec in records:
+        if rec["id"] not in items:
+            continue
+        refusal = rec.get("refusal")
+        if (
+            refusal is None
+            and replay_refusal
+            and rec.get("answer") is None
+            and rec.get("reason_code")
+        ):
+            refusal = refusal_module.explain(
+                rec["reason_code"], questions[rec["id"]], db_path=db_path
+            ).text
+        graded = must_state.grade_case(
+            items[rec["id"]], rec.get("answer"), refusal, judge, questions[rec["id"]]
+        )
+        rows.append(
+            {
+                "id": rec["id"],
+                "tier": gold[rec["id"]]["tier"],
+                "rubric_pass": must_state.stated(graded),
+            }
+        )
+    return rows
+
+
+def tier_rubric(rows: list[dict]) -> dict[str, dict[str, int]]:
+    """Per tier, the records on rubric cases and how many state every rubric item. A record that
+    could not be graded is not a pass."""
+    out: dict[str, dict[str, int]] = {}
+    for r in rows:
+        cell = out.setdefault(r["tier"], {"n": 0, "stated": 0})
+        cell["n"] += 1
+        cell["stated"] += r["rubric_pass"] is True
+    return out
+
+
+def acceptance(cases: list[dict], ids: tuple[str, ...] = ACCEPTANCE_IDS) -> dict[str, str]:
+    """For each named case: "1.0" if its value is correct and its prose states its assumption;
+    otherwise why not: abstained, right value but extra columns (strict fails, relaxed passes),
+    wrong value, or assumption not stated."""
+    by_id = {c["id"]: c for c in cases}
+    out = {}
+    for i in ids:
+        c = by_id.get(i)
+        if c is None:
+            out[i] = "not run"
+        elif c["state"] == "ABSTAIN":
+            out[i] = "0 (abstained)"
+        elif not c["correct_v3"] and c.get("correct_v3r"):
+            out[i] = "0 (right value, extra columns: strict fails, relaxed passes)"
+        elif not c["correct_v3"]:
+            out[i] = "0 (wrong value)"
+        elif c["stated"] is not True:
+            out[i] = "0 (assumption not stated)"
+        else:
+            out[i] = "1.0"
+    return out
+
+
 def summarize(records: list[dict], db_path: str = DEFAULT_DB, judge=None) -> dict:
     gold = R.Gold(db_path)
     scores = {s.id: s for s in R.score_report(records, gold, judge)}
@@ -62,6 +166,7 @@ def summarize(records: list[dict], db_path: str = DEFAULT_DB, judge=None) -> dic
                 "state": rec.get("state") or ("ABSTAIN" if rec.get("answer") is None else "ANSWER"),
                 "reason_code": rec.get("reason_code"),
                 "correct_v3": None if s is None else s.verdict["v3"],
+                "correct_v3r": None if s is None else s.verdict["v3r"],
                 "stated": None if s is None else s.rubric_pass,
                 "answer": rec.get("answer"),
                 "refusal": rec.get("refusal"),

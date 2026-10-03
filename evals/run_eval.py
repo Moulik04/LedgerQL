@@ -37,6 +37,7 @@ from evals.confidently_wrong import compute_confidently_wrong_rate
 from evals.repair_scoring import compute_repair_stats
 from evals.scoring import case_matches
 from ledgerql import answer as answer_module
+from ledgerql import frame as frame_module
 from ledgerql import generate as generate_module
 from ledgerql import pipeline
 from ledgerql.verify import verify as verify_answer
@@ -135,6 +136,59 @@ def score_guardrail_case(case: dict, result: dict) -> dict:
         "guardrail_ok": guardrail_ok,
         "passed": blocked and reason_correct and guardrail_ok,
     }
+
+
+# A record that failed because the model server was unreachable or answered with an HTTP error is
+# not a model answer. 47314853 "completed" with 27 of 103 records of this kind (another job's
+# server shut down under it) and nothing said so. The run now exits with INFRA_EXIT_CODE.
+INFRA_EXIT_CODE = 4
+_INFRA_PATTERNS = (
+    "Connection refused",
+    "Errno 111",
+    "ConnectError",
+    "ConnectTimeout",
+    "ReadTimeout",
+    "RemoteProtocolError",
+    "HTTPStatusError",
+    "Client error '4",
+    "Server error '5",
+)
+
+
+def is_infra_error(text: str | None) -> bool:
+    return bool(text) and any(p in text for p in _INFRA_PATTERNS)
+
+
+def infra_error_ids(per_case: list[dict]) -> list[str]:
+    return [r["id"] for r in per_case if is_infra_error(r.get("execution_error"))]
+
+
+def verify_as_pipeline(
+    answer: str, columns: list[str], rows: list, sql: str | None, question: str, db_path: str
+):
+    """Verify a recorded answer exactly as the pipeline verified it. The framing
+    (`ledgerql/frame.py`) is a pure function of the question, the winning SQL and the result's
+    shape, so it is recomputed here, and the year and day labels it stated are given to the
+    verifier as context. Without that, the framing's own "fiscal year 2025 (period ended June 30,
+    2025)" reads as invented numbers: the first 30B pipeline run reported a 14.3% hallucination
+    rate that was entirely this."""
+    frame = (
+        frame_module.frame_answer(
+            question, sql, frame_module.ResultShape(columns, len(rows)), db_path=db_path
+        )
+        if sql
+        else frame_module.Frame()
+    )
+    if frame.text:
+        return verify_answer(
+            answer,
+            columns,
+            rows,
+            sql=sql,
+            context_years=frame.years,
+            context_numbers=frame.numbers,
+        )
+    return verify_answer(answer, columns, rows, sql=sql)
 
 
 def load_gold_cases(path: Path) -> list[dict]:
@@ -264,8 +318,13 @@ def run(gold_path: Path, db_path: str, judge=None, only: set[str] | None = None)
             # 1e9 AS revenue_in_billions`), causing this metric to flag
             # answers as hallucinated that the live pipeline had already
             # correctly verified as grounded.
-            verify_result = verify_answer(
-                result["answer"], result["columns"], result["rows"], sql=result["sql"]
+            verify_result = verify_as_pipeline(
+                result["answer"],
+                result["columns"],
+                result["rows"],
+                result["sql"],
+                case["question"],
+                db_path,
             )
             record["hallucinated_numbers"] = verify_result.ungrounded_numbers
             if not verify_result.ok:
@@ -565,6 +624,16 @@ def main(argv: list[str] | None = None) -> int:
     print(f"Wrote {md_path} and {jsonl_path}")
     print(f"Overall execution accuracy: {summary['overall_execution_accuracy']:.1%}")
     print(f"Hallucinated-number rate: {summary['hallucinated_number_rate']:.1%}")
+    broken = infra_error_ids(summary.get("per_case", []))
+    if broken:
+        print(
+            f"INCOMPLETE RUN: {len(broken)} of {len(summary['per_case'])} records failed because "
+            "the model server was unreachable or returned an HTTP error, not because the model "
+            f"answered badly: {broken}. The figures above are not valid. "
+            f"Exiting {INFRA_EXIT_CODE}.",
+            file=sys.stderr,
+        )
+        return INFRA_EXIT_CODE
     return 0
 
 

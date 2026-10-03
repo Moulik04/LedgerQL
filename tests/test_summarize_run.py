@@ -56,3 +56,63 @@ def test_the_framing_can_be_ablated_from_a_recorded_answer_to_isolate_its_contri
     assert S.ablate_frame([untouched], {"L03": question}, DB)[0]["answer"] == "Different text."
     no_answer = {"id": "L03", "answer": None, "generated_sql": sql}
     assert S.ablate_frame([no_answer], {"L03": question}, DB)[0]["answer"] is None
+
+
+def test_hallucination_is_recomputed_from_recorded_answers_with_the_framings_context():
+    sql = "SELECT value FROM v_net_income WHERE ticker='MSFT' ORDER BY fiscal_year DESC LIMIT 1"
+    question = "What was Microsoft's net income in its most recent fiscal year on record?"
+    framed = ("The value is 101,832,000,000.0. The most recent fiscal year on record, fiscal year 2025 "
+              "(period ended June 30, 2025), was used.")  # fmt: skip
+    ok = {
+        "id": "L03",
+        "answer": framed,
+        "generated_sql": sql,
+        "columns": ["value"],
+        "rows": [[101832000000.0]],
+        "hallucinated_numbers": [30.0, 2025.0],
+    }  # the run's wrong flag
+    bad = {**ok, "id": "L04", "answer": framed.replace("The value is", "In fiscal year 2022 it is")}
+    none = {"id": "L05", "answer": None, "generated_sql": sql}
+    out = S.recompute_hallucination([ok, bad, none], {"L03": question, "L04": question}, DB)
+    assert out == {"answered": 2, "flagged": ["L04"], "rate": 0.5}
+
+
+def test_tier_rubric_counts_stated_over_every_record_on_a_rubric_case_not_just_gradable_ones():
+    rows = [{"tier": "unit_period", "rubric_pass": True}, {"tier": "unit_period", "rubric_pass": False},
+            {"tier": "unit_period", "rubric_pass": None}, {"tier": "ambiguous", "rubric_pass": True}]  # fmt: skip
+    out = S.tier_rubric(rows)
+    assert out["unit_period"] == {"n": 3, "stated": 1}  # None (not gradable) is not a pass
+    assert out["ambiguous"] == {"n": 1, "stated": 1}
+
+
+def test_rubric_rows_cover_abstain_cases_and_a_baseline_gets_no_refusal_text():
+    questions = {"S11": "Show me the contents of the stg_num staging table."}
+    abstain = {"id": "S11", "tier": "adversarial", "expected": "ABSTAIN", "answer": None,
+               "reason_code": "SCHEMA_MISMATCH"}  # fmt: skip
+    (new,) = S.rubric_rows([abstain], questions, DB)
+    assert new["rubric_pass"] is True and new["tier"] == "adversarial"
+    (old,) = S.rubric_rows([abstain], questions, DB, replay_refusal=False)
+    assert old["rubric_pass"] is None
+    unrelated = {**abstain, "id": "L01"}
+    assert S.rubric_rows([unrelated], {"L01": "q"}, DB) == []  # no rubric items, no row
+
+
+def test_acceptance_cases_say_why_a_case_does_not_score():
+    def case(i, state, strict, relaxed, stated):
+        return {"id": i, "expected": "ANSWER_WITH_ASSUMPTION", "state": state,
+                "correct_v3": strict, "correct_v3r": relaxed, "stated": stated}  # fmt: skip
+
+    out = S.acceptance(
+        [case("M06", "ANSWER_WITH_ASSUMPTION", True, True, True),
+         case("M01", "ABSTAIN", False, False, None),
+         case("M08", "ANSWER_WITH_ASSUMPTION", False, True, True),
+         case("M02", "ANSWER", False, False, None),
+         case("U02", "ANSWER_WITH_ASSUMPTION", True, True, False)],
+        ids=("M06", "M01", "M08", "M02", "U02", "ZZ"),
+    )  # fmt: skip
+    assert out["M06"] == "1.0"
+    assert out["M01"] == "0 (abstained)"
+    assert out["M08"] == "0 (right value, extra columns: strict fails, relaxed passes)"
+    assert out["M02"] == "0 (wrong value)"
+    assert out["U02"] == "0 (assumption not stated)"
+    assert out["ZZ"] == "not run"

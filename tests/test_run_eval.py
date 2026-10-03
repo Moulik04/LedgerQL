@@ -677,3 +677,98 @@ def test_run_can_be_restricted_to_named_cases_and_records_the_refusal_text(tmp_p
     (rec,) = summary["per_case"]
     assert rec["refusal"].startswith("The staging tables")
     assert rec["rubric_pass"] is None or isinstance(rec["rubric_pass"], bool)
+
+
+def test_infrastructure_failures_are_counted_and_make_the_run_exit_nonzero(tmp_path, monkeypatch):
+    from evals import run_eval
+
+    assert run_eval.is_infra_error("[Errno 111] Connection refused")
+    assert run_eval.is_infra_error("pipeline crashed: ConnectError: all connection attempts failed")
+    assert run_eval.is_infra_error("Client error '404 Not Found' for url http://localhost:8000/v1")
+    assert not run_eval.is_infra_error("no candidate produced a usable result")
+    assert not run_eval.is_infra_error("answer states unsupported number(s): [1.0]")
+    assert not run_eval.is_infra_error(None)
+
+    summary = {
+        "overall_execution_accuracy": 0.5, "hallucinated_number_rate": 0.0,
+        "per_case": [{"id": "A", "execution_error": "[Errno 111] Connection refused"},
+                     {"id": "B", "execution_error": None}],
+    }  # fmt: skip
+    monkeypatch.setattr(run_eval, "run", lambda *a, **k: summary)
+    monkeypatch.setattr(
+        run_eval, "write_reports", lambda s, d: (tmp_path / "a.md", tmp_path / "b.jsonl")
+    )
+    assert run_eval.main(["--reports-dir", str(tmp_path)]) == run_eval.INFRA_EXIT_CODE
+    summary["per_case"][0]["execution_error"] = None
+    assert run_eval.main(["--reports-dir", str(tmp_path)]) == 0
+
+
+def test_the_report_states_how_many_records_failed_for_infrastructure_reasons():
+    from evals import run_eval
+
+    rows = [
+        {"id": "A", "execution_error": "Connection refused"},
+        {"id": "B", "execution_error": None},
+    ]
+    assert run_eval.infra_error_ids(rows) == ["A"]
+
+
+FIXTURE_DB = "tests/fixtures/eval_fixture.duckdb"
+MSFT_SQL = "SELECT value FROM v_net_income WHERE ticker='MSFT' ORDER BY fiscal_year DESC LIMIT 1"
+MSFT_Q = "What was Microsoft's net income in its most recent fiscal year on record?"
+FRAMED = (
+    "The value is 101,832,000,000.0. The most recent fiscal year on record, fiscal year 2025 "
+    "(period ended June 30, 2025), was used."
+)
+
+
+def _hallucination_rate_for(answer, monkeypatch, tmp_path):
+    import json
+
+    from evals import run_eval
+
+    gold = tmp_path / "gold.jsonl"
+    case = {"id": "L03", "tier": "lookup", "expected": "ANSWER_WITH_ASSUMPTION", "question": MSFT_Q,
+            "gold_sql": None, "compare": "none"}  # fmt: skip
+    gold.write_text(json.dumps(case) + "\n")
+
+    def fake_ask(question, db_path=None):
+        return {"sql": MSFT_SQL, "error": None, "answer": answer, "columns": ["value"],
+                "rows": [(101832000000.0,)], "truncated": False, "reason_code": None,
+                "guardrail_events": [], "confidence": 1.0, "repair": None, "candidates": None,
+                "refusal": None, "state": "ANSWER_WITH_ASSUMPTION",
+                "assumptions": ["x"]}  # fmt: skip
+
+    monkeypatch.setattr(run_eval.pipeline, "ask", fake_ask)
+    return run_eval.run(gold, FIXTURE_DB)["hallucinated_number_rate"]
+
+
+def test_the_hallucination_metric_does_not_flag_the_framings_own_year_and_date_labels(
+    monkeypatch, tmp_path
+):
+    """The pipeline verifies the framing with its labels as context; the evaluator must verify the
+    same way, or it counts "period ended June 30, 2025" as an invented number (it did: 14.3% on the
+    30B pipeline run against a true 0%)."""
+    assert _hallucination_rate_for(FRAMED, monkeypatch, tmp_path) == 0.0
+
+
+def test_the_hallucination_metric_still_flags_a_year_the_writer_invented(monkeypatch, tmp_path):
+    invented = FRAMED.replace("The value is", "In fiscal year 2022 the value is")
+    assert _hallucination_rate_for(invented, monkeypatch, tmp_path) == 1.0
+    wrong_number = FRAMED.replace("101,832,000,000.0", "999,999,000,000.0")
+    assert _hallucination_rate_for(wrong_number, monkeypatch, tmp_path) == 1.0
+
+
+def test_verify_as_pipeline_agrees_with_what_the_pipeline_itself_accepted():
+    from evals import run_eval
+
+    ok = run_eval.verify_as_pipeline(
+        FRAMED, ["value"], [(101832000000.0,)], MSFT_SQL, MSFT_Q, FIXTURE_DB
+    )
+    assert ok.ok
+    plain = run_eval.verify_as_pipeline(
+        "The value is 391,035,000,000.0.", ["value"], [(391035000000.0,)],
+        "SELECT value FROM v_revenue WHERE ticker='AAPL' AND fiscal_year=2024",
+        "What was Apple's revenue in fiscal year 2024?", FIXTURE_DB,
+    )  # fmt: skip
+    assert plain.ok

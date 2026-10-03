@@ -106,7 +106,9 @@ class RecordScore:
     rubric_pass: bool | None = None  # answer_must_state: stated / not stated / not assessed
 
 
-def score_report(records: list[dict], gold: Gold, judge=None) -> list[RecordScore]:
+def score_report(
+    records: list[dict], gold: Gold, judge=None, replay_refusal: bool = True
+) -> list[RecordScore]:
     """Each scored record, judged by the winner rows it recorded, exactly as `run_eval`
     judged them: no execution error, and the rows match. `rubric_pass` is the
     `answer_must_state` grade of the answer text (patterns; `judge` decides only the
@@ -121,7 +123,12 @@ def score_report(records: list[dict], gold: Gold, judge=None) -> list[RecordScor
         rubric_pass = None
         if rec["id"] in items:
             question = gold.v1[rec["id"]]["question"]
-            if rec.get("answer") is None and rec.get("reason_code") and not rec.get("refusal"):
+            if (
+                replay_refusal
+                and rec.get("answer") is None
+                and rec.get("reason_code")
+                and not rec.get("refusal")
+            ):
                 # a record from before abstains carried an explanation: replay it (it is a pure
                 # function of the reason code, the question and the database)
                 rec = {**rec, "refusal": refusal_module.explain(
