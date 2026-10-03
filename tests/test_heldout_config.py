@@ -26,6 +26,13 @@ def test_a_superseded_declaration_keeps_what_it_pinned():
     assert h1["code_commit"] == "97c69949a491d97146635c0dd45fd55d934f8a1c"
     assert h1["ledgerql_tree"] == "95ad19d17eeac9debf36e48903d4d6371962373d"
     assert h2["ledgerql_tree"] != h1["ledgerql_tree"] and len(h2["changes_from_H1"]) == 2
+    # H2 was amended once, before anything ran under it; what it first pinned is kept
+    first = h2["amended"]["first_declared_as"]
+    assert first["ledgerql_tree"] == "720f4bae3a5a33644812ef1dd54db8e1cfc7ec25"
+    assert (
+        first["ledgerql_tree"] != h2["ledgerql_tree"]
+        and h2["amended"]["why_an_amendment_and_not_H3"]
+    )
     # one declaration covers both changes, and the linker decision is carried over unchanged
     assert h2["entity_link"] == h1["entity_link"] and h2["entity_link"]["decision"] == "on"
     assert h2["models"] == h1["models"] and h2["jobs"] == h1["jobs"]

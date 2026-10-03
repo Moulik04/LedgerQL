@@ -192,7 +192,10 @@ if [ "${EVAL_MODE:-pipeline}" = "gen_only" ]; then
         done
     fi
 else
-    echo "Running eval with LLM_BACKEND=vllm OLLAMA_MODEL=$REPO_ID -> $OUT ..."
+    # Entity linking is read from the environment by the pipeline (LEDGERQL_ENTITY_LINK=1 is on;
+    # submit.sh passes the submitting shell's value through). Printed here and recorded in
+    # run_meta.json, so a run made with the wrong setting cannot pass for the right one.
+    echo "Running eval with LLM_BACKEND=vllm OLLAMA_MODEL=$REPO_ID LEDGERQL_ENTITY_LINK=${LEDGERQL_ENTITY_LINK:-unset (linker off)} -> $OUT ..."
     VLLM_HOST="http://localhost:$PORT" LLM_BACKEND=vllm OLLAMA_MODEL="$REPO_ID" \
         uv run python evals/run_eval.py --db data/ledgerql.duckdb --reports-dir "$OUT" \
         --gold "${GOLD_FILE:-evals/gold_v3.jsonl}"
@@ -208,6 +211,7 @@ cat > "$OUT/run_meta.json" <<META
   "vllm_port": "${PORT:-}",
   "profiles": "${PROFILES:-}",
   "entity_link_ab": "${ENTITY_LINK_AB:-}",
+  "entity_link": "${LEDGERQL_ENTITY_LINK:-}",
   "gold_file": "${GOLD_FILE:-}",
   "tensor_parallel_size": $TP_SIZE,
   "slurm_job_id": "${SLURM_JOB_ID:-}",

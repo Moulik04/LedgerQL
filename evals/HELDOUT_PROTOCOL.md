@@ -178,19 +178,25 @@ Amended 2026-10-01 at MJ's request in two ways: H is pinned to code, and the lin
 longer chosen from held-out results. Amended again 2026-10-02, before the rerun's results were read
 (DECISIONS.md, 2026-10-02 amendments): the linker rule's metric, and what hallucination figure 1 is.
 Amended 2026-10-03, before any held-out question exists: H1 is superseded by **H2** (the verifier
-fixed and blocked drafts stored), and how figure 1 counts the auditor's tiers is fixed.
+fixed and blocked drafts stored), and how figure 1 counts the auditor's tiers is fixed. H2 and the
+tiers were themselves amended once the same day, before anything ran under H2 (a round number passes
+as a rounding only when hedged; another company's year or date is ungrounded, not weak).
 
 - **The headline configuration is H2** (it supersedes H1; both are in `evals/heldout_config.json`,
   which is append-only). H2 is H1 with two changes under `ledgerql/`, declared together as one
   configuration on 2026-10-03: the verifier (`verify.py`) accepts true values in the forms it used
   to refuse (`$416B`, `416 bn`, `$0.4T`, `FY25`, `3rd`), reads spelled-out numbers, holds a stated
-  figure to the precision it states in place of a flat 1% tolerance, and no longer exempts form-code
-  lookalikes (`391-K`); and the pipeline stores the text of every draft the verifier blocks. Why:
+  figure to the precision it states in place of a flat 1% tolerance (a round number such as `420
+  billion` is read as a rounding only when the answer hedges it: `about`, `approximately`, `roughly`,
+  `around`, `nearly`, `~`), and no longer exempts form-code lookalikes (`391-K`); and the pipeline
+  stores the text of every draft the verifier blocks. Why:
   the independent audit found the first on planted values (`reports/number_audit_vs_verify.md`), and
   without the second, figure 1(a) counts blocks, not invented numbers. H2 is commit
-  `19a297e37c58678df4be8802a0882a63018a0d76`, `ledgerql/` tree
-  `720f4bae3a5a33644812ef1dd54db8e1cfc7ec25`, with the same models, jobs, settings and linker
-  decision (on) as H1. No held-out run was made under H1. The description of H1 that follows is
+  `590188e3ace789fea9e2ef8816ae4444baf5ff83`, `ledgerql/` tree
+  `2cbe737057fd2c58abafd324161701dafb9896fa`, with the same models, jobs, settings and linker
+  decision (on) as H1. (As first declared, before the hedge rule, it was commit `19a297e` and tree
+  `720f4ba`; nothing was run under that, so it was amended in place and not replaced by an H3. The
+  declaration records both.) No held-out run was made under H1. The description of H1 that follows is
   kept as written; read "H" as H2.
 - **The headline configuration H1** is declared in `evals/heldout_config.json`: the full pipeline
   (classify, N=5 generation, guard, vote, verify, answer) with **Qwen3-Coder-30B-A3B fp16** on the
@@ -254,9 +260,12 @@ fixed and blocked drafts stored), and how figure 1 counts the auditor's tiers is
      - `ungrounded` **counts as an invented number.** Figure 1(b) is the share of shipped answers with
        at least one ungrounded claim, and every such claim is listed.
      - `weak` is **reported separately and is not counted** as invented, and never as grounded
-       either: its count is printed beside the figure. Weak has two sources and both are treated this
-       way: a coarse rounding whose precision is unstated (`about 420 billion` for 416.161 billion),
-       and a year or date that the database holds only for a company the SQL does not name.
+       either: its count is printed beside the figure. Weak is coarse rounding only: a *hedged* round
+       number whose precision is therefore unstated (`about 420 billion` for 416.161 billion).
+       Unhedged, `420 billion` is `ungrounded`.
+     - **A year or date the database holds only for a different company is `ungrounded`**, not weak
+       (amended 2026-10-03): another company's period attached to this company's figure is the
+       misattributed-period error the year rule exists to catch.
      - `derived` (a sum, difference, ratio or percentage change of two numeric cells) **counts as
        grounded only under the three-significant-digit rule**: a claim that states fewer than three
        significant digits cannot be derived and is `ungrounded`. Derived claims are counted and
@@ -298,9 +307,12 @@ configuration is run once for its confirmatory comparison.
    +0.340] and XiYanSQL-32B +0.112 [+0.044, +0.188] in the mean per-case change of the correct candidate
    share; neither CI is below zero. Recorded in `heldout_config.json` and `DECISIONS.md`.
 4. **Configuration H2 supersedes H1** (2026-10-03, MJ, before any held-out run): the verifier fixed from
-   the audit's findings and blocked drafts stored, as one declaration; linker on, unchanged.
-5. **Figure 1's tiers** (2026-10-03, MJ, before any held-out run): `ungrounded` counts as invented; `weak`
-   is reported separately and not counted; `derived` counts as grounded only under the
+   the audit's findings and blocked drafts stored, as one declaration; linker on, unchanged. Amended
+   once the same day, before anything ran under it: a round number passes as a rounding only when
+   hedged.
+5. **Figure 1's tiers** (2026-10-03, MJ, before any held-out run): `ungrounded` counts as invented, and
+   includes a year or date the database holds only for a different company; `weak` is hedged coarse
+   rounding only, reported separately and not counted; `derived` counts as grounded only under the
    three-significant-digit rule; figure 1(a) is printed with its split into invented blocks and verifier
    false positives.
 6. Still open: whether an `informal` share of one quarter of the mention styles is right (3.2),

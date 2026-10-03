@@ -362,3 +362,46 @@ records the port. A pipeline run's figures are valid only if it exited 0.
 `sacct -u $USER -S 2026-09-13 -E now --format=JobID%14,JobName%28,NodeList,Start,End,State,ExitCode -P > sacct.txt`,
 then locally `python -m evals.colocation_audit sacct.txt`. It lists any two jobs serving the same model that
 overlapped on one node (the only silent case) and any cross-model overlaps with whether a job failed.
+
+## The H2 regression check: the 30B pipeline on the dev set, linker on (2026-10-03)
+
+Configuration H2 (`evals/heldout_config.json`) changed the verifier and stores blocked drafts. Before
+any held-out run, the 30B pipeline is run once on the **dev** set under H2 with entity linking on, to
+see what the change does on real drafts: the draft rate, each blocked draft judged by the auditor, the
+false abstains, and the auditor's verdicts on what shipped.
+
+The pipeline job does not set the linker; it inherits `LEDGERQL_ENTITY_LINK` from the shell that runs
+`submit.sh` (`--export=ALL`). So the setting goes on the command line, and the job prints it and
+records it in `run_meta.json` (`"entity_link": "1"`).
+
+```bash
+# on the login node; <commit> is origin/main, whose ledgerql/ tree must be H2's
+LEDGERQL_ENTITY_LINK=1 scripts/bridges2/submit.sh <commit> run_qwen3_coder_30b_fp16.sbatch
+```
+
+The run is valid only if the job exited 0 (`sacct`) and `run_meta.json` says `"entity_link": "1"` and
+the expected commit. Then, on the laptop:
+
+```bash
+J=<jobid>; D=<date in the file name>
+ssh bridges2 "cat ~/ledgerql-bridges2/ledgerql/reports/runs/$J/run_meta.json"
+ssh bridges2 "cat ~/ledgerql-bridges2/ledgerql/reports/runs/$J/eval_$D.jsonl" \
+  > reports/eval_bridges2_qwen3_30b_pipeline_$J.jsonl
+
+# the verifier before the change, replayed on this run's own drafts (shipped and blocked)
+python -m evals.replay_verifier reports/eval_bridges2_qwen3_30b_pipeline_$J.jsonl \
+    --old-rev 3c235d1 --write reports/verifier_replay_30b_$J.md
+
+# every blocked draft judged by the auditor, and the auditor on every shipped answer, beside the H1 run
+python -m evals.audit_vs_verify \
+    --run "30B H2 $J=reports/eval_bridges2_qwen3_30b_pipeline_$J.jsonl" \
+    --run "30B H1 47367323=reports/eval_bridges2_qwen3_30b_pipeline_47367323.jsonl" \
+    --write reports/number_audit_vs_verify_30b_$J.md
+```
+
+**What can and cannot be compared.** `replay_verifier` runs both verifiers on the same texts, so its
+before and after differ only by the verifier: that is the regression check. The H1 run (47367323) is a
+different set of drafts, and it ran with the linker **off**, so a difference between the two runs'
+draft rates mixes the linker, sampling and the verifier; and its four blocked drafts were never
+stored, so they stay unclassified. Give `--write` a new file name: the committed
+`reports/number_audit_vs_verify.md` covers the three committed runs and should not be overwritten.

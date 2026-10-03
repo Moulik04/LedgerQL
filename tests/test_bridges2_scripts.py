@@ -344,6 +344,17 @@ def test_the_pipeline_job_scores_against_the_frozen_gold_unless_told_otherwise()
     assert '--gold "${GOLD_FILE:-evals/gold_v3.jsonl}"' in command
 
 
+def test_the_pipeline_job_records_the_entity_linking_setting_it_ran_with():
+    # The pipeline reads LEDGERQL_ENTITY_LINK from the environment and the job does not set it, so
+    # a run made with the wrong setting would look like any other. It is printed and recorded.
+    text = (SCRIPTS / "run_model_eval.sh").read_text()
+    assert '"entity_link": "${LEDGERQL_ENTITY_LINK:-}"' in text
+    pipeline_branch = text[text.index("Running eval with LLM_BACKEND=vllm") :]
+    assert "LEDGERQL_ENTITY_LINK" in pipeline_branch.splitlines()[0]
+    # ... and the submitting shell's value reaches the job
+    assert "--export=ALL,EXPECTED_COMMIT=" in (SCRIPTS / "submit.sh").read_text()
+
+
 def test_the_job_body_never_hard_codes_port_8000_because_jobs_share_nodes():
     """Jobs 47314848 and 47314850 ran on one node: XiYan's smoke requests were answered by the
     30B's server (404, wrong model) and the 30B pipeline job's own server failed to bind

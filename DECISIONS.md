@@ -2880,3 +2880,82 @@ exists yet. Held-out runs are refused unless `ledgerql/` is the H2 tree and `LED
 The dev pipeline rerun on the local 7B under H2 (draft rate, false abstains, and the auditor's verdicts before
 and after) was started with this code and had not finished when this entry was written; its results go in the
 next entry. Then, as before: MJ's 80 held-out questions and the blind labels.
+
+---
+
+## 2026-10-03 (night) — H2 amended before anything ran under it, the local 7B rerun dropped, and the regression check moved to the 30B
+
+MJ's review of the entry above. It supersedes three things in that entry: decision 1 of section 2 (unhedged
+trailing zeros), the treatment of `weak` in section 5, and the commit and tree of H2 in section 4.
+
+### 1. A round number is a rounding only when the answer hedges it
+
+The entry above accepted any whole number with trailing zeros as a rounding to its last non-zero place
+(`420 billion` for 416.161 billion). **That reintroduces most of the flat 1% tolerance by another route**: 420
+against 416.161 is 0.9% off. Now the coarse reading applies only directly after `about`, `approximately`,
+`roughly`, `around`, `nearly` or `~`. **Unhedged trailing zeros are stated digits**, so `420 billion` and `$400B`
+for 416.161 billion are refused. The hedge must be on the figure itself (`about the same: 420 billion` is not
+hedged), and it loosens nothing else: `about 417 billion` and `about 416.3 billion` are still wrong.
+
+This is implemented twice, separately: in `ledgerql/verify.py` (a hedged round number passes) and in
+`evals/number_audit.py` (a hedged round number is `weak`; unhedged it is `ungrounded`). It has to hold on both
+sides, or an unhedged `420 billion` the verifier blocks would be scored as a verifier false positive.
+`tests/planted_values.py` gained three unhedged round numbers (invented) and three hedged ones (honest), and both
+implementations pass.
+
+### 2. A year or date the database holds only for a different company is ungrounded
+
+It was `weak`, reported and not counted. **Another company's period attached to this company's figure is the
+misattributed-period error the year rule exists to catch**, so it now counts as an invented number. `weak` is
+coarse rounding only. This is in the auditor and protocol 6a, not under `ledgerql/`.
+
+Two consequences to know when reading figure 1(b):
+
+- It also covers a label the database holds when **the SQL names no company at all**: nothing ties it to the
+  answer, so it is `ungrounded`.
+- **The auditor finds the company only from a string literal in the SQL** (a ticker or a name). A company named
+  only through a join or a subquery is not found, so a year or date that is right for it is now flagged, where
+  before it was `weak` and uncounted. That is the auditor's own false positive. Every ungrounded claim is listed
+  with its source ("the database holds this label, but not for the company the SQL names"), so it can be seen
+  and judged by reading; it is not corrected automatically.
+
+### 3. What the two amendments change on real text: nothing on dev
+
+| check | result |
+|---|---|
+| the 141 shipped dev answers, auditor (`reports/number_audit_vs_verify.md`) | 0 ungrounded, 0 weak, 0 derived, as before |
+| planted comparison (22 invented, 14 honest) | verifier and auditor agree on all 36 |
+| every distinct stored answer text (276): H2 as first declared against H2 as amended | **no verdict changes** |
+| the same 276: verifier now against auditor now | agree on all 276 (257 shipped and clean; 19 blocked and flagged) |
+
+So on dev the amendments cost no true statement and catch nothing new. They are rules for text the dev runs did
+not produce.
+
+### 4. H2 amended in place
+
+H2 is now commit `590188e3ace789fea9e2ef8816ae4444baf5ff83`, `ledgerql/` tree
+`2cbe737057fd2c58abafd324161701dafb9896fa`. As first declared it was commit `19a297e` and tree `720f4ba`; the
+declaration keeps both (`amended.first_declared_as`). **It is an amendment and not an H3 because nothing was run
+under H2 as first declared**: no held-out question exists, the declaring commit was never pushed, and the only
+execution of that code was 4 of 103 dev cases of the local 7B run below, which produced no report. Linker on,
+models, jobs and settings unchanged.
+
+### 5. The local 7B rerun was dropped
+
+Started under H2 as first declared, it finished 4 cases in 37 minutes (344 s, 396 s, 684 s and 752 s; earlier
+runs on the same machine took 50 to 120 s a case). The laptop has 8.6 GB of memory and its swap was nearly full.
+It was stopped (MJ) and left no report. **The regression check is the 30B pipeline on the dev set under H2,
+linker on**, on the cluster (`docs/bridges2.md`, last section): the draft rate, every blocked draft judged by
+the auditor (`evals/audit_vs_verify.py`), the false abstains, and the auditor's verdicts on what shipped.
+
+`evals/replay_verifier.py` is the comparison: it replays the verifier as it was at `3c235d1` on the new run's
+own drafts, shipped and blocked, so before and after differ only by the verifier. Two limits on comparing with
+the H1 30B run (47367323) directly: **that run had the linker off**, so the two runs' drafts differ for three
+reasons at once (linker, sampling, verifier); and its four blocked drafts were never stored.
+
+The pipeline job did not record the linker setting, which it inherits from the submitting shell. It now prints
+it and writes it to `run_meta.json` (`entity_link`), so a run made with the linker off cannot pass for this one.
+
+### 6. Still owed
+
+The 30B dev run under H2 and its two reports; then MJ's 80 held-out questions and the blind labels.

@@ -49,11 +49,22 @@
     "declared": "2026-10-03",
     "supersedes": "H1",
     "what": "The pipeline configuration whose held-out results become the README headline figures (evals/HELDOUT_PROTOCOL.md 6a).",
-    "why": "Two changes under ledgerql/ after H1, declared together as one configuration before any held-out run (no held-out question exists yet). (1) ledgerql/verify.py: the independent audit (reports/number_audit_vs_verify.md) found the verifier refused true statements ($416B, 416 bn, $0.4T, FY25, 3rd) and accepted invented ones (a figure inside its flat 1% tolerance, every spelled-out number, a form-code lookalike such as 391-K). It now reads magnitude abbreviations, spelled-out numbers, FY labels, dates and period labels, and a stated figure must agree to the precision it states. (2) ledgerql/pipeline.py: the text of a draft the verifier blocks is stored (blocked_draft, blocked_claims), so the auditor can judge each block as an invented number or a verifier false positive; without it figure 1a counts blocks, not inventions. Neither change touches generation, the vote, the guardrails, the framing or the linker.",
-    "code_commit": "19a297e37c58678df4be8802a0882a63018a0d76",
-    "ledgerql_tree": "720f4bae3a5a33644812ef1dd54db8e1cfc7ec25",
+    "why": "Two changes under ledgerql/ after H1, declared together as one configuration before any held-out run (no held-out question exists yet). (1) ledgerql/verify.py: the independent audit (reports/number_audit_vs_verify.md) found the verifier refused true statements ($416B, 416 bn, $0.4T, FY25, 3rd) and accepted invented ones (a figure inside its flat 1% tolerance, every spelled-out number, a form-code lookalike such as 391-K). It now reads magnitude abbreviations, spelled-out numbers, FY labels, dates and period labels, and a stated figure must agree to the precision it states (a round number is read as a rounding only when hedged). (2) ledgerql/pipeline.py: the text of a draft the verifier blocks is stored (blocked_draft, blocked_claims), so the auditor can judge each block as an invented number or a verifier false positive; without it figure 1a counts blocks, not inventions. Neither change touches generation, the vote, the guardrails, the framing or the linker.",
+    "code_commit": "590188e3ace789fea9e2ef8816ae4444baf5ff83",
+    "ledgerql_tree": "2cbe737057fd2c58abafd324161701dafb9896fa",
+    "amended": {
+      "date": "2026-10-03",
+      "first_declared_as": {
+        "code_commit": "19a297e37c58678df4be8802a0882a63018a0d76",
+        "ledgerql_tree": "720f4bae3a5a33644812ef1dd54db8e1cfc7ec25",
+        "declared_in": "f48df55f3f7558439f7362dca014f623b37865a6"
+      },
+      "what": "A whole number with trailing zeros passes as a rounding to its last non-zero place only when the answer hedges the figure (about, approximately, roughly, around, nearly, ~); unhedged trailing zeros are stated digits. The same day, in the auditor and the protocol (not under ledgerql/): a year or date the database holds only for a different company is ungrounded, not weak, and weak is coarse rounding only.",
+      "why": "Unhedged, the trailing-zero reading reintroduces most of the flat 1% tolerance by another route. Another company's period on this company's figure is the misattributed-period error the year rule exists to catch.",
+      "why_an_amendment_and_not_H3": "Nothing was run under H2 as first declared: no held-out question exists, the declaring commit was never pushed, and the only execution of that code was 4 of 103 dev cases of a local 7B run that was abandoned without a report (MJ, 2026-10-03)."
+    },
     "changes_from_H1": [
-      "ledgerql/verify.py: precision-aware number verifier (no flat 1% tolerance); magnitude abbreviations; spelled-out numbers; FY labels as years; dates and Q/H labels as claims; fixed list of SEC form codes; the row count grounds a plain count; a ratio cell grounds a percentage",
+      "ledgerql/verify.py: precision-aware number verifier (no flat 1% tolerance); magnitude abbreviations; spelled-out numbers; FY labels as years; dates and Q/H labels as claims; fixed list of SEC form codes; the row count grounds a plain count; a ratio cell grounds a percentage; a trailing-zero rounding passes only with a hedge word",
       "ledgerql/pipeline.py: a blocked draft's text and refused claims are stored in the result and the audit log"
     ],
     "code_includes": [
@@ -81,7 +92,7 @@
       "year_verifier": "on",
       "low_agreement_threshold": 0.6,
       "scored_against": "the frozen held-out gold (strict, gold v3 rules)",
-      "number_verifier": "precision-aware (2026-10-03)",
+      "number_verifier": "precision-aware, hedged round numbers only (2026-10-03, amended)",
       "blocked_drafts": "stored"
     },
     "entity_link": {
@@ -93,6 +104,6 @@
       "reason": "dev A/B, mean per-case change in correct candidate share (strict v3, 50 ANSWER cases, N=5, linked minus unlinked, 95% bootstrap CI over cases): Qwen3-30B +0.2440 [+0.1560, +0.3400], XiYanSQL-32B +0.1120 [+0.0440, +0.1880]; rule: on unless either CI lies entirely below zero -> on. Evidence: reports/entity_link_ab_qwen3_30b.jsonl (job 47314848) and reports/entity_link_ab_xiyan_32b.jsonl (job 47367322). Descriptive only: pass@1 32->47 (30B) and 44->47 (XiYan).",
       "setting": "LEDGERQL_ENTITY_LINK=1 for on; unset for off"
     },
-    "note": "The 32B configuration for the agree-policy table is the same commit, tree, settings and linker decision. The linker decision is carried over from H1 unchanged: it was made from the dev A/B, which is gen-only and does not run the verifier, so neither change can affect it. A change under ledgerql/ is a new configuration: append a declaration with its own id; never edit this one (only `status` and `superseded_by` change when it is superseded)."
+    "note": "The 32B configuration for the agree-policy table is the same commit, tree, settings and linker decision. The linker decision is carried over from H1 unchanged: it was made from the dev A/B, which is gen-only and does not run the verifier, so neither change can affect it. A change under ledgerql/ is a new configuration: append a declaration with its own id; never edit this one (only `status` and `superseded_by` change when it is superseded; H2 itself was amended once, before anything ran under it, and `amended` records what it was)."
   }
 ]
