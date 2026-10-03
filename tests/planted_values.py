@@ -33,6 +33,10 @@ INVENTED = [
     "Revenue was 416.161 million.",
     "Revenue was 416.161 trillion.",
     "Revenue was 416,161 thousand.",
+    # a round number with no hedge states its zeros: 416.161 billion is not 420 or 400 billion
+    "Revenue was 420 billion.",
+    "Revenue was $400B.",
+    "Revenue was four hundred billion.",
     # percentages
     "Growth was 38%.",
     "Growth was 38 percent.",
@@ -67,6 +71,10 @@ HONEST = [
     "Revenue was $416.161 billion.",
     "Revenue was about 416 billion.",
     "Revenue was 416.2 billion.",
+    # hedged, a round number is a rounding to its last non-zero place
+    "Revenue was roughly 420 billion.",
+    "Revenue was about four hundred billion.",
+    "Revenue was ~$420B.",
     "Revenue was $416B.",
     "Revenue was 416 bn.",
     "Revenue was 0.4T.",

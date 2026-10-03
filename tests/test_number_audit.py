@@ -58,9 +58,10 @@ def test_rounding_is_judged_at_the_precision_the_claim_states():
     assert bad("417 billion") == ["417 billion"]
     assert bad("416.2 billion") == []
     assert bad("416.3 billion") == ["416.3 billion"]
-    # "four hundred billion" leaves its precision unstated: a coarse rounding, weak, never strong
+    # "about four hundred billion" hedges, so its precision is unstated: a coarse rounding, weak
     assert [c.status for c in audit("about four hundred billion").claims] == ["weak"]
     assert bad("about four hundred fifty billion") != []
+    assert bad("four hundred billion") == ["four hundred billion"]  # no hedge: 400 is stated
 
 
 def test_a_percentage_matches_a_ratio_cell_times_100_or_a_cell_already_in_percent():
@@ -162,13 +163,17 @@ def db(tmp_path):
     return str(path)
 
 
-def test_a_label_found_only_in_the_database_is_weak_not_strong_and_not_ungrounded(db):
+def test_a_label_the_database_holds_but_the_evidence_does_not_tie_to_this_answer_is_ungrounded(db):
+    # Another company's fiscal year or period end on this company's figure is the misattributed
+    # period the year rule exists to catch. It was `weak` until 2026-10-03.
     a = audit("For fiscal year 2024.", columns=["value"], rows=[(1.5,)], sql="", db_path=db)
-    assert [(c.status, c.source) for c in a.claims] == [("weak", "database label")]
-    assert a.clean
+    assert [(c.status, c.text) for c in a.claims] == [("ungrounded", "2024")]
+    assert "not for the company" in a.claims[0].source and not a.clean
     assert bad("For fiscal year 2022.", columns=["value"], rows=[(1.5,)], sql="", db_path=db)
     d = audit("Ended September 27, 2025.", columns=["v"], rows=[(1.5,)], sql="", db_path=db)
-    assert [c.status for c in d.claims] == ["weak"]
+    assert [c.status for c in d.claims] == ["ungrounded"] and "not for the company" in d.claims[
+        0
+    ].source
     assert bad("Ended September 28, 2025.", columns=["v"], rows=[(1.5,)], sql="", db_path=db)
 
 
@@ -177,7 +182,7 @@ def test_numbers_get_no_weak_grounding_and_database_names_with_digits_are_masked
     assert bad("3M had 1.5.", columns=["v"], rows=[(1.5,)], sql="", db_path=db) == []
 
 
-def test_a_label_the_named_company_has_is_grounded_and_one_only_another_company_has_is_weak(db):
+def test_a_label_the_named_company_has_is_grounded_and_one_only_another_company_has_is_not(db):
     aapl = "SELECT v FROM t WHERE ticker = 'AAPL'"
     mmm = "SELECT v FROM t WHERE ticker = 'MMM'"
     text = "Fiscal year 2025, ended September 27, 2025."
@@ -186,18 +191,48 @@ def test_a_label_the_named_company_has_is_grounded_and_one_only_another_company_
         ("grounded", "database, for the company the SQL names")
     ] * 2
     other = N.audit_answer(text, ["v"], [(1.5,)], mmm, db)
-    assert [c.status for c in other.claims] == ["weak", "weak"]  # real labels, wrong company
-    assert N.audit_answer(text, ["v"], [(1.5,)], "SELECT 1", db).clean  # names none: weak, clean
+    # real labels, wrong company: invented for this answer
+    assert [c.status for c in other.claims] == ["ungrounded", "ungrounded"]
+    # and with no company named at all, nothing ties the labels to the answer either
+    assert [c.status for c in N.audit_answer(text, ["v"], [(1.5,)], "SELECT 1", db).claims] == [
+        "ungrounded"
+    ] * 2
 
 
-def test_coarse_rounding_is_its_own_tier_never_ungrounded_and_never_strong():
-    for text in ("roughly 420 billion", "about 400 billion", "420,000,000,000"):
+def test_a_hedged_coarse_rounding_is_its_own_tier_never_ungrounded_and_never_strong():
+    for text in (
+        "roughly 420 billion",
+        "about 400 billion",
+        "About $420B",
+        "approximately 420,000,000,000",
+        "around 420 bn",
+        "nearly 420 billion",
+        "~420 billion",
+        "~ $420 billion",
+    ):
         a = audit(text)
         assert [c.status for c in a.claims] == ["weak"], text
         assert a.claims[0].source.startswith("coarse rounding")
     # below ten, or off by more than the unstated precision, there is no such reading
     for text in ("about 4 billion", "about 450 billion", "about 417 billion", "750"):
         assert bad(text), text
+
+
+def test_unhedged_trailing_zeros_are_stated_digits():
+    # without a hedge on the figure itself, "420 billion" claims 420, and 416.161 is not 420
+    for text, claim in (
+        ("420 billion", "420 billion"),
+        ("Revenue was 420 billion.", "420 billion"),
+        ("$400B", "$400B"),
+        ("420,000,000,000", "420,000,000,000"),
+        ("exactly 420 billion", "420 billion"),
+        ("about the same: 420 billion", "420 billion"),
+    ):
+        assert bad(text) == [claim], text
+    # the weak tier is coarse rounding only: `weak` never appears for anything else
+    assert [c.source for c in audit("about 420 billion in FY25").claims if c.status == "weak"] == [
+        "coarse rounding (a hedged round number, read to its last non-zero place)"
+    ]
 
 
 def test_a_spelled_out_number_is_judged_at_the_scale_word_it_ends_on():

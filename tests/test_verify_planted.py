@@ -107,12 +107,51 @@ def test_a_stated_figure_must_agree_to_the_precision_it_states():
     assert flagged("416,161,000,001.0")  # states one decimal, so it must be that exact
 
 
-def test_a_whole_number_with_trailing_zeros_leaves_its_precision_unstated():
-    # "about 420 billion" for 416.161 billion is a correct rounding to two figures; "450" is not
-    assert not flagged("about 420 billion")
-    assert not flagged("about 400 billion")
-    assert flagged("about 450 billion")
-    assert flagged("about 4 billion")  # below ten there is only the one reading
+@pytest.mark.parametrize(
+    "text",
+    [
+        "about 420 billion",
+        "About 400 billion",
+        "approximately $420 billion",
+        "roughly 420 bn",
+        "around $420B",
+        "nearly 420 billion",
+        "~420 billion",
+        "~ $420 billion",
+        "about four hundred billion",
+        "roughly four hundred twenty billion",
+    ],
+)
+def test_a_hedged_whole_number_may_be_a_rounding_to_its_last_non_zero_place(text):
+    # true value 416.161 billion: 420 is its rounding to two figures, 400 to one
+    assert not flagged(text), text
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "420 billion",  # no hedge: the zero is a stated digit, and 416.161 is not 420
+        "Revenue was 420 billion.",
+        "$400B",
+        "four hundred billion",
+        "Revenue was exactly 420 billion.",
+        "about the same: 420 billion",  # the hedge must be on the figure itself
+        "about 450 billion",  # hedged, but not a rounding of 416.161 at any place
+        "roughly four hundred fifty billion",
+        "about 4 billion",  # below 100 there is only the one reading
+    ],
+)
+def test_unhedged_trailing_zeros_are_significant(text):
+    assert flagged(text), text
+
+
+def test_a_hedge_does_not_loosen_a_figure_that_states_its_precision():
+    assert not flagged("about 416 billion")
+    assert flagged("about 417 billion")
+    assert flagged("about 416.3 billion")
+    # and an exact whole number needs no hedge
+    assert not flagged("Revenue was 416,161,000,000.")
+    assert not flagged("416161000000")
 
 
 def test_a_scale_named_column_grounds_the_scaled_figure_at_its_precision():

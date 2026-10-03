@@ -56,10 +56,13 @@ planted values; the regression suite is `tests/planted_values.py`, shared with t
 - **A stated figure must agree to the precision it states.** The place of its last stated digit
   sets the tolerance: it is correct for a result number if that number rounds to it there (within
   half a unit of the last place, times the scale). `416.2 billion` is correct for 416.161 billion,
-  `416.3 billion` is not. There is no percentage slack. A whole number with trailing zeros (`420
-  billion`) leaves its precision unstated, so it is also accepted as a rounding to its last non-zero
-  place, but only when it states a magnitude or four or more digits and is at least 100: `about 420
-  billion` passes for 416.161 billion, `about 450 billion` and `about 4 billion` do not.
+  `416.3 billion` is not. There is no percentage slack. **Trailing zeros are stated digits unless
+  the answer hedges the figure**: only directly after `about`, `approximately`, `roughly`, `around`,
+  `nearly` or `~` is a whole number with trailing zeros also accepted as a rounding to its last
+  non-zero place (and only when it states a magnitude or four or more digits and is at least 100).
+  `about 420 billion` passes for 416.161 billion; `420 billion`, `about 450 billion` and `about 4
+  billion` do not. Without the hedge, the trailing-zero reading would let through most of what the
+  flat 1% tolerance did (amended 2026-10-03, DECISIONS.md).
 - It is grounded by a number in the result (a column whose name names a scale grounds the cell times
   that scale, as before), by a context number the framing stated, by the number of rows (a plain
   count only, never a scaled figure or a percentage), and, for a percentage, by a ratio cell times
@@ -150,6 +153,11 @@ _DIGITS_RE = re.compile(
     re.IGNORECASE,
 )
 
+# The words that make a round number a rounding ("about 420 billion"): directly before the figure.
+_HEDGE_RE = re.compile(
+    r"(?:\b(?:about|approximately|roughly|around|nearly)\s+|~\s*)$", re.IGNORECASE
+)
+
 # --- numbers in words ---------------------------------------------------------------------------
 
 _UNITS = {
@@ -177,7 +185,7 @@ class Claim:
     end: int
     value: float | None = None
     unit: float = 1.0  # the size of the last place the claim states
-    coarse_unit: float | None = None  # the last non-zero place, where trailing zeros hide it
+    coarse_unit: float | None = None  # the last non-zero place, for a hedged round number
     scaled: bool = False  # a magnitude was stated
     date: tuple[int | None, int, int] | None = None  # (year or None, month, day)
 
@@ -191,16 +199,23 @@ def _number_claim(
     exponent: int,
     whole_digits: str,
     scaled: bool,
+    hedged: bool,
 ) -> Claim:
     """`mantissa` is the number as written ("416.2"), `exponent` the power of ten of its magnitude.
-    Decimal keeps "391.035 billion" exactly 391035000000."""
+    Decimal keeps "391.035 billion" exactly 391035000000. `hedged`: the answer says "about"."""
     unit = Decimal(10) ** (exponent - decimals)
     zeros = len(whole_digits) - len(whole_digits.rstrip("0"))
     coarse = None
-    if decimals == 0 and zeros and abs(mantissa) >= 100 and (scaled or len(whole_digits) >= 4):
+    round_number = decimals == 0 and zeros and abs(mantissa) >= 100
+    if hedged and round_number and (scaled or len(whole_digits) >= 4):
         coarse = float(unit * 10**zeros)
     value = float(mantissa * Decimal(10) ** exponent)
     return Claim(kind, text, span[0], span[1], value, float(unit), coarse, scaled)
+
+
+def _hedged(text: str, start: int) -> bool:
+    """The figure starting at `start` is directly preceded by a hedge word."""
+    return bool(_HEDGE_RE.search(text, 0, start))
 
 
 def _spelled_claims(text: str) -> list[Claim]:
@@ -277,7 +292,15 @@ def _spelled_claims(text: str) -> list[Claim]:
             kind, j = "percent", j + 2
         span = (words[i][1], words[j - 1][2])
         claim = _number_claim(
-            kind, text[span[0] : span[1]], span, mantissa, len(decimals), exponent, whole, scaled
+            kind,
+            text[span[0] : span[1]],
+            span,
+            mantissa,
+            len(decimals),
+            exponent,
+            whole,
+            scaled,
+            _hedged(text, span[0]),
         )
         return claim, j
 
@@ -313,6 +336,7 @@ def _digit_claims(text: str) -> list[Claim]:
                 exponent,
                 whole,
                 bool(suffix),
+                _hedged(text, m.start()),
             )
         )
     return claims

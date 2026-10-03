@@ -52,6 +52,7 @@ The true value is 416,161,000,000 (fiscal 2025, AAPL). Each text states somethin
 | date, US numeric | The period ended 6/30/2022. | yes | yes | agree |
 | quarter label | In the quarter Q2. | yes | yes | agree |
 | form code lookalike | Filed a 391-K. | yes | yes | agree |
+| round number, no hedge | Revenue was 420 billion. | yes | yes | agree |
 
 ## Correct restatements of the same fact, both implementations
 

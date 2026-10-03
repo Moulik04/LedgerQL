@@ -112,6 +112,8 @@ _APOS_YEAR = re.compile(r"(?<![\w])['’](\d\d)(?!\d)")
 _ORDINAL = re.compile(r"\b\d+(?:st|nd|rd|th)\b")
 _LIST_MARKER = re.compile(r"(?m)^\s*\d{1,2}[.)]\s")
 _YEAR_SHAPE = re.compile(r"^(?:19|20)\d\d$")
+# Spec section 2: only a hedged round number leaves its precision unstated.
+_HEDGE = ("about", "approximately", "roughly", "around", "nearly")
 _GLUED_ID = re.compile(r"\b(?=[A-Za-z0-9]*\d)(?=[A-Za-z0-9]*[A-Za-z])[A-Za-z0-9]+\b")
 
 
@@ -128,6 +130,7 @@ class Claim:
     scale: float = 1.0
     percent: bool = False
     date: tuple[int | None, int | None, int | None] | None = None  # (year, month, day)
+    hedged: bool = False  # "about", "roughly", "~" ... stands directly before the number
     status: str = "ungrounded"  # grounded | weak | derived | ungrounded
     source: str = ""  # what grounded it
 
@@ -206,6 +209,15 @@ def _spelled_value(span: str) -> tuple[float, int, float] | None:
         value += float("0." + "".join(str(_UNITS[w]) for w in frac))
     ends_on_scale = bool(words) and words[-1] in _SCALE and not frac
     return value, len(frac), float(_SCALE[words[-1]]) if ends_on_scale else 1.0
+
+
+def _is_hedged(text: str, start: int) -> bool:
+    """The number starting at `start` comes straight after a hedge word or a tilde."""
+    before = text[:start].rstrip()
+    if before.endswith("~"):
+        return True
+    last = re.search(r"[A-Za-z]+$", before)
+    return bool(last) and last.group(0).lower() in _HEDGE
 
 
 def _to_year(s: str) -> int:
@@ -308,6 +320,7 @@ def extract_claims(text: str, mask_strings: list[str] | None = None) -> list[Cla
                 decimals=decimals,
                 scale=scale,
                 percent=percent,
+                hedged=_is_hedged(text, m.start()),
             ),
         )
 
@@ -327,6 +340,7 @@ def extract_claims(text: str, mask_strings: list[str] | None = None) -> list[Cla
                 decimals=decimals,
                 scale=scale,
                 percent=bool(pct),
+                hedged=_is_hedged(work, m.start()),
             ),
         )
     return claims
@@ -500,10 +514,11 @@ def _grounded_by_cells(c: Claim, cells: list[float]) -> bool:
 
 
 def _coarse_tolerance(c: Claim) -> float | None:
-    """For a whole-number mantissa with trailing zeros ("420 billion", "400,000"), the precision
-    those zeros leave unstated: half a unit of the last non-zero place. None if there are none."""
+    """For a hedged whole-number mantissa with trailing zeros ("about 420 billion", "roughly
+    400,000"), the precision those zeros leave unstated: half a unit of the last non-zero place.
+    None if there are none, or if the claim is not hedged: unhedged zeros are stated digits."""
     mantissa = abs(c.value) / c.scale
-    if c.decimals or mantissa < 10 or abs(mantissa - round(mantissa)) > 1e-9:
+    if not c.hedged or c.decimals or mantissa < 10 or abs(mantissa - round(mantissa)) > 1e-9:
         return None
     digits = str(int(round(mantissa)))
     zeros = len(digits) - len(digits.rstrip("0"))
@@ -532,6 +547,12 @@ def _derived(c: Claim, operands: list[float]) -> bool:
     return False
 
 
+# A real label, but nothing ties it to this answer: another company's period on this company's
+# figure is a misattributed period, so it is ungrounded (it was `weak` until 2026-10-03). The source
+# text says why, so a reader can tell it from a label the database does not hold at all.
+_OTHER_COMPANY = "the database holds this label, but not for the company the SQL names"
+
+
 def ground(claim: Claim, ev: Evidence) -> Claim:
     def set_(status: str, source: str = "") -> Claim:
         claim.status, claim.source = status, source
@@ -554,7 +575,7 @@ def ground(claim: Claim, ev: Evidence) -> Claim:
         if any(fits(x) for x in ev.co_dates):
             return set_("grounded", "database, for the company the SQL names")
         if any(fits(x) for x in ev.db_dates):
-            return set_("weak", "database label")
+            return set_("ungrounded", _OTHER_COMPANY)
         return set_("ungrounded")
     if claim.kind == "year":
         if int(claim.value) in ev.years or _grounded_by_cells(claim, ev.cells):
@@ -562,7 +583,7 @@ def ground(claim: Claim, ev: Evidence) -> Claim:
         if int(claim.value) in ev.co_years:
             return set_("grounded", "database, for the company the SQL names")
         if int(claim.value) in ev.db_years:
-            return set_("weak", "database label")
+            return set_("ungrounded", _OTHER_COMPANY)
         return set_("ungrounded")
     if _grounded_by_cells(claim, ev.cells):
         return set_("grounded", "result")
@@ -571,7 +592,9 @@ def ground(claim: Claim, ev: Evidence) -> Claim:
         _close(claim.value, g, coarse) or (claim.percent and _close(claim.value, 100 * g, coarse))
         for g in ev.cells
     ):
-        return set_("weak", "coarse rounding (trailing zeros read as unstated precision)")
+        return set_(
+            "weak", "coarse rounding (a hedged round number, read to its last non-zero place)"
+        )
     if _derived(claim, ev.operands):
         return set_("derived", "pair of result numbers")
     return set_("ungrounded")

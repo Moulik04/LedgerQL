@@ -64,11 +64,15 @@ identifier in which digits are glued to letters and that is not a magnitude or l
   the last stated place, times the scale. So `about 4 billion` is correct for 4.42e9 (it rounds to
   4 billion) and wrong for 4.62e9 (which rounds to 5); `4.4 billion` is correct for 4.43e9 and
   wrong for 4.46e9 (which rounds to 4.5). There is no percentage-style slack beyond half a unit.
-- **Coarse rounding (reported separately).** Trailing zeros in a whole-number claim leave its
-  precision unstated: `about 420 billion` may mean 420 to the billion or 42 tens of billions. A claim
-  that fails the rule above but is a correct rounding of a result number to its last **non-zero** place
-  (`420 billion` for 416.161 billion) is `weak`, source "coarse rounding": not counted as
-  ungrounded, never counted as strongly grounded. Fewer than ten (`4 billion`) has no such reading.
+- **Coarse rounding (reported separately), for a hedged round number only.** Trailing zeros in a
+  whole-number claim leave its precision unstated **only when the answer hedges the figure**: directly
+  after `about`, `approximately`, `roughly`, `around`, `nearly` or `~`, `about 420 billion` may mean
+  420 to the billion or 42 tens of billions. Such a claim that fails the rule above but is a correct
+  rounding of a result number to its last **non-zero** place (`about 420 billion` for 416.161 billion)
+  is `weak`, source "coarse rounding": not counted as ungrounded, never counted as strongly grounded.
+  Fewer than ten (`about 4 billion`) has no such reading. **Without a hedge, trailing zeros are stated
+  digits**: `420 billion` for 416.161 billion is `ungrounded`. (Amended 2026-10-03: unhedged, the
+  trailing-zero reading accepts most of what a flat 1% tolerance did.)
 
 ## 3. Grounding: where a claim may come from
 
@@ -91,9 +95,13 @@ A claim is **grounded** if it is correct (section 2) for:
    `filings.fiscal_year`, a `filings.period_end_date` or a `financial_facts.ddate` of that company).
    The framing's "fiscal year 2025 (period ended June 30, 2025)" is grounded this way.
 
-**Weak grounding (reported separately, never silently counted as strong):** a year or date that is
-in none of the above, and for which the SQL names no company that has it, but which exists as a label
-in the database for *any* company. It proves the label is real, not that it belongs to this answer.
+**A label the database holds only for another company is ungrounded** (amended 2026-10-03; it was
+`weak`). A year or date that is in none of the above, and for which the SQL names no company that has
+it, is `ungrounded` even if it exists as a label in the database for some company. That it is a real
+label does not make it this answer's: another company's period attached to this company's figure is
+the misattributed period the year rule exists to catch. The claim's source records that the database
+holds the label, so a reader can tell this from a label that exists nowhere. **`weak` is coarse
+rounding only** (section 2).
 Numbers get no weak grounding.
 
 **Derived:** a claim not grounded by 1 to 6 but equal to the sum, difference, ratio, or percentage
@@ -116,6 +124,8 @@ listed; weak and derived counts beside it.
 
 Not counted: a bare `one`, `half`, `a third`, `a dozen`, ordinals in words, "twice" and the like
 (relative statements); a quantity hidden in a word the lists do not know. Abbreviation `m`/`b`/`t`/`k`
-attached to a number is read as a magnitude even if it meant minutes or bytes. A weakly grounded date
-is not tied to the right company, and a company named only by a join or a subquery is not found. A number that happens to equal the row count or any unrelated cell is
+attached to a number is read as a magnitude even if it meant minutes or bytes. A company named only by a join or
+a subquery is not found, so a year or date that is right for that company is flagged `ungrounded`
+(since 2026-10-03; before, it was `weak` and uncounted). It is listed with its source like every
+ungrounded claim, and is the audit's own false positive to look for when reading the list. A number that happens to equal the row count or any unrelated cell is
 grounded by it: the audit cannot tell a coincidence from a transcription.

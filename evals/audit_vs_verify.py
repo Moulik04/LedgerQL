@@ -57,6 +57,7 @@ PLANTS = [
     ("date, US numeric", "The period ended 6/30/2022."),
     ("quarter label", "In the quarter Q2."),
     ("form code lookalike", "Filed a 391-K."),
+    ("round number, no hedge", "Revenue was 420 billion."),
 ]
 
 
