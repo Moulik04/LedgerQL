@@ -286,6 +286,9 @@ def run(gold_path: Path, db_path: str, judge=None, only: set[str] | None = None)
             "refusal": result.get("refusal"),
             "state": result.get("state"),
             "assumptions": result.get("assumptions"),
+            # the text of a draft the verifier blocked (figure 1a), so the block can be audited
+            "blocked_draft": result.get("blocked_draft"),
+            "blocked_claims": result.get("blocked_claims", []),
             "guardrail_events": result.get("guardrail_events", []),
             "confidence": result.get("confidence"),
             "repair": result.get("repair"),

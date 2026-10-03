@@ -83,10 +83,19 @@ def load(path: str) -> list[dict]:
     return [json.loads(x) for x in Path(path).read_text().splitlines() if x.strip()]
 
 
-def compare_runs(db: str) -> tuple[list[dict], dict]:
+def blocks_by_run(db: str, runs: dict[str, str] | None = None) -> dict[str, dict]:
+    """Per run: figure 1a's counts (`draft_rate`) and each blocked draft's verdict."""
+    out = {}
+    for label, path in (runs or RUNS).items():
+        records = load(path)
+        out[label] = {"rate": draft_rate(records, db), "blocks": classify_blocks(records, db)}
+    return out
+
+
+def compare_runs(db: str, runs: dict[str, str] | None = None) -> tuple[list[dict], dict]:
     questions = pipeline_acceptance._questions()
     rows_out, totals = [], {}
-    for label, path in RUNS.items():
+    for label, path in (runs or RUNS).items():
         answered = 0
         for rec in load(path):
             if not rec.get("answer"):
@@ -117,6 +126,56 @@ def compare_runs(db: str) -> tuple[list[dict], dict]:
     return rows_out, totals
 
 
+BLOCKED = "UNGROUNDED_ANSWER"
+
+
+def classify_blocks(records: list[dict], db: str | None) -> list[dict]:
+    """Every draft the verifier blocked, judged by the auditor on the stored draft text
+    (`blocked_draft`, recorded since 2026-10-03). `invented`: the auditor finds an ungrounded claim
+    too, so the block was right. `verifier false positive`: the auditor grounds every claim, so the
+    verifier refused a true statement. A weak or derived claim is listed and never makes a draft
+    invented (protocol 6a). A record from before drafts were stored is `draft not stored`."""
+    out = []
+    for rec in records:
+        if rec.get("reason_code") != BLOCKED:
+            continue
+        block = {"id": rec["id"], "draft": rec.get("blocked_draft"), "ungrounded": [], "weak": [],
+                 "derived": [], "refused": rec.get("blocked_claims", [])}  # fmt: skip
+        if not block["draft"]:
+            out.append({**block, "verdict": "draft not stored"})
+            continue
+        a = number_audit.audit_answer(
+            block["draft"],
+            rec["columns"],
+            [tuple(r) for r in rec["rows"]],
+            rec.get("generated_sql"),
+            db,
+        )
+        block["ungrounded"] = [(c.kind, c.text) for c in a.ungrounded]
+        block["weak"] = [(c.kind, c.text) for c in a.of("weak")]
+        block["derived"] = [(c.kind, c.text) for c in a.of("derived")]
+        verdict = "invented" if block["ungrounded"] else "verifier false positive"
+        out.append({**block, "verdict": verdict})
+    return out
+
+
+def draft_rate(records: list[dict], db: str | None) -> dict[str, int]:
+    """Figure 1a and what it is made of: of the answers the pipeline drafted (shipped plus
+    blocked), how many the verifier blocked, split by the auditor's verdict on each block."""
+    blocks = classify_blocks(records, db)
+    shipped = sum(1 for r in records if r.get("answer"))
+    count = {v: sum(b["verdict"] == v for b in blocks) for v in
+             ("invented", "verifier false positive", "draft not stored")}  # fmt: skip
+    return {
+        "drafted": shipped + len(blocks),
+        "shipped": shipped,
+        "blocked": len(blocks),
+        "invented": count["invented"],
+        "verifier_false_positive": count["verifier false positive"],
+        "draft_not_stored": count["draft not stored"],
+    }
+
+
 def plant_table() -> list[dict]:
     out = []
     for form, text in PLANTS:
@@ -136,7 +195,47 @@ def honest_table() -> list[dict]:
     return out
 
 
-def render(rows: list[dict], totals: dict, plants: list[dict], honest: list[dict]) -> str:
+def render_blocks(by_run: dict[str, dict]) -> list[str]:
+    lines = [
+        "## Blocked drafts (figure 1a): an invented number, or the verifier being wrong?",
+        "",
+        "Of the answers the pipeline drafted (shipped plus blocked), the ones the verifier blocked, each",
+        "judged by the auditor on the stored draft. A block the auditor also flags is an invented number;",
+        "a block the auditor grounds completely is a verifier false positive. Runs from before 2026-10-03",
+        "did not store the draft, so their blocks cannot be judged.",
+        "",
+        "| run | drafted | blocked | invented | verifier false positive | draft not stored |",
+        "|---|---|---|---|---|---|",
+    ]
+    for label, b in by_run.items():
+        r = b["rate"]
+        lines.append(
+            f"| {label} | {r['drafted']} | {r['blocked']} | {r['invented']} | "
+            f"{r['verifier_false_positive']} | {r['draft_not_stored']} |"
+        )
+    lines.append("")
+    for label, b in by_run.items():
+        for blk in b["blocks"]:
+            if blk["verdict"] == "draft not stored":
+                continue
+            lines += [
+                f"### {label} / {blk['id']}: {blk['verdict']}",
+                "",
+                f"- draft: {blk['draft']}",
+                f"- the verifier refused: {blk['refused']}",
+                f"- auditor ungrounded: {blk['ungrounded']}; weak: {blk['weak']}; derived: {blk['derived']}",
+                "",
+            ]
+    return lines
+
+
+def render(
+    rows: list[dict],
+    totals: dict,
+    plants: list[dict],
+    honest: list[dict],
+    blocks: dict[str, dict] | None = None,
+) -> str:
     dis = [r for r in rows if r["verifier_ok"] != r["audit_clean"]]
     lines = [
         "# Independent number audit beside the verifier (dev runs only)",
@@ -164,6 +263,8 @@ def render(rows: list[dict], totals: dict, plants: list[dict], honest: list[dict
             f"- verifier: ok. auditor ungrounded: {r['ungrounded']}",
             "",
         ]
+    if blocks:
+        lines += render_blocks(blocks)
     lines += [
         "## Planted invented values, both implementations",
         "",
@@ -208,9 +309,17 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--db", default=DEFAULT_DB)
     ap.add_argument("--write", type=Path)
+    ap.add_argument(
+        "--run",
+        action="append",
+        default=[],
+        metavar="LABEL=PATH",
+        help="a per-case jsonl to audit instead of the committed dev runs (repeatable)",
+    )
     args = ap.parse_args(argv)
-    rows, totals = compare_runs(args.db)
-    text = render(rows, totals, plant_table(), honest_table())
+    runs = dict(r.split("=", 1) for r in args.run) or None
+    rows, totals = compare_runs(args.db, runs)
+    text = render(rows, totals, plant_table(), honest_table(), blocks_by_run(args.db, runs))
     if args.write:
         args.write.write_text(text)
     print(text)

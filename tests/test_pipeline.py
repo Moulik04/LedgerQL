@@ -296,6 +296,71 @@ def test_ask_abstains_on_ungrounded_answer(monkeypatch):
     assert len(records) == 1
 
 
+def test_a_blocked_draft_is_kept_with_what_the_verifier_refused(monkeypatch):
+    # Figure 1a counts blocks. Without the text, nobody can tell an invented number from a
+    # verifier false positive, so the draft and the refused claims go into the record.
+    records = _patch_audit(monkeypatch)
+    _patch_classify_in_scope(monkeypatch)
+    _patch_generate(monkeypatch)
+    monkeypatch.setattr(
+        guardrails_module,
+        "validate",
+        lambda sql, db_path=None: guardrails_module.GuardrailResult(ok=True, sql=sql),
+    )
+    monkeypatch.setattr(
+        execute_module,
+        "execute",
+        lambda sql, db_path=None: ExecutionResult(columns=["x"], rows=[(1,)]),
+    )
+    monkeypatch.setattr(
+        consensus_module,
+        "vote",
+        lambda guards, execs: ConsensusResult(
+            sql="SELECT 1", columns=["x"], rows=[(1,)], agreement=1.0, reason_code=None
+        ),
+    )
+    monkeypatch.setattr(answer_module, "write_answer", lambda r: "The value is 999 billion.")
+
+    result = pipeline.ask("q")  # the real verifier
+
+    assert result["answer"] is None and result["reason_code"] == "UNGROUNDED_ANSWER"
+    assert result["blocked_draft"] == "The value is 999 billion."
+    assert result["blocked_claims"] == ["999 billion"]
+    assert "999" not in result["refusal"]  # what the user is told never quotes the draft
+    assert records[0]["blocked_draft"] == "The value is 999 billion."
+    assert records[0]["blocked_claims"] == ["999 billion"]
+
+
+def test_an_answer_that_ships_has_no_blocked_draft(monkeypatch):
+    records = _patch_audit(monkeypatch)
+    _patch_classify_in_scope(monkeypatch)
+    _patch_generate(monkeypatch)
+    monkeypatch.setattr(
+        guardrails_module,
+        "validate",
+        lambda sql, db_path=None: guardrails_module.GuardrailResult(ok=True, sql=sql),
+    )
+    monkeypatch.setattr(
+        execute_module,
+        "execute",
+        lambda sql, db_path=None: ExecutionResult(columns=["x"], rows=[(1,)]),
+    )
+    monkeypatch.setattr(
+        consensus_module,
+        "vote",
+        lambda guards, execs: ConsensusResult(
+            sql="SELECT 1", columns=["x"], rows=[(1,)], agreement=1.0, reason_code=None
+        ),
+    )
+    monkeypatch.setattr(answer_module, "write_answer", lambda r: "The value is 1.")
+
+    result = pipeline.ask("q")
+
+    assert result["answer"] == "The value is 1."
+    assert result["blocked_draft"] is None and result["blocked_claims"] == []
+    assert records[0]["blocked_draft"] is None
+
+
 def test_ask_returns_full_success_result_with_confidence(monkeypatch):
     records = _patch_audit(monkeypatch)
     _patch_classify_in_scope(monkeypatch)

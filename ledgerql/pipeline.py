@@ -421,6 +421,11 @@ def _answer_from(
             confidence=confidence,
             repair=repair,
             candidates=candidates,
+            # The withheld text and the claims the verifier refused, for the audit trail only:
+            # they let an independent check say whether a block was an invented number or the
+            # verifier being wrong. Never shown to the user (the refusal does not quote them).
+            blocked_draft=answer_text,
+            blocked_claims=verify_result.ungrounded_claims,
         )
 
     return _finish(
@@ -467,6 +472,8 @@ def _finish(
     confidence: float | None = None,
     repair: dict | None = None,
     candidates: list[dict] | None = None,
+    blocked_draft: str | None = None,
+    blocked_claims: list[str] | None = None,
 ) -> dict:
     guardrail_events = guardrail_events or []
     columns = columns or []
@@ -492,6 +499,8 @@ def _finish(
             "ABSTAIN" if answer is None else ("ANSWER_WITH_ASSUMPTION" if assumptions else "ANSWER")
         ),
         "assumptions": list(assumptions or []),
+        "blocked_draft": blocked_draft,
+        "blocked_claims": list(blocked_claims or []),
     }
     if candidates is not None:
         result["candidates"] = candidates
@@ -514,6 +523,8 @@ def _finish(
             "refusal": result["refusal"],
             "state": result["state"],
             "assumptions": result["assumptions"],
+            "blocked_draft": blocked_draft,
+            "blocked_claims": result["blocked_claims"],
             "repair": repair,
             "candidates": candidates,
             "latency_ms": latency_ms,

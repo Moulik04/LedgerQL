@@ -12,15 +12,28 @@ every disagreement is the auditor flagging something the verifier let through.
 
 Disagreements: 0 of 141 answered records.
 
+## Blocked drafts (figure 1a): an invented number, or the verifier being wrong?
+
+Of the answers the pipeline drafted (shipped plus blocked), the ones the verifier blocked, each
+judged by the auditor on the stored draft. A block the auditor also flags is an invented number;
+a block the auditor grounds completely is a verifier false positive. Runs from before 2026-10-03
+did not store the draft, so their blocks cannot be judged.
+
+| run | drafted | blocked | invented | verifier false positive | draft not stored |
+|---|---|---|---|---|---|
+| 30B rerun 47367323 | 59 | 4 | 0 | 0 | 4 |
+| 30B partial 47314853 | 46 | 4 | 0 | 0 | 4 |
+| 32B 47314855 | 47 | 3 | 0 | 0 | 3 |
+
 ## Planted invented values, both implementations
 
 The true value is 416,161,000,000 (fiscal 2025, AAPL). Each text states something invented.
 
 | form | text | verifier catches | auditor catches | verdict |
 |---|---|---|---|---|
-| digits | Revenue was 417,500,000,000.0. | **no** | yes | verifier blind spot |
-| decimal | Revenue was 417500000000.5. | **no** | yes | verifier blind spot |
-| magnitude word | Revenue was $417.5 billion. | **no** | yes | verifier blind spot |
+| digits | Revenue was 417,500,000,000.0. | yes | yes | agree |
+| decimal | Revenue was 417500000000.5. | yes | yes | agree |
+| magnitude word | Revenue was $417.5 billion. | yes | yes | agree |
 | mis-scaled word | Revenue was 416.161 million. | yes | yes | agree |
 | abbreviation B | Revenue was $417.5B. | yes | yes | agree |
 | abbreviation bn | Revenue was 417.5 bn. | yes | yes | agree |
@@ -28,9 +41,9 @@ The true value is 416,161,000,000 (fiscal 2025, AAPL). Each text states somethin
 | abbreviation K | Revenue was 417500K. | yes | yes | agree |
 | percent sign | Growth was 38%. | yes | yes | agree |
 | percent word | Growth was 38 percent. | yes | yes | agree |
-| spelled-out integer | There were forty-two. | **no** | yes | verifier blind spot |
-| spelled-out scale | Revenue was four hundred seventeen billion. | **no** | yes | verifier blind spot |
-| spelled-out decimal | Growth was two point five percent. | **no** | yes | verifier blind spot |
+| spelled-out integer | There were forty-two. | yes | yes | agree |
+| spelled-out scale | Revenue was four hundred seventeen billion. | yes | yes | agree |
+| spelled-out decimal | Growth was two point five percent. | yes | yes | agree |
 | small digit count | There were 7 filings. | yes | yes | agree |
 | year, wrong | For fiscal year 2022. | yes | yes | agree |
 | year, FY form | For FY22. | yes | yes | agree |
@@ -38,7 +51,7 @@ The true value is 416,161,000,000 (fiscal 2025, AAPL). Each text states somethin
 | date, ISO | The period ended 2022-06-30. | yes | yes | agree |
 | date, US numeric | The period ended 6/30/2022. | yes | yes | agree |
 | quarter label | In the quarter Q2. | yes | yes | agree |
-| form code lookalike | Filed a 391-K. | **no** | yes | verifier blind spot |
+| form code lookalike | Filed a 391-K. | yes | yes | agree |
 
 ## Correct restatements of the same fact, both implementations
 
@@ -51,12 +64,12 @@ Every row is true, so the right verdict is to accept.
 | rounded to the billion | Revenue was about 416 billion. | yes | yes | agree |
 | rounded to a tenth of a billion | Revenue was 416.2 billion. | yes | yes | agree |
 | rounded to ten billion | Revenue was roughly 420 billion. | yes | yes | agree |
-| abbreviation B | Revenue was $416B. | **no** | yes | verifier too strict |
-| abbreviation bn | Revenue was 416 bn. | **no** | yes | verifier too strict |
-| abbreviation T | Revenue was $0.4T. | **no** | yes | verifier too strict |
+| abbreviation B | Revenue was $416B. | yes | yes | agree |
+| abbreviation bn | Revenue was 416 bn. | yes | yes | agree |
+| abbreviation T | Revenue was $0.4T. | yes | yes | agree |
 | in millions | Revenue was 416,161 million. | yes | yes | agree |
 | spelled out | Revenue was four hundred sixteen billion. | yes | yes | agree |
 | fiscal year, long | For fiscal year 2025. | yes | yes | agree |
-| fiscal year, FY form | For FY25. | **no** | yes | verifier too strict |
+| fiscal year, FY form | For FY25. | yes | yes | agree |
 | form code | Per the 10-K for fiscal 2025. | yes | yes | agree |
-| ordinal | The 3rd largest filer. | **no** | yes | verifier too strict |
+| ordinal | The 3rd largest filer. | yes | yes | agree |
