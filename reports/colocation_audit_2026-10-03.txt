@@ -1,0 +1,10 @@
+Audited 17 of 19 ledgerql jobs.
+
+**Same model, same node, overlapping in time (the silent case):**
+- 47314848 and 47314853 (qwen3_30b) on w006, 225s
+
+Different models overlapping on one node (loud: the wrong server answers 404):
+- 47274009 and 47274010 (xiyan_32b / omnisql_32b) on w009, 284s; a job failed: True
+- 47314848 and 47314850 (qwen3_30b / xiyan_32b) on w006, 234s; a job failed: True
+
+Not auditable (no node or no start/end recorded): 46583436, 46583437

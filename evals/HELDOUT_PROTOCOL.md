@@ -229,7 +229,9 @@ longer chosen from held-out results. Amended again 2026-10-02, before the rerun'
      a deliberately separate implementation that shares no code with `ledgerql/verify.py`: an
      extension of `evals/year_audit.py` to all numerals, spelled-out numbers ("forty-two") and
      magnitude words ("billion"). The agreement test stays: it guards the evaluator; the independent
-     audit is the measurement. The auditor is built and tested on dev runs **before any held-out run**.
+     audit is the measurement. The auditor is `evals/number_audit.py`, written from the plain-language
+     spec `evals/NUMBER_AUDIT_SPEC.md` with no import from `ledgerql/` (a test enforces it); built and
+     tested on dev runs 2026-10-03 (`reports/number_audit_vs_verify.md`), **before any held-out run**.
      The old figure (the verifier's own rate on shipped answers) may be printed beside them, labelled
      as zero by construction;
   2. the **confidently-wrong rate**: wrong answers over answered cases;

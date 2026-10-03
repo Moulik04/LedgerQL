@@ -2634,3 +2634,106 @@ Supersedes the 76-record figures in the 2026-10-02 acceptance table. 103 records
 
 `sacct.txt` for the co-location audit; the independent auditor (built and tested on dev runs before any held-out
 run); the 32B pipeline rerun is not needed for the 30B figures. MJ fills the blind label file and writes the 80 questions.
+
+---
+
+## 2026-10-03 (later) — Offline scoring made load-proof, a correction, the independent number auditor, and the co-location audit
+
+### 1. Offline scoring cannot depend on the machine (`evals/offline_exec.py`)
+
+Re-scoring recorded candidates asks whether the SQL is right, not whether it was fast, so a verdict must never
+turn on load. The live pipeline keeps its 10 s timeout (there a slow query is legitimately an `EXEC_ERROR`;
+`ledgerql/` is unchanged and H1's tree is untouched). Offline: a 120 s timeout (the slowest of the 1,000 A/B
+candidates took 0.043 s on an idle machine, p95 12 ms); every outcome has its own status (`ok`,
+`guard_rejected`, `error`, `timeout`, `unstable`); anything not `ok` is retried, up to 3 runs; a candidate that
+still times out, or fails differently on each attempt, raises `ScoringIncomplete` naming it and is **never**
+scored as wrong. Every `score_bakeoff` call is strict by default, so every decision path (`heldout_config`,
+`entity_link_eval`, `entity_upper_bound`, `rescore_v2`) fails loudly. Tested (`tests/test_offline_exec.py`,
+`tests/test_rescore_v2.py`).
+
+**Re-scored the committed A/B evidence this way: the decision figures are unchanged** (30B +0.2440
+[+0.1560, +0.3400], XiYan +0.1120 [+0.0440, +0.1880], decision on; byte-identical `reason`). Outcomes:
+30B 490 `ok`, 8 `error`, 2 `guard_rejected`; XiYan 486, 12, 2; no timeout, no unstable. The 8 and 12 `error`
+candidates reproduced the same SQL error on all 3 attempts, so they are real errors.
+
+**A correction.** The entry above (2026-10-03) says the 228-versus-229 flip was a candidate hitting the 10 s
+timeout under load. **That was a hypothesis written as a cause, and it did not survive testing.** At the old 10 s
+timeout, 8 parallel scorers plus 4 CPU burners (8,000 candidate executions) and 3 scorers during Ollama
+generation (3,000) gave results identical to an idle machine, and verdicts are identical across 8 values of
+`PYTHONHASHSEED`. The single flip (one baseline-correct candidate scored wrong in the linked condition, once) has
+**no established cause** and has not recurred. The new scoring path would catch it if it was an environmental
+failure (it would retry, then fail loudly); it cannot catch a verdict that is wrong without an error. Every
+committed report and the decision come from scorings that agree with each other and with the idle runs.
+
+### 2. The independent number auditor (`evals/number_audit.py`)
+
+- **`evals/year_audit.py` imports `ledgerql.verify`** (its extraction regexes `_NUMBER_RE`, `_FORM_CODE_RE`,
+  `_YEAR_RE`, `extract_years` and `result_years`). It was therefore **never independent**: it can only see what
+  `verify.py` sees, and it inherits `verify.py`'s exclusions (any bare 2000-2099 number, any digits followed by a
+  hyphen and a capital). It stays as a year-only diagnostic and is not the audit.
+- **Spec first** (`evals/NUMBER_AUDIT_SPEC.md`, plain language): digits, decimals, thousands separators,
+  percentages, currency, magnitude words and abbreviations (`billion`, `B`, `bn`, `T`, `K`), spelled-out numbers,
+  years, dates, period labels; what is not a claim (names with digits, a fixed list of form codes, ordinals, list
+  markers, identifiers); precision (a claim must equal the result number rounded to its stated place); and
+  grounding sources. The auditor was written from that spec, imports nothing from `ledgerql/` (a test parses its
+  imports) and was not written by reading `verify.py`'s extraction.
+- **Grounding tiers, never merged:** `grounded` (result, row count, SQL year or date, a label the database holds for
+  the company the SQL names); `weak` (a real label for some other company, or a *coarse rounding*: `420 billion`
+  for 416.161 billion, because trailing zeros leave precision unstated); `derived` (sum, difference, ratio or
+  percentage change of two numeric cells, three or more significant digits only); `ungrounded`. Two design choices
+  the first draft got wrong and testing fixed: "about a hundred" passed as the percentage change between a row
+  count and a year (derived now excludes the row count, year cells and short numbers), and the framing's period
+  labels were only weakly grounded (now tied to the company the SQL names).
+- **Tests:** 76, including 37 planted invented values in every form (digits, decimals, magnitude words,
+  mis-scaled units, `B`/`bn`/`T`/`K`, `%`/percent/per cent, spelled-out integers/scales/decimals, years, `FY`,
+  four date forms, a quarter label) which must all be flagged, and 17 correct restatements which must all pass.
+
+**On every answered dev record** (`reports/number_audit_vs_verify.md`, 141 records: 30B rerun 55, 30B partial 42,
+32B 44): 308 claims (202 numbers, 80 years, 16 dates, 10 percentages); **0 ungrounded, 0 disagreements with the
+verifier**, 0 weak, 0 derived; 31 year and date labels (the framing's) grounded in the database for the company
+the SQL names; 9 answers state no number. So on dev the independent audit agrees with the 0%: the shipped answers
+contain no invented number. Its limits: it shares the evidence (result, SQL) with the pipeline; the writer is
+question-blind and restates a table, so the shipped text is easy to ground; and the 4 drafts the verifier blocked
+cannot be audited because the draft text is not stored (only the verifier's detail), so the draft rate (4 of 59
+on the 30B rerun) is a count only.
+
+**Since the real records produce no disagreement, the blind spots show in planted values** (same table, both
+implementations, true value 416,161,000,000):
+
+| | verifier | auditor |
+|---|---|---|
+| planted invented values caught (21 forms) | 14 | **21** |
+| correct restatements accepted (14 forms) | 9 | **14** |
+
+*Verifier blind spots (it accepts an invented value):* a figure within its 1% tolerance (`417,500,000,000.0`,
+`417500000000.5`, `$417.5 billion`, 0.3% off); **every spelled-out number** (`forty-two`, `four hundred
+seventeen billion`, `two point five percent`), because it only reads digits; and a form-code lookalike
+(`391-K`), because it skips any digits followed by a hyphen and a capital letter. *Verifier too strict (it
+refuses a true statement):* `$416B`, `416 bn`, `$0.4T` (abbreviations are not magnitudes to it), `FY25`, and
+`3rd`. *Auditor blind spots found:* none among the planted forms; its documented limits are in the spec
+(section 5), and the coarse-rounding tier is the one place it is loose (`about 400 billion` for 416 is `weak`,
+reported, not counted as ungrounded).
+
+The verifier's spelled-out blind spot is the one to weigh, and it is not hypothetical: **7 of the 308 real claims
+are spelled-out numbers** ("ten companies" in `A01` and `A09`, "two values" in `U03` and `M01`, across the three
+runs), which the verifier never reads. The auditor grounds all seven in the result's row count, so on dev they
+are correct. Nothing in the pipeline stops the writer from spelling out a wrong count or value, and the verifier
+would pass it; the independent audit is what would notice.
+
+### 3. Co-location audit on `sacct.txt` (`reports/colocation_audit_2026-10-03.txt`, the input beside it)
+
+Audited 17 of the 19 `ledgerql` jobs; 46583436 and 46583437 were cancelled before they started (no node, no start
+time), so they served nothing. **Same model, same node, overlapping in time (the silent case): exactly one pair,
+47314848 and 47314853 (both Qwen3-30B) on `w006`, for 225 s**, the pair already known. Different models
+overlapping (loud: the wrong server answers 404): 47274009 and 47274010 (XiYan and OmniSQL) on `w009`, 284 s, and
+OmniSQL's job failed (the known casualty); 47314848 and 47314850 (30B and XiYan) on `w006`, 234 s, and XiYan's job
+failed. No other overlap anywhere: the Sep 14 pair (`w008`, 02:55-03:01 and 03:39-03:44), the Sep 20 pair (`w003`,
+16:07-16:12 and 16:15-16:22), the Sep 29 30B and 32B-AWQ jobs on `w007` (18:40-18:46 and 18:48-18:55, a
+two-minute gap), and today's reruns (47367322 on `w008`, 47367323 on `w010`, the same start time on different
+nodes). This resolves the open question in the 2026-10-02 entry: the Sep 20 cancelled pair never ran, so the "could
+have overlapped" caveat is closed.
+
+**Consequence:** the only possible silent same-model collision in the project's history is the one the 30B A/B
+sits in. Both of its conditions ran inside that job, so which were interleaved is unknown; the effect is batching
+noise, and the linker decision's lower confidence bound for the 30B (+0.156) is well clear of it. No other past
+run was served by another job's server.
