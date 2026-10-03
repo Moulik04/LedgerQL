@@ -158,3 +158,34 @@ def test_a_baseline_run_does_not_get_the_new_refusal_text_replayed_onto_its_abst
     assert replayed.rubric_pass is True  # the registry's sentence states the documented gap
     (baseline,) = R.score_report([rec], gold, judge=yes, replay_refusal=False)
     assert baseline.rubric_pass is None  # an old abstain had no text, so there is nothing to grade
+
+
+def _evidence(sql="SELECT ticker FROM companies LIMIT 1"):
+    return [{"model": "m", "profile": "baseline", "id": "A09", "sqls": [sql, sql]}]
+
+
+def test_a_candidate_that_times_out_is_never_scored_as_wrong_it_stops_the_run(gold, monkeypatch):
+    from evals import offline_exec as O
+
+    timed_out = O.Outcome("timeout", error="query timed out after 120.0s", attempts=3)
+    monkeypatch.setattr(R.offline_exec, "run_candidate", lambda sql, db: timed_out)
+    with pytest.raises(O.ScoringIncomplete, match="m/baseline/A09#0"):
+        R.score_bakeoff(_evidence(), gold)
+
+
+def test_a_non_strict_run_records_the_timeout_as_its_own_status(gold, monkeypatch):
+    from evals import offline_exec as O
+
+    timed_out = O.Outcome("timeout", error="query timed out after 120.0s", attempts=3)
+    monkeypatch.setattr(R.offline_exec, "run_candidate", lambda sql, db: timed_out)
+    (pool,) = R.score_bakeoff(_evidence(), gold, strict=False)
+    assert [c.status for c in pool.cands] == ["timeout", "timeout"]
+    assert pool.cands[0].attempts == 3 and pool.cands[0].rows is None
+
+
+def test_a_deterministic_sql_error_is_scored_wrong_with_status_error_and_does_not_stop(gold):
+    (pool,) = R.score_bakeoff(
+        _evidence("SELECT CAST(name AS INTEGER) FROM companies LIMIT 1"), gold
+    )
+    assert [c.status for c in pool.cands] == ["error", "error"]
+    assert not pool.pass_at_n("v3")

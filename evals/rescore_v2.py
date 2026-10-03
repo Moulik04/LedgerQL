@@ -30,8 +30,8 @@ from pathlib import Path
 
 import duckdb
 
-from evals import bakeoff_evidence, must_state
-from evals.passn_scoring import _run_candidate_ex, load_jsonl
+from evals import bakeoff_evidence, must_state, offline_exec
+from evals.passn_scoring import load_jsonl
 from evals.scoring import case_match, load_gold
 from ledgerql import refusal as refusal_module
 from ledgerql.consensus import _row_sort_key
@@ -194,6 +194,8 @@ class Cand:
     via: frozenset = frozenset()
     guard_sql: str | None = None  # the SQL actually executed (after the guard's rewrite)
     columns: list[str] | None = None
+    status: str = "ok"  # offline_exec: ok, guard_rejected, error, timeout or unstable
+    attempts: int = 1
 
     @property
     def key(self) -> tuple | None:
@@ -229,21 +231,32 @@ def vote_winner(keys: list[tuple | None]) -> int | None:
     return max(clusters.values(), key=len)[0]
 
 
-def score_bakeoff(evidence: list[dict], gold: Gold) -> list[Pool]:
+def score_bakeoff(evidence: list[dict], gold: Gold, strict: bool = True) -> list[Pool]:
+    """Score every recorded candidate. A candidate that times out or fails unstably under
+    `offline_exec` is recorded with that status, never as "wrong"; with `strict` (the default,
+    and what every decision run uses) any such candidate raises `ScoringIncomplete`."""
     pools = []
+    unresolved: dict[str, offline_exec.Outcome] = {}
     for rec in evidence:
         case = gold.v1[rec["id"]]
         if case["expected"] != "ANSWER":
             continue
         pool = Pool(rec["model"], rec["profile"], rec["id"], case["tier"])
         pool.recorded_winner_sql = rec.get("winner_sql")
-        for sql in rec["sqls"]:
-            guard_sql, rows, columns = _run_candidate_ex(sql, gold.db)
+        for i, sql in enumerate(rec["sqls"]):
+            out = offline_exec.run_candidate(sql, gold.db)
+            if out.status in offline_exec.UNRESOLVED:
+                unresolved[f"{rec['model']}/{rec['profile']}/{rec['id']}#{i}"] = out
+            rows, columns = out.rows, out.columns
             verdict = gold.verdicts(rec["id"], rows, columns)
             via = gold.via(rec["id"], rows, columns) if rows and verdict["v3"] else frozenset()
-            pool.cands.append(Cand(sql, rows, verdict, via, guard_sql, columns))
+            pool.cands.append(
+                Cand(sql, rows, verdict, via, out.guard_sql, columns, out.status, out.attempts)
+            )
         pool.winner = vote_winner([c.key for c in pool.cands])
         pools.append(pool)
+    if strict:
+        offline_exec.require_resolved(unresolved)
     return pools
 
 

@@ -34,9 +34,8 @@ from pathlib import Path
 
 import duckdb
 
+from evals import offline_exec
 from evals.scoring import case_matches, load_gold
-from ledgerql import execute as execute_module
-from ledgerql import guardrails as guardrails_module
 
 GOLD_PATH = Path(__file__).resolve().parent / "gold.jsonl"
 
@@ -67,14 +66,12 @@ def _run_candidate_ex(
     sql: str, db_path: str
 ) -> tuple[str | None, list[tuple] | None, list[str] | None]:
     """The live pipeline's guard-then-execute stage: (guard.sql, rows, column names), or
-    (None, None, None) if guardrails rejected it or it errored."""
-    guard = guardrails_module.validate(sql, db_path=db_path)
-    if not guard.ok:
-        return None, None, None
-    execution = execute_module.execute(guard.sql, db_path=db_path)
-    if execution.error is not None:
-        return None, None, None
-    return guard.sql, execution.rows, execution.columns
+    (None, None, None) if guardrails rejected it or it errored. Offline scoring: the query runs
+    under `offline_exec`'s timeout and retries, and a candidate that still times out or fails
+    unstably raises `ScoringIncomplete` instead of counting as wrong."""
+    out = offline_exec.run_candidate(sql, db_path)
+    offline_exec.require_resolved({sql: out})
+    return out.guard_sql, out.rows, out.columns
 
 
 def _run_candidate(sql: str, db_path: str) -> tuple[str | None, list[tuple] | None]:
