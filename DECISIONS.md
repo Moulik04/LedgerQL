@@ -2737,3 +2737,146 @@ have overlapped" caveat is closed.
 sits in. Both of its conditions ran inside that job, so which were interleaved is unknown; the effect is batching
 noise, and the linker decision's lower confidence bound for the 30B (+0.156) is well clear of it. No other past
 run was served by another job's server.
+
+---
+
+## 2026-10-03 (evening) — The flip is not tie-dependence, the verifier fixed from the audit, blocked drafts stored, configuration H2, and figure 1's tiers
+
+Four items from MJ's review of the entry above, all before any held-out question exists.
+
+### 1. The unexplained flip: checked for parallel-execution tie-dependence, and it is not that
+
+The hypothesis: DuckDB runs queries in parallel, so a candidate whose `ORDER BY` has ties, or that uses
+`LIMIT` without a total ordering, can return different rows from run to run, and a verdict could turn on it.
+
+The flipped candidate was never identified (the flip happened once and was not recorded), so the check covered
+everything it could have been: **1,222 statements**, which are every guard-accepted candidate in both A/B
+evidence files and every gold and alternative SQL of the three gold editions (the gold SQL is executed once per
+scoring, so it was a suspect too).
+
+- **Default threads (8):** 60 statements return their rows in a different *order* between runs. **No statement
+  returns a different *set* of rows**, in 40 runs each.
+- **`threads=1`:** every statement returns the same rows in the same order every time, and the same set of rows
+  as at default threads. So the order variation is parallelism, as supposed.
+- **None of the 60 has a `LIMIT`.** 57 have no `ORDER BY` at all, and every comparator is order-insensitive for
+  them. Three have an `ORDER BY` with ties, all for `J04`, whose comparator is `set`. So no order-varying
+  statement reaches a comparator that reads order.
+- **25 complete scorings of the 30B A/B at default threads, each with the gold re-executed:** 168 and 229
+  correct candidates every time, and 0 of the 500 candidates changed verdict.
+
+**Not the cause.** As instructed, no tie detector was added to `evals/offline_exec.py`, and **the flip stays
+recorded as unexplained.** What this does and does not show: nothing in the current evidence or gold is
+tie-dependent. A future candidate with a `LIMIT` over tied values would still be scored on whichever rows it
+returned, and the scorer would not notice.
+
+### 2. The verifier (`ledgerql/verify.py`) fixed from the audit's findings
+
+Written from `verify.py`'s own description and the planted values. **`evals/number_audit.py` was not opened
+while writing it** and none of its code was ported; a test now checks that `verify.py` imports nothing from
+`evals/`, beside the existing test that the auditor imports nothing from `ledgerql/`. The planted lists moved to
+`tests/planted_values.py` and are the regression suite for both (`tests/test_number_audit.py`,
+`tests/test_verify_planted.py`).
+
+*Too strict, fixed:* `$416B`, `416 bn`, `$0.4T` (and `mil`, `mln`, `bil`, `tril`, `mn`, `mm`, `tn`, `trn`, and
+`k`/`m`/`b`/`t` attached to the number) are magnitudes; `FY25` is the year 2025 and is checked as a year; `3rd`
+is not a claim, nor is a list marker at the start of a line, nor digits glued to letters (`H2O`, `x86`).
+
+*Too lenient, fixed:* spelled-out numbers are read and checked (`forty-two`, `four hundred seventeen billion`,
+`two point five percent`, `a hundred`; a bare `one` is a pronoun). **The flat 1% tolerance is gone: a stated
+figure must agree to the precision it states** (within half a unit of its last stated place, times its scale),
+so `416.2 billion` is right for 416.161 billion and `416.3 billion` is not. SEC form codes are a fixed list, so
+`391-K` is the number 391.
+
+*Decisions made while doing it that the review did not spell out.* Each is a choice, listed so it can be
+reversed:
+
+1. **A whole number with trailing zeros is also accepted as a rounding to its last non-zero place** (`about 420
+   billion` for 416.161 billion), but only when it states a magnitude or at least four digits and is at least
+   100. `about 450 billion` and `about 4 billion` are refused. The auditor calls this tier `weak`; the verifier
+   has no tiers, so it had to accept or refuse, and refusing a correct two-figure rounding is a false abstain.
+2. **The number of rows grounds a plain count** (`the ten companies` over ten rows), never a scaled figure or a
+   percentage. Needed because spelled-out numbers are now read: 7 of the 308 real dev claims are counts of this
+   kind, and without it every one of those answers would now be blocked.
+3. **A ratio cell grounds a percentage** (`17.2%` for 0.17208...). This is the 30B's blocked `R02`.
+4. **A date is one claim** (`January 29, 2026`, `29 January 2026`, `2026-01-29`, `1/29/2026`, `January 29`),
+   grounded by the same month and day in a date in the result or in a SQL literal, or by a day the framing
+   stated. Before, the day was read as a bare number, so restating a date cell in words was refused: the 30B's
+   blocked `L07`. The year inside a date the result grounds is not checked a second time.
+5. **`Q1`-`Q4`, `H1`, `H2` must appear in the result or the SQL.** Without this, no longer reading digits glued
+   to letters would have let an invented quarter through.
+6. **A string the result holds is not a claim where the answer repeats it** (`3M`, `Five Below`), as a whole
+   word only.
+7. *Not changed:* a sign is still compared as written, so `fell 5.2%` over a cell of -5.2 is still refused. The
+   auditor ignores the sign. This is a known remaining false abstain, left alone because it was not in scope.
+
+**Evidence that nothing true is newly refused.**
+
+| check | result |
+|---|---|
+| planted invented values caught (21 forms, `evals/audit_vs_verify.py`) | verifier 14 → **21**; auditor 21 |
+| correct restatements accepted (14 forms) | verifier 9 → **14**; auditor 14 |
+| shared planted suite (37 invented, 17 honest) | both pass all |
+| the 141 shipped dev answers, re-verified (`tests/test_verifier_agreement.py`) | all still accepted |
+| every distinct answer text in every stored report (276), old verifier against new | 257 accepted by both, 18 refused by both, **1 changes** |
+
+The one change is a 7B answer from 2026-09-17 (`A01`) that *truncated* 637.959 billion to `$637.9 billion` and
+400.278 billion to `$400.2 billion`. The old tolerance passed it; the new rule blocks it; the auditor flags the
+same two figures. No answer the old verifier accepted is refused for a reason the auditor disagrees with.
+
+**What the fix costs the comparison.** The verifier and the auditor now agree on every planted value, so the
+planted suite no longer shows where they differ. They still differ by design: the verifier has no `weak` or
+`derived` tier (it blocks a figure that is a sum of two cells, where the auditor says `derived`), compares
+signs, reads years only from 2000 to 2099, and does not tie a year or date to the company the SQL names.
+
+A correction to the entry above: it says the auditor has 76 tests. `tests/test_number_audit.py` has 72, before
+and after this change.
+
+### 3. Blocked drafts are stored
+
+When the verifier blocks a draft, the pipeline now keeps the draft's text (`blocked_draft`: the writer's text
+plus the framing, exactly what was verified) and the claims the verifier refused (`blocked_claims`), in the
+result, in `logs/audit.jsonl` and in `run_eval`'s per-case record. The refusal shown to a user is unchanged
+and never quotes the draft.
+
+`evals/audit_vs_verify.py` judges each block with the auditor (`classify_blocks`, `draft_rate`): **`invented`**
+if the auditor finds an ungrounded claim too, **`verifier false positive`** if it grounds every claim,
+`draft not stored` for a run from before today. `reports/number_audit_vs_verify.md` has the table; on the
+committed runs it reproduces the hand counts (4 of 59, 4 of 46, 3 of 47 drafted) and marks all 11 as not
+stored.
+
+Reading the old verifier's stored detail for the 30B's four blocks suggests they were not all inventions:
+`L08` stated two figures over a result that held only a company name (an invention); `R02` stated 17.2 over a
+ratio of 0.17208 (a true statement the old verifier refused); `L07` stated a 29 over a cell holding
+`2026-01-29` (probably the day of that date); `T07` stated a 29 over 24 rows (probably a miscount). **This is
+inference from the detail string, not a measurement: those drafts were never stored.** It is the reason the
+6.8% draft rate must not be read as an invention rate.
+
+### 4. Configuration H2, one declaration for both changes
+
+Items 2 and 3 change `ledgerql/`, so H1's pinned tree no longer matches. **H2** is declared in
+`evals/heldout_config.json` (appended; H1 is kept, with only its `status` changed to `superseded` and
+`superseded_by` added): commit `19a297e37c58678df4be8802a0882a63018a0d76`, `ledgerql/` tree
+`720f4bae3a5a33644812ef1dd54db8e1cfc7ec25`, linker **on**, and the same models, jobs and settings as H1. One
+declaration covers both changes because they are one decision (make figure 1 measure invention) and no run
+separates them. The linker decision is carried over unchanged: it came from the dev A/B, which is
+generation-only and never runs the verifier. **No held-out run was made under H1**, and no held-out question
+exists yet. Held-out runs are refused unless `ledgerql/` is the H2 tree and `LEDGERQL_ENTITY_LINK=1`
+(`tests/test_heldout_config.py`).
+
+### 5. How figure 1 counts the auditor's tiers (protocol 6a, fixed before any held-out run)
+
+- `ungrounded` **counts as an invented number.**
+- `weak` is **reported separately and not counted**, as invented or as grounded. The review named coarse
+  rounding; the auditor's `weak` tier has a second source, a year or date the database holds only for a company
+  the SQL does not name, and the protocol treats both the same way. **If the second source should be counted
+  differently, that has to be said before the freeze.**
+- `derived` **counts as grounded only under the three-significant-digit rule**; with fewer digits a claim cannot
+  be derived and is `ungrounded`.
+- Figure 1(a) stays blocked over drafted and is always printed with its split into invented blocks and verifier
+  false positives.
+
+### 6. Still owed
+
+The dev pipeline rerun on the local 7B under H2 (draft rate, false abstains, and the auditor's verdicts before
+and after) was started with this code and had not finished when this entry was written; its results go in the
+next entry. Then, as before: MJ's 80 held-out questions and the blind labels.

@@ -1,7 +1,7 @@
 [
   {
     "id": "H1",
-    "status": "active",
+    "status": "superseded",
     "declared": "2026-10-01",
     "what": "The pipeline configuration whose held-out results become the README headline figures (evals/HELDOUT_PROTOCOL.md 6a).",
     "code_commit": "97c69949a491d97146635c0dd45fd55d934f8a1c",
@@ -40,6 +40,59 @@
       "reason": "dev A/B, mean per-case change in correct candidate share (strict v3, 50 ANSWER cases, N=5, linked minus unlinked, 95% bootstrap CI over cases): Qwen3-30B +0.2440 [+0.1560, +0.3400], XiYanSQL-32B +0.1120 [+0.0440, +0.1880]; rule: on unless either CI lies entirely below zero -> on. Evidence: reports/entity_link_ab_qwen3_30b.jsonl (job 47314848) and reports/entity_link_ab_xiyan_32b.jsonl (job 47367322). Descriptive only: pass@1 32->47 (30B) and 44->47 (XiYan).",
       "setting": "LEDGERQL_ENTITY_LINK=1 for on; unset for off"
     },
-    "note": "The 32B configuration for the agree-policy table is the same commit, tree, settings and linker decision. A change under ledgerql/ is a new configuration: append a declaration with its own id; never edit this one."
+    "note": "The 32B configuration for the agree-policy table is the same commit, tree, settings and linker decision. A change under ledgerql/ is a new configuration: append a declaration with its own id; never edit this one.",
+    "superseded_by": "H2"
+  },
+  {
+    "id": "H2",
+    "status": "active",
+    "declared": "2026-10-03",
+    "supersedes": "H1",
+    "what": "The pipeline configuration whose held-out results become the README headline figures (evals/HELDOUT_PROTOCOL.md 6a).",
+    "why": "Two changes under ledgerql/ after H1, declared together as one configuration before any held-out run (no held-out question exists yet). (1) ledgerql/verify.py: the independent audit (reports/number_audit_vs_verify.md) found the verifier refused true statements ($416B, 416 bn, $0.4T, FY25, 3rd) and accepted invented ones (a figure inside its flat 1% tolerance, every spelled-out number, a form-code lookalike such as 391-K). It now reads magnitude abbreviations, spelled-out numbers, FY labels, dates and period labels, and a stated figure must agree to the precision it states. (2) ledgerql/pipeline.py: the text of a draft the verifier blocks is stored (blocked_draft, blocked_claims), so the auditor can judge each block as an invented number or a verifier false positive; without it figure 1a counts blocks, not inventions. Neither change touches generation, the vote, the guardrails, the framing or the linker.",
+    "code_commit": "19a297e37c58678df4be8802a0882a63018a0d76",
+    "ledgerql_tree": "720f4bae3a5a33644812ef1dd54db8e1cfc7ec25",
+    "changes_from_H1": [
+      "ledgerql/verify.py: precision-aware number verifier (no flat 1% tolerance); magnitude abbreviations; spelled-out numbers; FY labels as years; dates and Q/H labels as claims; fixed list of SEC form codes; the row count grounds a plain count; a ratio cell grounds a percentage",
+      "ledgerql/pipeline.py: a blocked draft's text and refused claims are stored in the result and the audit log"
+    ],
+    "code_includes": [
+      "ledgerql/intent.py (the deterministic intent check)",
+      "ledgerql/result_shape.py and ledgerql/pipeline.py (the NO_DATA rule, the tautology check)",
+      "ledgerql/refusal.py and ledgerql/known_gaps.json (the abstain templates)",
+      "ledgerql/frame.py (frame_answer) and ledgerql/verify.py (the year verifier and the precision-aware number verifier)",
+      "ledgerql/pipeline.py (stores the draft the verifier blocked)",
+      "ledgerql/entity_link.py (present; used only if the decision below is on)"
+    ],
+    "models": {
+      "primary": "Qwen/Qwen3-Coder-30B-A3B-Instruct",
+      "policy_partner": "Qwen/Qwen2.5-Coder-32B-Instruct-AWQ"
+    },
+    "jobs": {
+      "primary": "scripts/bridges2/run_qwen3_coder_30b_fp16.sbatch",
+      "policy_partner": "scripts/bridges2/run_qwen25_coder_32b_awq.sbatch"
+    },
+    "settings": {
+      "prompt": "current (the pipeline's own)",
+      "candidates": 5,
+      "consensus_temperature": 0.7,
+      "seed": 42,
+      "exec_error_repair": "off",
+      "year_verifier": "on",
+      "low_agreement_threshold": 0.6,
+      "scored_against": "the frozen held-out gold (strict, gold v3 rules)",
+      "number_verifier": "precision-aware (2026-10-03)",
+      "blocked_drafts": "stored"
+    },
+    "entity_link": {
+      "decision": "on",
+      "decided_from": "dev A/B (gen-only, gold v3), never from held-out results",
+      "rule": "on unless either model's 95% bootstrap CI lies entirely below zero. Metric: per ANSWER case, the share of the 5 candidates that are correct (strict v3), linked minus unlinked, averaged over the 50 ANSWER cases; CI by percentile bootstrap over cases, paired by case (10000 resamples, seed 20261002). Qwen3-30B and XiYanSQL-32B each get one CI. pass@1 and pass@N are descriptive only.",
+      "rule_amended": "2026-10-02, before either result of the 47367322 / 47367323 rerun was read, and with the 30B A/B (47314848) still packed and unscored",
+      "rule_superseded": "on iff, in the dev A/B, Qwen3-30B's net pass@1 gain is at least +2 cases (strict v3, the 50 ANSWER cases, N=5, the vote's pick, with minus without linking) AND XiYanSQL-32B's net pass@1 gain is not negative; otherwise off",
+      "reason": "dev A/B, mean per-case change in correct candidate share (strict v3, 50 ANSWER cases, N=5, linked minus unlinked, 95% bootstrap CI over cases): Qwen3-30B +0.2440 [+0.1560, +0.3400], XiYanSQL-32B +0.1120 [+0.0440, +0.1880]; rule: on unless either CI lies entirely below zero -> on. Evidence: reports/entity_link_ab_qwen3_30b.jsonl (job 47314848) and reports/entity_link_ab_xiyan_32b.jsonl (job 47367322). Descriptive only: pass@1 32->47 (30B) and 44->47 (XiYan).",
+      "setting": "LEDGERQL_ENTITY_LINK=1 for on; unset for off"
+    },
+    "note": "The 32B configuration for the agree-policy table is the same commit, tree, settings and linker decision. The linker decision is carried over from H1 unchanged: it was made from the dev A/B, which is gen-only and does not run the verifier, so neither change can affect it. A change under ledgerql/ is a new configuration: append a declaration with its own id; never edit this one (only `status` and `superseded_by` change when it is superseded)."
   }
 ]

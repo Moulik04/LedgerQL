@@ -9,13 +9,27 @@ from evals.scoring import FrozenGoldError
 
 def test_the_declaration_file_has_one_active_configuration_pinned_to_a_commit_and_a_code_tree():
     decls = C.load()
-    assert [d["id"] for d in decls] == ["H1"]
+    assert [d["id"] for d in decls] == ["H1", "H2"]
     h = C.active(decls)
+    assert h["id"] == "H2" and h["supersedes"] == "H1"
     assert len(h["code_commit"]) == 40 and len(h["ledgerql_tree"]) == 40
     assert h["models"]["primary"] == "Qwen/Qwen3-Coder-30B-A3B-Instruct"
     assert h["models"]["policy_partner"] == "Qwen/Qwen2.5-Coder-32B-Instruct-AWQ"
     assert h["settings"]["exec_error_repair"] == "off" and h["settings"]["year_verifier"] == "on"
     assert set(h["jobs"]) == {"primary", "policy_partner"}
+
+
+def test_a_superseded_declaration_keeps_what_it_pinned():
+    # Declarations are append-only: superseding H1 changes its status and nothing it declared.
+    h1, h2 = C.load()
+    assert h1["status"] == "superseded" and h1["superseded_by"] == "H2"
+    assert h1["code_commit"] == "97c69949a491d97146635c0dd45fd55d934f8a1c"
+    assert h1["ledgerql_tree"] == "95ad19d17eeac9debf36e48903d4d6371962373d"
+    assert h2["ledgerql_tree"] != h1["ledgerql_tree"] and len(h2["changes_from_H1"]) == 2
+    # one declaration covers both changes, and the linker decision is carried over unchanged
+    assert h2["entity_link"] == h1["entity_link"] and h2["entity_link"]["decision"] == "on"
+    assert h2["models"] == h1["models"] and h2["jobs"] == h1["jobs"]
+    assert {k: v for k, v in h2["settings"].items() if k in h1["settings"]} == h1["settings"]
 
 
 def test_entity_linking_is_decided_from_the_dev_ab_by_a_rule_fixed_before_the_result():
@@ -31,8 +45,9 @@ def test_entity_linking_is_decided_from_the_dev_ab_by_a_rule_fixed_before_the_re
 def test_the_code_under_ledgerql_is_the_declared_tree_or_a_new_configuration_must_be_declared():
     h = C.active(C.load())
     assert C.current_tree() == h["ledgerql_tree"], (
-        "ledgerql/ changed since configuration H1 was declared. A change is a new configuration: "
-        "declare it in evals/heldout_config.json (and the protocol) before any held-out run."
+        f"ledgerql/ changed since configuration {h['id']} was declared. A change is a new "
+        "configuration: declare it in evals/heldout_config.json (and the protocol) before any "
+        "held-out run."
     )
 
 

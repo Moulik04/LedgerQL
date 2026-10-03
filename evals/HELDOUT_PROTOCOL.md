@@ -177,7 +177,21 @@ Fixed now, before any question exists, so the headline cannot be chosen after se
 Amended 2026-10-01 at MJ's request in two ways: H is pinned to code, and the linker setting is no
 longer chosen from held-out results. Amended again 2026-10-02, before the rerun's results were read
 (DECISIONS.md, 2026-10-02 amendments): the linker rule's metric, and what hallucination figure 1 is.
+Amended 2026-10-03, before any held-out question exists: H1 is superseded by **H2** (the verifier
+fixed and blocked drafts stored), and how figure 1 counts the auditor's tiers is fixed.
 
+- **The headline configuration is H2** (it supersedes H1; both are in `evals/heldout_config.json`,
+  which is append-only). H2 is H1 with two changes under `ledgerql/`, declared together as one
+  configuration on 2026-10-03: the verifier (`verify.py`) accepts true values in the forms it used
+  to refuse (`$416B`, `416 bn`, `$0.4T`, `FY25`, `3rd`), reads spelled-out numbers, holds a stated
+  figure to the precision it states in place of a flat 1% tolerance, and no longer exempts form-code
+  lookalikes (`391-K`); and the pipeline stores the text of every draft the verifier blocks. Why:
+  the independent audit found the first on planted values (`reports/number_audit_vs_verify.md`), and
+  without the second, figure 1(a) counts blocks, not invented numbers. H2 is commit
+  `19a297e37c58678df4be8802a0882a63018a0d76`, `ledgerql/` tree
+  `720f4bae3a5a33644812ef1dd54db8e1cfc7ec25`, with the same models, jobs, settings and linker
+  decision (on) as H1. No held-out run was made under H1. The description of H1 that follows is
+  kept as written; read "H" as H2.
 - **The headline configuration H1** is declared in `evals/heldout_config.json`: the full pipeline
   (classify, N=5 generation, guard, vote, verify, answer) with **Qwen3-Coder-30B-A3B fp16** on the
   pipeline's own `current` prompt, `exec_error` repair **off**, the year verifier **on**. The
@@ -233,7 +247,27 @@ longer chosen from held-out results. Amended again 2026-10-02, before the rerun'
      spec `evals/NUMBER_AUDIT_SPEC.md` with no import from `ledgerql/` (a test enforces it); built and
      tested on dev runs 2026-10-03 (`reports/number_audit_vs_verify.md`), **before any held-out run**.
      The old figure (the verifier's own rate on shipped answers) may be printed beside them, labelled
-     as zero by construction;
+     as zero by construction.
+     **How the auditor's tiers are counted (fixed 2026-10-03, before any held-out run).** The auditor
+     gives every claim one of four statuses (`evals/NUMBER_AUDIT_SPEC.md` section 3), and figure 1(b)
+     treats them as follows, with no later choice:
+     - `ungrounded` **counts as an invented number.** Figure 1(b) is the share of shipped answers with
+       at least one ungrounded claim, and every such claim is listed.
+     - `weak` is **reported separately and is not counted** as invented, and never as grounded
+       either: its count is printed beside the figure. Weak has two sources and both are treated this
+       way: a coarse rounding whose precision is unstated (`about 420 billion` for 416.161 billion),
+       and a year or date that the database holds only for a company the SQL does not name.
+     - `derived` (a sum, difference, ratio or percentage change of two numeric cells) **counts as
+       grounded only under the three-significant-digit rule**: a claim that states fewer than three
+       significant digits cannot be derived and is `ungrounded`. Derived claims are counted and
+       printed beside the figure.
+     - `grounded` is not counted.
+     **Figure 1(a) is reported with what it is made of.** A block is the verifier refusing a draft,
+     which is an invented number only if the verifier is right. The pipeline stores every blocked
+     draft (`blocked_draft`, since configuration H2), and the auditor judges each on the same tiers
+     (`evals/audit_vs_verify.py`, `draft_rate`): `invented` if it has an ungrounded claim,
+     `verifier false positive` if it has none. Figure 1(a) stays blocked over drafted; printed with
+     it, always, are the two parts, so an over-strict verifier cannot pass as a high invention rate;
   2. the **confidently-wrong rate**: wrong answers over answered cases;
   3. **coverage**: answered over answerable cases (`ANSWER` and `ANSWER_WITH_ASSUMPTION`);
   4. the **agree-policy table**: "answer only where both models answered and agree", with
@@ -263,5 +297,11 @@ configuration is run once for its confirmatory comparison.
 3. **Linker setting: on** (2026-10-02), from the dev A/B under the amended rule: Qwen3-30B +0.244 [+0.156,
    +0.340] and XiYanSQL-32B +0.112 [+0.044, +0.188] in the mean per-case change of the correct candidate
    share; neither CI is below zero. Recorded in `heldout_config.json` and `DECISIONS.md`.
-4. Still open: whether an `informal` share of one quarter of the mention styles is right (3.2),
+4. **Configuration H2 supersedes H1** (2026-10-03, MJ, before any held-out run): the verifier fixed from
+   the audit's findings and blocked drafts stored, as one declaration; linker on, unchanged.
+5. **Figure 1's tiers** (2026-10-03, MJ, before any held-out run): `ungrounded` counts as invented; `weak`
+   is reported separately and not counted; `derived` counts as grounded only under the
+   three-significant-digit rule; figure 1(a) is printed with its split into invented blocks and verifier
+   false positives.
+6. Still open: whether an `informal` share of one quarter of the mention styles is right (3.2),
    and the four confirmatory comparisons in 6.
