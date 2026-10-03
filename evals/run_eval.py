@@ -164,9 +164,16 @@ def infra_error_ids(per_case: list[dict]) -> list[str]:
 
 
 def verify_as_pipeline(
-    answer: str, columns: list[str], rows: list, sql: str | None, question: str, db_path: str
+    answer: str,
+    columns: list[str],
+    rows: list,
+    sql: str | None,
+    question: str,
+    db_path: str,
+    verifier=None,
 ):
-    """Verify a recorded answer exactly as the pipeline verified it. The framing
+    """Verify a recorded answer exactly as the pipeline verified it (`verifier`: another
+    version of `verify.verify` to replay in its place, `evals/replay_verifier.py`). The framing
     (`ledgerql/frame.py`) is a pure function of the question, the winning SQL and the result's
     shape, so it is recomputed here, and the year and day labels it stated are given to the
     verifier as context. Without that, the framing's own "fiscal year 2025 (period ended June 30,
@@ -179,8 +186,9 @@ def verify_as_pipeline(
         if sql
         else frame_module.Frame()
     )
+    verifier = verifier or verify_answer
     if frame.text:
-        return verify_answer(
+        return verifier(
             answer,
             columns,
             rows,
@@ -188,7 +196,7 @@ def verify_as_pipeline(
             context_years=frame.years,
             context_numbers=frame.numbers,
         )
-    return verify_answer(answer, columns, rows, sql=sql)
+    return verifier(answer, columns, rows, sql=sql)
 
 
 # The pipeline only gives an answer after verifying it, so an answered record the evaluator would
