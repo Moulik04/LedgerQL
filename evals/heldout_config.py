@@ -14,9 +14,11 @@ from __future__ import annotations
 
 import json
 import os
+import random
 import subprocess
 from pathlib import Path
 
+from evals.rescore_v2 import Pool
 from evals.scoring import FrozenGoldError
 
 CONFIG_PATH = Path(__file__).resolve().parent / "heldout_config.json"
@@ -69,27 +71,82 @@ def require_declared(path, decls: list[dict] | None = None) -> None:
         )
 
 
-def apply_rule(net_30b: int, net_xiyan: int) -> tuple[str, str]:
-    """The entity-linking decision rule, exactly as fixed in the protocol before the dev A/B result:
-    on iff Qwen3-30B's net pass@1 gain is at least +2 cases and XiYanSQL-32B's is not negative."""
-    on = net_30b >= 2 and net_xiyan >= 0
+BOOTSTRAP_RESAMPLES = 10_000
+BOOTSTRAP_SEED = 20261002
+EXPECTED_CASES = 50
+
+
+def case_share_diffs(base: list[Pool], linked: list[Pool], version: str = "v3") -> dict[str, float]:
+    """Per case, the share of the N candidates that are correct (strict v3 by default), linked
+    minus unlinked. The two conditions must cover the same cases."""
+    b = {p.id: p for p in base}
+    k = {p.id: p for p in linked}
+    if set(b) != set(k):
+        raise ValueError(f"the two conditions cover different cases: {sorted(set(b) ^ set(k))}")
+
+    def share(p: Pool) -> float:
+        return sum(bool(c.verdict[version]) for c in p.cands) / len(p.cands)
+
+    return {i: share(k[i]) - share(b[i]) for i in sorted(b)}
+
+
+def bootstrap_ci(
+    diffs: list[float],
+    resamples: int = BOOTSTRAP_RESAMPLES,
+    seed: int = BOOTSTRAP_SEED,
+    level: float = 0.95,
+) -> tuple[float, float]:
+    """Percentile bootstrap CI of the mean over cases (paired: `diffs` are per-case differences).
+    Seeded, and pure Python, so the same inputs give the same interval on any machine."""
+    rng = random.Random(seed)
+    n = len(diffs)
+    means = sorted(sum(rng.choices(diffs, k=n)) / n for _ in range(resamples))
+    tail = (1 - level) / 2
+    return means[int(resamples * tail)], means[int(resamples * (1 - tail)) - 1]
+
+
+def apply_rule(
+    ci_30b: tuple[float, float], ci_xiyan: tuple[float, float], mean_30b: float, mean_xiyan: float
+) -> tuple[str, str]:
+    """The entity-linking decision rule (protocol 6a, amended 2026-10-02 before either result was
+    read): linking is on unless either model's 95% CI for the mean per-case change in the correct
+    candidate share (linked minus unlinked) lies entirely below zero."""
+    harmed = [name for name, ci in (("Qwen3-30B", ci_30b), ("XiYanSQL-32B", ci_xiyan)) if ci[1] < 0]
+    decision = "off" if harmed else "on"
     reason = (
-        f"dev A/B net pass@1 (strict v3, 50 ANSWER cases, N=5): Qwen3-30B {net_30b:+d}, "
-        f"XiYanSQL-32B {net_xiyan:+d}; rule: on iff 30B >= +2 and XiYan >= 0 -> "
-        f"{'on' if on else 'off'}"
+        f"dev A/B, mean per-case change in correct candidate share (strict v3, {EXPECTED_CASES} "
+        f"ANSWER cases, N=5, linked minus unlinked, 95% bootstrap CI over cases): Qwen3-30B "
+        f"{mean_30b:+.4f} [{ci_30b[0]:+.4f}, {ci_30b[1]:+.4f}], XiYanSQL-32B {mean_xiyan:+.4f} "
+        f"[{ci_xiyan[0]:+.4f}, {ci_xiyan[1]:+.4f}]; rule: on unless either CI lies entirely below "
+        f"zero -> {decision}" + (f" ({' and '.join(harmed)} harmed)" if harmed else "")
     )
-    return ("on" if on else "off"), reason
+    return decision, reason
 
 
-def _net_pass_1(evidence_path: Path, db: str) -> int:
+def _evaluate(evidence_path: Path, db: str) -> dict:
+    """The decision metric, plus pass@1 and pass@N as descriptive figures only."""
     from evals import entity_link_eval as E
     from evals.rescore_v2 import Gold, score_bakeoff
 
     pools = score_bakeoff(E.load(evidence_path), Gold(db))
     base = [p for p in pools if p.profile == "baseline"]
     linked = [p for p in pools if p.profile == "linked"]
-    r = E.compare(base, linked, "v3")["pass_1"]
-    return len(r["gained"]) - len(r["lost"])
+    diffs = case_share_diffs(base, linked)
+    if len(diffs) != EXPECTED_CASES:
+        raise ValueError(f"{evidence_path}: {len(diffs)} cases, expected {EXPECTED_CASES}")
+    values = list(diffs.values())
+    r = E.compare(base, linked, "v3")
+    return {
+        "mean": sum(values) / len(values),
+        "ci": bootstrap_ci(values),
+        "descriptive": {
+            "pass_1": (r["pass_1"]["base"], r["pass_1"]["linked"]),
+            "pass_1_gained_lost": (len(r["pass_1"]["gained"]), len(r["pass_1"]["lost"])),
+            "pass_n": (r["pass_n"]["base"], r["pass_n"]["linked"]),
+            "pass_n_gained_lost": (len(r["pass_n"]["gained"]), len(r["pass_n"]["lost"])),
+            "candidates": r["candidates"],
+        },
+    }
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -106,9 +163,10 @@ def main(argv: list[str] | None = None) -> int:
         "--xiyan", type=Path, default=REPO / "reports" / "entity_link_ab_xiyan_32b.jsonl"
     )
     args = ap.parse_args(argv)
-    decision, reason = apply_rule(
-        _net_pass_1(args.qwen3_30b, args.db), _net_pass_1(args.xiyan, args.db)
-    )
+    a, b = _evaluate(args.qwen3_30b, args.db), _evaluate(args.xiyan, args.db)
+    decision, reason = apply_rule(a["ci"], b["ci"], a["mean"], b["mean"])
+    for name, r in (("Qwen3-30B", a), ("XiYanSQL-32B", b)):
+        print(f"descriptive only, {name}: {r['descriptive']}")
     print(f"decision: {decision}\nreason: {reason}")
     print(
         "Record both in evals/heldout_config.json (entity_link.decision, entity_link.reason), "

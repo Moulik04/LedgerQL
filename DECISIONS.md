@@ -2514,3 +2514,42 @@ may hold only `ABSTAIN:<REASON_CODE>` entries (machine-parsed); any other accept
 `alternatives` with `describes`, an executable `gold_sql` and a `compare` mode. `python -m evals.heldout_gold_check`
 enforces it, runs every alternative's SQL, rejects `M02` as written, and is on the freeze checklist. Decided
 before any held-out gold is written.
+
+---
+
+## 2026-10-02 (amendments) — The linker rule becomes a harm check, and hallucination figure 1 stops being zero by construction
+
+Made by MJ's instruction **before** either result of the rerun (47367322 XiYan A/B, 47367323 30B pipeline) was
+scored or read: only the tarball's file names had been listed. The 30B A/B (47314848) was still packed and
+unscored. Nothing under `ledgerql/` changed, so H1's code tree is untouched.
+
+### 1. Linker rule
+
+**Replaced:** "on iff Qwen3-30B's net pass@1 gain is at least +2 and XiYan's is not negative" (kept verbatim in
+`heldout_config.json` as `rule_superseded`).
+
+**New rule:** per `ANSWER` case, the share of the 5 candidates that are correct (strict v3), linked minus
+unlinked, averaged over the 50 `ANSWER` cases, with a 95% percentile-bootstrap CI over cases, paired by case
+(10000 resamples, seed 20261002). **Linking is on unless either model's CI lies entirely below zero** (upper
+bound below zero). pass@1 and pass@N are printed as descriptive only. Implemented in `evals/heldout_config.py`
+(`case_share_diffs`, `bootstrap_ci`, `apply_rule`) and tested.
+
+**Why.** This dev A/B cannot credibly show a benefit: the vote's pick differs in 10 of 50 cases between
+identical runs (entry above), so +2 net pass@1 is inside noise, and the dev set was built with the linker in
+view, which biases it toward on. A candidate-level harm check is a different matter: it compares 250 candidates
+per model, paired by case, and has real power to detect a linker that makes things worse. The mechanism is the
+other half of the argument: no false link on any gold question, and at least 261 candidate failures the linker
+can fix with none broken (`reports/entity_upper_bound.md`, a lower bound, see the entry above) justify
+on-by-default. Held-out P1 and P2 measure the true effect.
+
+### 2. Hallucination headline
+
+With the evaluator on the pipeline's verifier and the same inputs (`check_pipeline_agreement`), the
+post-verifier hallucinated-number rate is 0% by construction, so it cannot be headline figure 1. Protocol 6a
+figure 1 is now (a) the **draft rate**, the share of drafted answers (shipped plus blocked) that the verifier
+blocked as `UNGROUNDED_ANSWER`, and (b) an **independent audit of shipped answers** by an implementation that
+shares no code with `verify.py`, extending `year_audit` to all numerals, spelled-out numbers and magnitude words
+("billion"). The agreement test stays as the guard on the evaluator; the audit is the measurement.
+
+**Not done yet:** the independent auditor. It must be built and tested on dev runs before any held-out run.
+`year_audit.py` currently imports `verify`, so it is not independent as it stands.

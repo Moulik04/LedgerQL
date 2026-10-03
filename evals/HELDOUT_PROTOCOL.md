@@ -175,7 +175,8 @@ A result short of that is reported as "not shown".
 
 Fixed now, before any question exists, so the headline cannot be chosen after seeing results.
 Amended 2026-10-01 at MJ's request in two ways: H is pinned to code, and the linker setting is no
-longer chosen from held-out results.
+longer chosen from held-out results. Amended again 2026-10-02, before the rerun's results were read
+(DECISIONS.md, 2026-10-02 amendments): the linker rule's metric, and what hallucination figure 1 is.
 
 - **The headline configuration H1** is declared in `evals/heldout_config.json`: the full pipeline
   (classify, N=5 generation, guard, vote, verify, answer) with **Qwen3-Coder-30B-A3B fp16** on the
@@ -199,9 +200,19 @@ longer chosen from held-out results.
   report H's headline on those same results, which is selection on the test set. Instead, the
   dev A/B (gen-only, the DDL prompt, Qwen3-30B and XiYanSQL-32B, with and without `--entity-link`,
   same seeds, scored against the frozen gold v3) decides it, by a rule fixed here **before that
-  run's results exist**: **linking is on iff Qwen3-30B's net pass@1 gain is at least +2 cases
-  (strict v3, the 50 `ANSWER` cases, N=5, the vote's pick, with minus without) and XiYanSQL-32B's
-  net pass@1 gain is not negative; otherwise off.** The decision and its reason are then recorded
+  run's results exist**. **Rule (amended 2026-10-02): linking is on unless either model's 95% CI
+  lies entirely below zero.** The decision metric is, per `ANSWER` case, the share of the 5
+  candidates that are correct (strict v3), linked minus unlinked, averaged over the 50 `ANSWER`
+  cases; the CI is a percentile bootstrap over cases, paired by case (10000 resamples, seed
+  20261002, `evals/heldout_config.py`). "Entirely below zero" means the upper bound is below zero.
+  pass@1 and pass@N are reported as descriptive only and decide nothing. The rule it replaces (on iff
+  the 30B's net pass@1 gain is at least +2 cases and XiYan's is not negative) is kept in
+  `heldout_config.json` as `rule_superseded`. Why: the vote's pick differs in 10 of 50 cases between
+  identical runs, so +2 net pass@1 sits inside run-to-run noise, and the dev set is contaminated
+  toward the linker, so this A/B cannot credibly show a benefit; a candidate-level harm check
+  (250 candidates per model) does have power to show harm. The mechanism (zero false links on the
+  gold questions, at least 261 fixable candidate failures with none broken) justifies on-by-default.
+  P1 and P2 on held-out data measure the true effect. The decision and its reason are then recorded
   in `heldout_config.json` (`entity_link.decision`, `entity_link.reason`) and in `DECISIONS.md`
   before any held-out run; until they are, held-out runs are refused. Two limits to state with it:
   the dev set is contaminated for the linker (it was built with those questions in view, which biases
@@ -210,7 +221,17 @@ longer chosen from held-out results.
   is reported, and H is not changed.
 - **The four headline figures**, each defined as in `evals/README.md` section 5 and computed by
   `evals/run_eval.py`, and reported once, from H, on this set:
-  1. the **hallucinated-number rate including years**, with the year verifier on;
+  1. **hallucination, as two measurements (amended 2026-10-02).** With the evaluator on the
+     pipeline's own verifier and the same inputs, the post-verifier hallucinated-number rate is 0% by
+     construction (`run_eval.check_pipeline_agreement`), so it cannot be the headline. Figure 1 is
+     (a) the **draft rate**: of the answers the pipeline drafted (shipped plus blocked), the share the
+     verifier blocked as `UNGROUNDED_ANSWER`; and (b) an **independent audit of the shipped answers** by
+     a deliberately separate implementation that shares no code with `ledgerql/verify.py`: an
+     extension of `evals/year_audit.py` to all numerals, spelled-out numbers ("forty-two") and
+     magnitude words ("billion"). The agreement test stays: it guards the evaluator; the independent
+     audit is the measurement. The auditor is built and tested on dev runs **before any held-out run**.
+     The old figure (the verifier's own rate on shipped answers) may be printed beside them, labelled
+     as zero by construction;
   2. the **confidently-wrong rate**: wrong answers over answered cases;
   3. **coverage**: answered over answerable cases (`ANSWER` and `ANSWER_WITH_ASSUMPTION`);
   4. the **agree-policy table**: "answer only where both models answered and agree", with
@@ -235,6 +256,7 @@ configuration is run once for its confirmatory comparison.
 
 1. **80 questions** (MJ, 2026-10-01).
 2. The pre-registered headline in 6a, amended by MJ: H pinned to a code tree, and the linker decided from
-   the dev A/B by a rule fixed before its results.
+   the dev A/B by a rule fixed before its results; amended again 2026-10-02 (MJ): the linker rule's
+   metric (candidate-share harm check) and figure 1 (draft rate plus an independent audit).
 3. Still open: whether an `informal` share of one quarter of the mention styles is right (3.2),
    and the four confirmatory comparisons in 6.

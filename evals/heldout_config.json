@@ -34,7 +34,9 @@
     "entity_link": {
       "decision": null,
       "decided_from": "dev A/B (gen-only, gold v3), never from held-out results",
-      "rule": "on iff, in the dev A/B, Qwen3-30B's net pass@1 gain is at least +2 cases (strict v3, the 50 ANSWER cases, N=5, the vote's pick, with minus without linking) AND XiYanSQL-32B's net pass@1 gain is not negative; otherwise off",
+      "rule": "on unless either model's 95% bootstrap CI lies entirely below zero. Metric: per ANSWER case, the share of the 5 candidates that are correct (strict v3), linked minus unlinked, averaged over the 50 ANSWER cases; CI by percentile bootstrap over cases, paired by case (10000 resamples, seed 20261002). Qwen3-30B and XiYanSQL-32B each get one CI. pass@1 and pass@N are descriptive only.",
+      "rule_amended": "2026-10-02, before either result of the 47367322 / 47367323 rerun was read, and with the 30B A/B (47314848) still packed and unscored",
+      "rule_superseded": "on iff, in the dev A/B, Qwen3-30B's net pass@1 gain is at least +2 cases (strict v3, the 50 ANSWER cases, N=5, the vote's pick, with minus without linking) AND XiYanSQL-32B's net pass@1 gain is not negative; otherwise off",
       "reason": null,
       "setting": "LEDGERQL_ENTITY_LINK=1 for on; unset for off"
     },
