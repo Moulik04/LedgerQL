@@ -20,6 +20,7 @@ GOLD = {c["id"]: c for c in (json.loads(x) for x in open("evals/gold_v3.jsonl"))
 RUNS = [
     "reports/eval_bridges2_qwen25_32b_pipeline_47314855.jsonl",
     "reports/eval_bridges2_qwen3_30b_pipeline_47314853_PARTIAL.jsonl",
+    "reports/eval_bridges2_qwen3_30b_pipeline_47367323.jsonl",
 ]
 MSFT_SQL = "SELECT value FROM v_net_income WHERE ticker='MSFT' ORDER BY fiscal_year DESC LIMIT 1"
 MSFT_Q = "What was Microsoft's net income in its most recent fiscal year on record?"

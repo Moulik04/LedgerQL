@@ -258,5 +258,8 @@ configuration is run once for its confirmatory comparison.
 2. The pre-registered headline in 6a, amended by MJ: H pinned to a code tree, and the linker decided from
    the dev A/B by a rule fixed before its results; amended again 2026-10-02 (MJ): the linker rule's
    metric (candidate-share harm check) and figure 1 (draft rate plus an independent audit).
-3. Still open: whether an `informal` share of one quarter of the mention styles is right (3.2),
+3. **Linker setting: on** (2026-10-02), from the dev A/B under the amended rule: Qwen3-30B +0.244 [+0.156,
+   +0.340] and XiYanSQL-32B +0.112 [+0.044, +0.188] in the mean per-case change of the correct candidate
+   share; neither CI is below zero. Recorded in `heldout_config.json` and `DECISIONS.md`.
+4. Still open: whether an `informal` share of one quarter of the mention styles is right (3.2),
    and the four confirmatory comparisons in 6.

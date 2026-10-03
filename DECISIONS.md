@@ -2553,3 +2553,84 @@ shares no code with `verify.py`, extending `year_audit` to all numerals, spelled
 
 **Not done yet:** the independent auditor. It must be built and tested on dev runs before any held-out run.
 `year_audit.py` currently imports `verify`, so it is not independent as it stands.
+
+---
+
+## 2026-10-03 — The rerun verified, the linker decision recorded (on), and the complete 30B Task 2/3 figures
+
+Written after the amendments above were pushed and CI was green on `f41893d`.
+
+### 1. Verification of 47367322 (XiYan A/B) and 47367323 (30B pipeline)
+
+- Both ran on commit `8ea7e25`; its `ledgerql/` tree is `95ad19d1…`, the tree H1 pins. Different hosts and ports
+  (`w008`:48939 and `w010`:57291); each log confirms its port serves its own model.
+- 47367322: smoke passed; 50 records in each condition. 47367323: 103 records, unique ids, none crashed, **zero**
+  connection or HTTP errors, zero `verifier_disagreement`. (The only error strings in either run are SQL Binder
+  Errors inside candidates, which are model output.) Linking was off in the pipeline run (the default; nothing set it).
+- **Co-location audit: not run.** `sacct.txt` was not in the tarball and is not in Downloads or on the Desktop.
+  `python -m evals.colocation_audit sacct.txt` still needs it. The two reruns themselves are on different nodes,
+  so they cannot have shared a server; the older pairs remain unaudited.
+- XiYan's unlinked summary file (`pass_1` 44/50) was glanced at while checking the run, after the amendments were
+  pushed and before the rule was applied. It is one condition, not the difference the rule uses.
+
+### 2. Linker decision: **on**
+
+Rule applied as amended (`python -m evals.heldout_config`): mean per-case change in the share of the 5 candidates
+that are correct (strict v3, 50 `ANSWER` cases, linked minus unlinked), 95% bootstrap CI (10000 resamples, seed
+20261002):
+
+| model | mean | 95% CI | verdict |
+|---|---|---|---|
+| Qwen3-30B (job 47314848) | +0.2440 | [+0.1560, +0.3400] | not below zero |
+| XiYanSQL-32B (job 47367322) | +0.1120 | [+0.0440, +0.1880] | not below zero |
+
+Descriptive only, strict v3 (they decide nothing). Qwen3-30B: pass@1 32 to 47 (+15 / -0), pass@N 44 to 48 (+5 / -1),
+correct candidates 168 to 229 of 250 (+64 / -3), empty results 57 to 6. XiYanSQL-32B: pass@1 44 to 47 (+5 / -2),
+pass@N 49 to 50, correct candidates 199 to 227 (+37 / -9), empty results 29 to 5. Reports:
+`reports/entity_link_ab_{qwen3_30b,xiyan_32b}.md`.
+
+Recorded in `heldout_config.json` (`entity_link.decision = "on"`, with the reason) and the protocol (section 8).
+**Held-out runs must set `LEDGERQL_ENTITY_LINK=1`.** Both CIs sit above zero, so this dev A/B also looks like a
+benefit, but the dev set was built with the linker in view and the rule does not rest on that; P1 and P2 measure
+it. For the record, the superseded rule (30B net +15 and XiYan net +3) would have given the same answer, so the
+decision does not depend on the amendment.
+
+Caveats. (1) The 30B A/B ran with about 460 of 47314853's requests interleaved on the same server (entry of
+2026-10-02, later); that is batching noise and inside the floor above. (2) **Scoring is sensitive to machine load:**
+candidate queries run under a 10 s timeout, and scoring the 30B evidence while the Ollama judge was running flipped
+one candidate (228 instead of 229 correct linked candidates). Two scorings on an idle machine agree exactly. The
+published reports and the decision above come from idle scorings; a future decision run should be done idle.
+
+### 3. Complete 30B Task 2/3 figures (47367323, linker off, strict v3; `reports/pipeline_acceptance_30b_47367323.md`)
+
+Supersedes the 76-record figures in the 2026-10-02 acceptance table. 103 records, complete.
+
+| | 30B, complete |
+|---|---|
+| states emitted | ANSWER 42, ASSUMPTION 13, ABSTAIN 48 |
+| hallucinated-number rate incl. years, as the pipeline verified (zero by construction, see above) | 0.0% (0/55) |
+| execution accuracy, `ANSWER` cases | 31/50 strict (40/50 relaxed) |
+| confidently wrong / answered | 14/55 |
+| coverage, answered / answerable | 52/69 |
+| **assumption cases answered correctly with the assumption stated** (baseline 0 of 19) | **9 of 19** (answered correctly 11, 0 of them not stated, 2 with no rubric items; abstained 6, reason stated 2; answered wrong 2) |
+| same, framing removed from the same records | 0 |
+
+- *Draft rate (new figure 1a, descriptive on dev):* the verifier blocked 4 drafted answers as `UNGROUNDED_ANSWER`
+  (`L07`, `L08`, `T07`, `R02`); 55 shipped; **4 of 59 drafted = 6.8%**.
+- *Task 2.* The six named cases: `M01`, `M06`, `M08`, `U02`, `U07` score 1.0; `M02` scores 0. `M02` is the known
+  gold limit (`KNOWN_GOLD_ISSUES.md`): the 30B answers by total assets and states "'Biggest' was measured by total
+  assets", which the gold's own text accepts but the comparator cannot credit. Crediting it would make 6 of 6. As
+  scored, **5 of 6; not met strictly, met on the gold's own terms.** `M01`, which returned the whole series in the
+  partial run, now returns the latest value with the period stated.
+- *Task 3.* Rubric pass rate, records stating every item (baseline run to this run): `unit_period` 1/6 to 5/6,
+  `ambiguous` 0/5 to 4/5, `schema_bait` 0/3 to 3/3. The ablation (0 stated without the framing) is the control.
+  **Met.** The hallucinated-number rate is 0.0% but is zero by construction (amendment above); the independent
+  audit is not built yet.
+- *Limits.* Same as before: the judge decides few items, and the registry and clause rules were written with these
+  dev items in view, so dev numbers are optimistic. `tests/test_verifier_agreement.py` now also runs over this
+  run's 55 answered records: no disagreement.
+
+### 4. Still owed
+
+`sacct.txt` for the co-location audit; the independent auditor (built and tested on dev runs before any held-out
+run); the 32B pipeline rerun is not needed for the 30B figures. MJ fills the blind label file and writes the 80 questions.

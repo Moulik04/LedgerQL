@@ -32,12 +32,12 @@
       "scored_against": "the frozen held-out gold (strict, gold v3 rules)"
     },
     "entity_link": {
-      "decision": null,
+      "decision": "on",
       "decided_from": "dev A/B (gen-only, gold v3), never from held-out results",
       "rule": "on unless either model's 95% bootstrap CI lies entirely below zero. Metric: per ANSWER case, the share of the 5 candidates that are correct (strict v3), linked minus unlinked, averaged over the 50 ANSWER cases; CI by percentile bootstrap over cases, paired by case (10000 resamples, seed 20261002). Qwen3-30B and XiYanSQL-32B each get one CI. pass@1 and pass@N are descriptive only.",
       "rule_amended": "2026-10-02, before either result of the 47367322 / 47367323 rerun was read, and with the 30B A/B (47314848) still packed and unscored",
       "rule_superseded": "on iff, in the dev A/B, Qwen3-30B's net pass@1 gain is at least +2 cases (strict v3, the 50 ANSWER cases, N=5, the vote's pick, with minus without linking) AND XiYanSQL-32B's net pass@1 gain is not negative; otherwise off",
-      "reason": null,
+      "reason": "dev A/B, mean per-case change in correct candidate share (strict v3, 50 ANSWER cases, N=5, linked minus unlinked, 95% bootstrap CI over cases): Qwen3-30B +0.2440 [+0.1560, +0.3400], XiYanSQL-32B +0.1120 [+0.0440, +0.1880]; rule: on unless either CI lies entirely below zero -> on. Evidence: reports/entity_link_ab_qwen3_30b.jsonl (job 47314848) and reports/entity_link_ab_xiyan_32b.jsonl (job 47367322). Descriptive only: pass@1 32->47 (30B) and 44->47 (XiYan).",
       "setting": "LEDGERQL_ENTITY_LINK=1 for on; unset for off"
     },
     "note": "The 32B configuration for the agree-policy table is the same commit, tree, settings and linker decision. A change under ledgerql/ is a new configuration: append a declaration with its own id; never edit this one."
