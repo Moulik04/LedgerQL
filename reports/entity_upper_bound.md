@@ -1,6 +1,6 @@
 # Entity linking: the offline upper bound
 
-Every candidate's company-name predicates are rewritten to the correct ticker (the case's companies are read from its gold SQL, so the link is always right), re-executed and re-scored. This is what *perfect* linking could gain; it is not an estimate of what a linker will. `evals/entity_upper_bound.py`.
+Every candidate's company-name predicates are rewritten to the correct ticker (the case's companies are read from its gold SQL, so the link is always right), re-executed and re-scored. This is what *perfect* linking could gain, **at least** (the name matcher cannot connect `Exxon Mobil Corp.` to the stored `ExxonMobil`, so some candidates are not rewritten; DECISIONS 2026-10-02); it is not an estimate of what a linker will. `evals/entity_upper_bound.py`.
 
 Candidates: 2250; changed by the rewrite: 590.
 

@@ -191,6 +191,36 @@ def verify_as_pipeline(
     return verify_answer(answer, columns, rows, sql=sql)
 
 
+# The pipeline only gives an answer after verifying it, so an answered record the evaluator would
+# reject means the two verified on different inputs (the first 30B run: 14.3% against a true 0%).
+DISAGREEMENT_EXIT_CODE = 5
+
+
+def check_pipeline_agreement(
+    answer: str, columns: list[str], rows: list, sql: str | None, question: str, db_path: str
+) -> list[str]:
+    """Problems found re-verifying an answer the pipeline gave; [] when evaluator and pipeline
+    agree. Two checks: the framing recomputed from the question, SQL, result shape and database must
+    be the framing the answer ends with (else the two used different framing inputs), and the
+    verifier, given that framing's year and day labels, must accept the answer."""
+    found = []
+    frame = (
+        frame_module.frame_answer(
+            question, sql, frame_module.ResultShape(columns, len(rows)), db_path=db_path
+        )
+        if sql
+        else frame_module.Frame()
+    )
+    if frame.text and not answer.endswith(frame.text):
+        found.append(f"framing: the answer does not end with the recomputed framing {frame.text!r}")
+    verdict = verify_as_pipeline(answer, columns, rows, sql, question, db_path)
+    if not verdict.ok:
+        found.append(
+            f"verification: the evaluator rejects what the pipeline accepted: {verdict.detail}"
+        )
+    return found
+
+
 def load_gold_cases(path: Path) -> list[dict]:
     cases = []
     for line in path.read_text().splitlines():
@@ -219,6 +249,7 @@ def run(gold_path: Path, db_path: str, judge=None, only: set[str] | None = None)
     guardrail_total: dict[str, int] = defaultdict(int)
     hallucinated = 0
     answered = 0
+    verifier_disagreements: dict[str, list[str]] = {}
 
     for case in cases:
         try:
@@ -329,6 +360,17 @@ def run(gold_path: Path, db_path: str, judge=None, only: set[str] | None = None)
             record["hallucinated_numbers"] = verify_result.ungrounded_numbers
             if not verify_result.ok:
                 hallucinated += 1
+            disagreement = check_pipeline_agreement(
+                result["answer"],
+                result["columns"],
+                result["rows"],
+                result["sql"],
+                case["question"],
+                db_path,
+            )
+            if disagreement:
+                record["verifier_disagreement"] = disagreement
+                verifier_disagreements[case["id"]] = disagreement
 
         per_case.append(record)
 
@@ -378,6 +420,7 @@ def run(gold_path: Path, db_path: str, judge=None, only: set[str] | None = None)
         "non_answer_errored": non_answer_errored,
         "non_answer_tier_breakdown": non_answer_tier_breakdown,
         "per_case": per_case,
+        "verifier_disagreements": verifier_disagreements,
         "repair": compute_repair_stats(per_case, cases_by_id),
         **confidently_wrong_metrics,
         **abstain_metrics,
@@ -624,6 +667,16 @@ def main(argv: list[str] | None = None) -> int:
     print(f"Wrote {md_path} and {jsonl_path}")
     print(f"Overall execution accuracy: {summary['overall_execution_accuracy']:.1%}")
     print(f"Hallucinated-number rate: {summary['hallucinated_number_rate']:.1%}")
+    disagreements = summary.get("verifier_disagreements") or {}
+    if disagreements:
+        print(
+            f"VERIFIER DISAGREEMENT on {len(disagreements)} records: the evaluator rejects "
+            "answers the pipeline accepted, so the two verified on different inputs and the "
+            f"hallucination figure is not valid: {disagreements}. "
+            f"Exiting {DISAGREEMENT_EXIT_CODE}.",
+            file=sys.stderr,
+        )
+        return DISAGREEMENT_EXIT_CODE
     broken = infra_error_ids(summary.get("per_case", []))
     if broken:
         print(

@@ -7,8 +7,9 @@ nothing. For each candidate this rewrites every predicate of the form
 `name = '...'`, `name LIKE '%...%'`, `name ILIKE ...`, `LOWER(name) LIKE ...` or
 `name IN (...)` whose literal names one of the case's companies into
 `ticker = '<TICKER>'`, re-executes it, and re-scores. The companies of a case are read
-from its gold SQL, so the link is always right: the result is an upper bound on what
-a linker could gain, not an estimate of what one will.
+from its gold SQL, so the link is always right: the result is a *lower* bound on what perfect
+linking gains (the token-containment matcher misses forms like `Exxon Mobil Corp.` against
+`ExxonMobil`), not an estimate of what a linker will gain.
 
     python -m evals.entity_upper_bound --write reports/entity_upper_bound.md
 """
@@ -148,8 +149,10 @@ def render(before, after, stats: Counter) -> str:
         "",
         "Every candidate's company-name predicates are rewritten to the correct ticker (the case's "
         "companies are read from its gold SQL, so the link is always right), re-executed and "
-        "re-scored. This is what *perfect* linking could gain; it is not an estimate of what a "
-        "linker will. `evals/entity_upper_bound.py`.",
+        "re-scored. This is what *perfect* linking could gain, **at least** (the name matcher "
+        "cannot connect `Exxon Mobil Corp.` to the stored `ExxonMobil`, so some candidates are "
+        "not rewritten; DECISIONS 2026-10-02); it is not an estimate of what a linker will. "
+        "`evals/entity_upper_bound.py`.",
         "",
         f"Candidates: {stats['candidates']}; changed by the rewrite: {stats['rewritten']}.",
         "",

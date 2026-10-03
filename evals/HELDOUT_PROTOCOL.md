@@ -95,10 +95,22 @@ exactly what is asked; entity columns compare at company level; proportions carr
 a stated scale carries `scale_cols`; one quantity for several periods or entities carries
 `pivot`. There is no later "fix the gold" pass.
 
-### 4.2 Expected behaviour and reason codes
+### 4.2 Expected behaviour, reason codes and alternatives
 
-ABSTAIN cases carry the reason code the tier implies (`evals/README.md` section 2) and any
-`accept_alternatives`, decided by reading the question and schema, not a model's answer.
+ABSTAIN cases carry the reason code the tier implies (`evals/README.md` section 2), decided by reading
+the question and schema, not a model's answer. `accept_alternatives` may list **only**
+`ABSTAIN:<REASON_CODE>` entries, which the abstain scorer parses.
+
+**Every acceptable answer must be executable.** Prose cannot be scored, and the dev gold shows what
+that costs: `M02` lists "ANSWER_WITH_ASSUMPTION using total_assets instead, if stated" as acceptable,
+both measured models answered exactly that way (stating "'Biggest' was measured by total assets") and
+the comparator scored them 0, because only the revenue SQL existed (`evals/KNOWN_GOLD_ISSUES.md`).
+So in held-out gold, any other acceptable answer is an entry of `alternatives`, each with `describes`
+(prose, for the reader), `gold_sql` (executable, so the comparator credits it) and `compare`; its
+own entity, ratio, scale and pivot marks apply as for the main answer. A sentence in
+`accept_alternatives` that is not `ABSTAIN:<CODE>` fails `python -m evals.heldout_gold_check`, which
+also runs every alternative's SQL; it is part of the freeze checklist (5) and must pass before the
+set is frozen. This is decided **before any held-out gold is written**.
 
 ### 4.3 Validation (before the freeze)
 
@@ -111,6 +123,8 @@ For every ANSWER and ASSUMPTION case:
 3. where `docs/schema.md` states a value, it matches;
 4. MJ reviews the question, the SQL and the expected behaviour.
 
+`python -m evals.heldout_gold_check <file> --db data/ledgerql.duckdb` passes (4.2).
+
 A disagreement at step 2 is resolved by reading the schema, never by running a model. Cases that
 cannot be made unambiguous are dropped before the freeze, not patched after.
 
@@ -118,7 +132,7 @@ cannot be made unambiguous are dropped before the freeze, not patched after.
 
 1. Commit the slot sheet and its hash (done before questions).
 2. MJ commits `heldout_questions.jsonl`. Questions are then fixed.
-3. Claude commits `heldout_v1.jsonl` (questions, gold, rubric items) with its SHA-256 in
+3. Claude runs `python -m evals.heldout_gold_check` (4.2) and commits `heldout_v1.jsonl` (questions, gold, rubric items) with its SHA-256 in
    `evals/heldout_v1.sha256`, checked by a test, and tags the commit `heldout-v1-frozen`.
 4. **Only then** may a model run on it. `gen_only_eval` and `run_eval` refuse a held-out file
    without a matching hash.

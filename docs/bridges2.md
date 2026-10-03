@@ -357,3 +357,8 @@ pipeline client), and, before any request, checks that `/v1/models` on that port
 and stops if not. `run_eval` counts records that failed for infrastructure reasons (connection refused,
 HTTP errors) and **exits 4**, so a partial run shows as FAILED in `sacct`, not COMPLETED. `run_meta.json`
 records the port. A pipeline run's figures are valid only if it exited 0.
+
+**Auditing past batches for same-model overlap.** On the login node:
+`sacct -u $USER -S 2026-09-13 -E now --format=JobID%14,JobName%28,NodeList,Start,End,State,ExitCode -P > sacct.txt`,
+then locally `python -m evals.colocation_audit sacct.txt`. It lists any two jobs serving the same model that
+overlapped on one node (the only silent case) and any cross-model overlaps with whether a job failed.

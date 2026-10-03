@@ -2404,3 +2404,113 @@ A year the writer invents is still flagged (tested).
 The XiYan entity-link job is resubmitted alone; the 30B pipeline needs a rerun too (a complete run is
 what a headline figure needs). Commands are given once the fix is pushed and CI is green. The harness
 change does not touch generation, so the XiYan A/B stays comparable to the 30B's.
+
+---
+
+## 2026-10-02 (later) — Past runs audited for shared servers, the run-to-run noise floor, an evaluator agreement guard, the 32B's NO_DATA abstains, and a held-out rule for alternatives
+
+Resubmitted by MJ on `8ea7e25`: 47367322 (XiYan entity-link A/B) and 47367323 (30B pipeline rerun). When they land:
+verify, apply the pre-registered linker rule, record the decision, then report the complete 30B Task 2/3 figures.
+
+### 1. Were earlier runs silently served by another job's server?
+
+**What can fail silently.** Two jobs on one node reaching each other's server fail loudly when the models
+differ (404 on the model name) and silently only when they serve the *same* model at the same time. A
+silent same-model collision gives valid answers (same weights), with batching noise and no bias.
+
+**What local evidence shows.** It cannot prove the negative for every batch: start and end times and
+server logs did not survive for Sep 14 and Sep 20 (the server log had a fixed name until 09-29). It does show:
+
+- *The loud signature is absent everywhere.* Every record of every past run (Sep 14 and Sep 20 pipeline
+  reports; the 09-29 bake-off's nine gen-only files; the 10-02 32B run) has **zero** connection or HTTP
+  errors; the only run with any is the partial 47314853 (27).
+- *Same-model jobs were not submitted together before 2026-10-01.* Sep 14: a failed first attempt
+  (45918244 `ninja`, 45936558 KV cache) preceded each resubmission (45935285, 45938446), which came after
+  diagnosis. Sep 20: the wrong-commit pair (46583436/7) was cancelled and the correct pair (46584652/3)
+  resubmitted; the account gives no times, so the cancelled and replacement jobs *could* have overlapped,
+  and if they did the effect is batching noise only. Sep 29: four different models (30B and 32B AWQ both on
+  `w007`, XiYan on `w009`; the 30B finished 22:46Z and the 32B's smoke ran at about 22:50Z). The 09-29
+  bake-off therefore had its collision risk across models, and one visible casualty: OmniSQL's first attempt
+  (47274010), see the 10-02 entry.
+- *Today's batch* is the one confirmed same-model overlap: 47314848 and 47314853 (both 30B, node `w006`).
+  47314848's A/B ran with about 460 of the pipeline job's requests interleaved on its server.
+
+**The definitive check is a tool, not an argument:** `python -m evals.colocation_audit sacct.txt` reads
+the cluster's accounting and lists any two jobs serving the same model that overlapped on one node (silent
+case), and any cross-model overlaps with whether a job failed. MJ runs `sacct -u $USER -S 2026-09-13 -E now
+--format=JobID%14,JobName%28,NodeList,Start,End,State,ExitCode -P > sacct.txt` on the login node. Tested on
+today's real pairs. **Not yet run, so the audit is incomplete until it is.**
+
+**Interleaving, recorded as asked: noise, not bias, and the noise floor is large.** Batch composition can
+perturb seeded sampling. To size it: 47314848's *unlinked* condition (interleaved) against 47274007's
+`omnisql` run (alone, same model, seeds and prompts; the 50 prompts hash identically at `76c792c` and
+`97c6994`). Text equality only; no correctness was computed and the linked condition was not read:
+- only **114 of 250** candidates (46%) are the same SQL text, and 7 of 50 cases have all five identical;
+- the vote's winning **result differs in 10 of 50 cases** (`L01`, `J03`, `J05`, `T01`, `R02`, `R04`,
+  `R05`, `R06`, `S09`, `G01`), and the winning-cluster share differs in 17.
+
+So two runs of an identical configuration disagree on the vote's pick in about a fifth of cases, with or
+without interleaving; the interleaving cannot be separated from that floor and is well inside it.
+
+**This bears on the pre-registered linker rule, and I have changed nothing.** The rule (on iff the 30B's net
+pass@1 gain is at least +2 and XiYan's is not negative) uses the vote's pick over 50 cases. A floor of about
+10 changed winners per pair of identical runs means a paired difference of +2 can arise from noise alone, in
+either direction. The rule is mechanical and approved, so it stands, and the result will be reported with
+this caveat; but MJ should decide **before XiYan's result is read** whether to amend the rule (for example to
+add the pass@N and per-candidate correct share, which use 250 candidates, or to require agreement across
+the two models). The 30B A/B is packed and unscored, so an amendment now is still blind to it.
+
+### 2. The evaluator and the pipeline now cannot verify on different inputs, silently
+
+The 14.3% bug was `run_eval` verifying without the framing labels the pipeline had given its verifier. The
+evaluator stays an independent call site, but `run_eval.check_pipeline_agreement` states the rule for every
+answered record: the framing the evaluator recomputes (a pure function of the question, SQL, result shape
+and database) must be the framing the answer ends with, and the verifier, given that framing's labels, must
+accept what the pipeline accepted. Any problem fails loudly in two places:
+- `tests/test_verifier_agreement.py` runs it over **every answered record of both committed pipeline runs**
+  (32B: 44 records, 30B: 42) and fails by record id on any disagreement: none;
+- `run_eval` records `verifier_disagreement`, prints it and **exits 5**, so a live run that disagrees with
+  its own pipeline is FAILED, as an infrastructure-incomplete run is exit 4.
+A consequence worth stating: with the same verifier on the same inputs the hallucination figure is zero by
+construction for any answer the pipeline gave, so it measures the pipeline's *abstains* (`UNGROUNDED_ANSWER`)
+and nothing else; the figure is only informative against a pipeline whose verifier differs.
+
+### 3. The 32B's `NO_DATA` abstains on assumption cases: how many were an entity problem?
+
+Seven of its 12 assumption-case abstains were `NO_DATA` (`L09`, `J02`, `J06`, `R07`, `U07`, `M09`, `H06`;
+the other five are `LOW_AGREEMENT` 4 and `EXEC_ERROR` 1). `python -m evals.nodata_audit` classifies each
+(an empty candidate whose predicate uses a name literal that is not the stored name; a ticker literal that is
+not the company's; and, as a bound, every name predicate rewritten to the case's ticker and re-run):
+
+| | empty candidates | cause | after perfect linking |
+|---|---|---|---|
+| `L09` | 3 of 5 | wrong name literal in **all** (`Exxon Mobil Corp.`) | rows on 3; strict-correct 1 |
+| `J02` | 3 of 5 | wrong name literal in all (`Microsoft Corporation`) | rows on 3; strict 0 (relaxed 3: extra column) |
+| `U07` | 5 of 5 | wrong name literal in all (`The Coca-Cola Company`) | rows on 5; strict 2 |
+| `M09` | 3 of 5 | wrong **ticker** literal (`BRK-A`, stored `BRK.B`) | not covered by the name rewrite |
+| `J06` | 5 of 5 | wrong name in 3, **and** a wrong tag (`LongTermDebt`) | none: linking alone does not fix it |
+| `R07`, `H06` | 5 of 5 | **none**: JPMorgan has no revenue rows (the documented gap) | still empty: a correct abstain |
+
+**Count: 3 of 7 are wrong-name-literal failures outright, a 4th (`M09`) is the same class with a ticker, so
+4 of 7 are entity failures; 2 are correct abstains; 1 is mixed.** That is a majority of the `NO_DATA`
+abstains, but only 4 of the 18 assumption cases the 32B does not score, so the entity problem is **not** the
+main cause of its Task 2 shortfall: 6 more are answered with the wrong shape, 4 are `LOW_AGREEMENT`, 2 are
+correct abstains. A perfect linker would recover at most 4 cases, so the 32B's "stated" figure would move
+from 1 of 19 to at most about 5. The linker decision bears on it modestly. Nothing changed.
+
+**A correction to an earlier figure:** `evals/entity_upper_bound.py` links a name literal to a company by
+token containment, which cannot connect `Exxon Mobil Corp.` to the stored `ExxonMobil`. Its 261-candidate
+count is therefore a **lower** bound on what perfect linking gains, not an upper bound (the real linker's
+concatenated-name match does handle that form). The label in `reports/entity_upper_bound.md` should read
+"at least". Unchanged in code. Also: three of my own analysis scripts failed first (a regex with a bad word
+boundary; a DuckDB connection held open without the repo's `enable_external_access` config, which made every
+later execute fail silently and produced "zero rows" artifacts). Both are corrected in the tested module.
+
+### 4. Held-out protocol: every acceptable alternative must be executable
+
+`M02` lists "ANSWER_WITH_ASSUMPTION using total_assets instead, if stated" as acceptable; both measured models
+answered that way and scored 0 because only the revenue SQL existed. Protocol 4.2 now says: `accept_alternatives`
+may hold only `ABSTAIN:<REASON_CODE>` entries (machine-parsed); any other acceptable answer is an entry of
+`alternatives` with `describes`, an executable `gold_sql` and a `compare` mode. `python -m evals.heldout_gold_check`
+enforces it, runs every alternative's SQL, rejects `M02` as written, and is on the freeze checklist. Decided
+before any held-out gold is written.
