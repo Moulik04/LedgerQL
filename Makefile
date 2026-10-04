@@ -1,4 +1,4 @@
-.PHONY: setup test lint fmt data eval eval-validate run api ui clean
+.PHONY: setup test lint fmt data eval eval-validate clean
 
 setup:
 	uv sync --all-groups
@@ -23,14 +23,6 @@ eval:
 
 eval-validate:
 	uv run python evals/validate_gold.py --db data/ledgerql.duckdb
-
-api:
-	uv run uvicorn ledgerql.api:app --reload --port 8000
-
-ui:
-	uv run streamlit run ledgerql/ui/app.py
-
-run: api
 
 clean:
 	find . -type d -name "__pycache__" -exec rm -rf {} +
