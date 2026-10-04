@@ -184,9 +184,42 @@ as a rounding only when hedged; another company's year or date is ungrounded, no
 Amended 2026-10-04, before any held-out question exists and before any held-out run: the auditor
 gains a fifth status, **`unresolved`**, and how figure 1 treats it is fixed below. This is in the
 auditor and this protocol only; nothing under `ledgerql/` changes, so H2 stands.
+Amended 2026-10-04 (later), at MJ's request, before any held-out question exists: H2 is superseded by
+**H3** (an accession number is an identifier, not three numbers), **H3 is final and `ledgerql/` is
+frozen**, and figure 1(b) is reported as a range, not one number.
 
-- **The headline configuration is H2** (it supersedes H1; both are in `evals/heldout_config.json`,
-  which is append-only). H2 is H1 with two changes under `ledgerql/`, declared together as one
+- **The headline configuration is H3, and it is final** (it supersedes H2; all three are in
+  `evals/heldout_config.json`, which is append-only). H3 is H2 with one change under `ledgerql/`, in
+  `verify.py`: three or more groups of digits joined by hyphens, such as an SEC accession number
+  (`0000037996-26-000015`), are an identifier, one claim that states no quantity, grounded only if
+  that exact string is in a string cell of the result (whole: not a piece of a longer run of digits
+  and hyphens, never by its groups as numbers, never by the SQL). Two groups stay two numbers, an
+  ISO date stays a date, a run of years stays years. Why: in the 30B dev run under H2 (job 47412929)
+  the one verifier false positive was `L11`, a lookup whose result was one accession number that the
+  draft quoted and the verifier refused as the numbers 37996, 26 and 15; held-out lookups will
+  plausibly ask for accession numbers. The rule was written from `verify.py`'s own spec, not from
+  the auditor's code. **Checked offline, with no model run**: the verifier at H2's commit and at
+  H3's, replayed on that run's 63 stored drafts (`reports/verifier_replay_h3_30b_47412929.md`).
+  `L11` goes from blocked to shipped and the auditor grounds every claim in it; no other draft's
+  verdict changes; the auditor flags 0 of the 60 shipped. H3 is commit
+  `458478a284d2f9a594d88e4b225d494d913078b8`, `ledgerql/` tree
+  `8758231d5c11b904e8f3f30df828147a5855952a`, with the same models, jobs, settings and linker
+  decision (on) as H2. It is a new declaration and not an amendment of H2 because a run was made
+  under H2 (that dev run); no held-out run was made under H1 or H2. The descriptions of H2 and H1
+  that follow are kept as written; read "H" as H3.
+- **`ledgerql/` is frozen at H3 until the held-out runs are done** (MJ, 2026-10-04), exactly like
+  the gold freeze (`evals/KNOWN_GOLD_ISSUES.md`). A verifier or pipeline issue found from now on,
+  on dev or on held-out data, is listed in `evals/KNOWN_PIPELINE_ISSUES.md` with what it does to a
+  figure. It is not fixed, there is no H4, and no figure is restated. Why: every fix so far was made
+  after reading more output, and a configuration that keeps being fixed until the day of the run is
+  a configuration chosen with that output in view. Enforced: a test fails if `ledgerql/` differs
+  from H3's tree, and `evals/heldout_config.py` refuses any declaration after a final one until the
+  freeze is lifted (`frozen.lifted`, set once the held-out runs of H3 and the 32B are in
+  `evals/heldout_runs.md`). The freeze covers `ledgerql/` only: the evaluator and the auditor are
+  under the rules fixed below. An issue is not a reason H "cannot be run as specified" (the last
+  bullet of this section): that clause is for a run that cannot be made at all.
+- **Configuration H2** (superseded by H3 on 2026-10-04; kept as written). H2 supersedes H1; both
+  are in `evals/heldout_config.json`, which is append-only. H2 is H1 with two changes under `ledgerql/`, declared together as one
   configuration on 2026-10-03: the verifier (`verify.py`) accepts true values in the forms it used
   to refuse (`$416B`, `416 bn`, `$0.4T`, `FY25`, `3rd`), reads spelled-out numbers, holds a stated
   figure to the precision it states in place of a flat 1% tolerance (a round number such as `420
@@ -278,7 +311,9 @@ auditor and this protocol only; nothing under `ledgerql/` changes, so H2 stands.
        auditor cannot tell, which is not the same as the answer having invented it. The same
        principle as a timeout not scoring as a wrong answer. Figure 1(b)'s numerator is unchanged
        (shipped answers with at least one `ungrounded` claim) and so is its denominator (all shipped
-       answers): an answer whose only open claims are unresolved is not in the numerator. The number
+       answers): an answer whose only open claims are unresolved is not in the numerator. (Amended
+       2026-10-04, later: that numerator and denominator are the **point rate**; such an answer is in
+       the **worst case**'s numerator, below. The claim's status does not change.) The number
        of shipped answers with an unresolved claim is printed beside the figure, and every such claim
        is listed with its answer and SQL. Which SQL forms resolve is fixed in
        `evals/NUMBER_AUDIT_SPEC.md` section 3, and is not changed after seeing held-out results.
@@ -287,6 +322,19 @@ auditor and this protocol only; nothing under `ledgerql/` changes, so H2 stands.
        significant digits cannot be derived and is `ungrounded`. Derived claims are counted and
        printed beside the figure.
      - `grounded` is not counted.
+     **Figure 1(b) is reported as a range, not as one number (fixed 2026-10-04 by MJ, before any
+     held-out question exists).** Two rates over the same denominator, all shipped answers, always
+     printed together:
+     - the **point rate**: shipped answers with at least one `ungrounded` claim, over shipped;
+     - the **worst case**: shipped answers with at least one `ungrounded` claim *or* at least one
+       `unresolved` claim, over shipped. It reads every claim the auditor cannot resolve as
+       invented; an answer with both kinds is counted once.
+     The README states both, as "point rate (worst case)", wherever figure 1(b) appears; neither is
+     quoted alone. With no unresolved claim the two are equal and both are still printed. `weak` and
+     `derived` claims enter neither rate, as above. The worst case is a bound, not a
+     reclassification: an `unresolved` claim is still listed as unresolved and judged by reading.
+     Why: "cannot tell" is not "invented", and it is not "grounded" either, so the honest figure is
+     the interval between the two readings. Computed by `evals/audit_vs_verify.py` (`figure_1b`).
      **Figure 1(a) is reported with what it is made of.** A block is the verifier refusing a draft,
      which is an invented number only if the verifier is right. The pipeline stores every blocked
      draft (`blocked_draft`, since configuration H2), and the auditor judges each on the same tiers
@@ -339,5 +387,15 @@ configuration is run once for its confirmatory comparison.
    reported separately, never counted as ungrounded or as grounded, with figure 1(b)'s numerator and
    denominator unchanged; a blocked draft with only such claims is its own part of figure 1(a). With
    no company predicate at all the query is cross-company and the label stays `ungrounded`.
-7. Still open: whether an `informal` share of one quarter of the mention styles is right (3.2),
+7. **Configuration H3 supersedes H2, and is final** (2026-10-04, MJ, before any held-out question
+   exists): an accession number, or any three or more hyphen-joined digit groups, is one identifier
+   claim grounded only by the exact string in the result. Checked offline on the 63 drafts of dev run
+   47412929: `L11` flips to shipped and passes the auditor, nothing else changes. Linker on, unchanged.
+8. **`ledgerql/` is frozen at H3 until the held-out runs are done** (2026-10-04, MJ): a later verifier
+   or pipeline issue goes on `evals/KNOWN_PIPELINE_ISSUES.md` and is not fixed, exactly like the gold
+   freeze.
+9. **Figure 1(b) is a range** (2026-10-04, MJ, before any held-out question exists): the point rate
+   (shipped answers with an ungrounded claim over shipped) and a worst case (shipped answers with an
+   ungrounded or an unresolved claim over shipped), always together.
+10. Still open: whether an `informal` share of one quarter of the mention styles is right (3.2),
    and the four confirmatory comparisons in 6.

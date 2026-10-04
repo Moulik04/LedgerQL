@@ -20,5 +20,8 @@ gh run watch <id> --exit-status
 ## Held-out material
 
 No model runs on held-out questions until the set is frozen and committed (`evals/HELDOUT_PROTOCOL.md`).
-The pipeline configuration H is pinned (`evals/heldout_config.json`); a change under `ledgerql/` is a new
-configuration that needs its own declaration there.
+The pipeline configuration H is pinned (`evals/heldout_config.json`), and since 2026-10-04 it is **H3,
+final: `ledgerql/` is frozen until the held-out runs are done**. Do not change anything under `ledgerql/`
+and do not declare an H4. A verifier or pipeline issue found meanwhile goes on
+`evals/KNOWN_PIPELINE_ISSUES.md` with its effect on the figures, exactly like a gold issue after the gold
+freeze (`evals/KNOWN_GOLD_ISSUES.md`). The freeze is lifted only by MJ, by setting `frozen.lifted` on H3.

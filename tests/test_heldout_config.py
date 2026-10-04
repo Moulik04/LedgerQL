@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 import pytest
 
@@ -9,9 +10,9 @@ from evals.scoring import FrozenGoldError
 
 def test_the_declaration_file_has_one_active_configuration_pinned_to_a_commit_and_a_code_tree():
     decls = C.load()
-    assert [d["id"] for d in decls] == ["H1", "H2"]
+    assert [d["id"] for d in decls] == ["H1", "H2", "H3"]
     h = C.active(decls)
-    assert h["id"] == "H2" and h["supersedes"] == "H1"
+    assert h["id"] == "H3" and h["supersedes"] == "H2"
     assert len(h["code_commit"]) == 40 and len(h["ledgerql_tree"]) == 40
     assert h["models"]["primary"] == "Qwen/Qwen3-Coder-30B-A3B-Instruct"
     assert h["models"]["policy_partner"] == "Qwen/Qwen2.5-Coder-32B-Instruct-AWQ"
@@ -21,7 +22,7 @@ def test_the_declaration_file_has_one_active_configuration_pinned_to_a_commit_an
 
 def test_a_superseded_declaration_keeps_what_it_pinned():
     # Declarations are append-only: superseding H1 changes its status and nothing it declared.
-    h1, h2 = C.load()
+    h1, h2, _ = C.load()
     assert h1["status"] == "superseded" and h1["superseded_by"] == "H2"
     assert h1["code_commit"] == "97c69949a491d97146635c0dd45fd55d934f8a1c"
     assert h1["ledgerql_tree"] == "95ad19d17eeac9debf36e48903d4d6371962373d"
@@ -39,6 +40,44 @@ def test_a_superseded_declaration_keeps_what_it_pinned():
     assert {k: v for k, v in h2["settings"].items() if k in h1["settings"]} == h1["settings"]
 
 
+def test_h3_changes_the_verifier_only_and_keeps_everything_else_h2_pinned():
+    _, h2, h3 = C.load()
+    assert h2["status"] == "superseded" and h2["superseded_by"] == "H3"
+    assert h2["code_commit"] == "590188e3ace789fea9e2ef8816ae4444baf5ff83"
+    assert h2["ledgerql_tree"] == "2cbe737057fd2c58abafd324161701dafb9896fa"
+    assert h3["ledgerql_tree"] != h2["ledgerql_tree"]
+    assert len(h3["changes_from_H2"]) == 1 and "ledgerql/verify.py" in h3["changes_from_H2"][0]
+    assert h3["entity_link"] == h2["entity_link"] and h3["entity_link"]["decision"] == "on"
+    assert h3["models"] == h2["models"] and h3["jobs"] == h2["jobs"]
+    assert {k: v for k, v in h3["settings"].items() if k in h2["settings"]} == h2["settings"]
+    # the offline check it was declared on: one draft changes, and it is the one the change is for
+    check = h3["regression_check"]
+    assert check["verdicts_changed"] == ["L11"] and check["model_runs"] == 0
+
+
+def test_h3_is_final_and_ledgerql_is_frozen_until_the_heldout_runs_are_done():
+    h3 = C.active(C.load())
+    assert h3["final"] is True
+    assert h3["frozen"]["since"] == "2026-10-04" and h3["frozen"]["lifted"] is None
+    issues = C.REPO / h3["frozen"]["issues_go_to"]
+    assert issues == C.REPO / "evals" / "KNOWN_PIPELINE_ISSUES.md" and Path(issues).exists()
+
+
+def _with_a_successor(lifted):
+    decls = json.loads(json.dumps(C.load()))
+    h4 = {k: v for k, v in decls[-1].items() if k not in ("final", "frozen")}
+    decls[-1].update(status="superseded", superseded_by="H4")
+    decls[-1]["frozen"]["lifted"] = lifted
+    return [*decls, {**h4, "id": "H4", "supersedes": "H3"}]
+
+
+def test_a_configuration_declared_after_the_final_one_is_refused_while_the_freeze_holds():
+    with pytest.raises(ValueError, match="frozen.*KNOWN_PIPELINE_ISSUES"):
+        C.active(_with_a_successor(lifted=None))
+    # the freeze is lifted by recording when, after the held-out runs; then a successor is allowed
+    assert C.active(_with_a_successor(lifted="2026-11-01"))["id"] == "H4"
+
+
 def test_entity_linking_is_decided_from_the_dev_ab_by_a_rule_fixed_before_the_result():
     link = C.active(C.load())["entity_link"]
     assert link["decided_from"] == "dev A/B (gen-only, gold v3), never from held-out results"
@@ -52,9 +91,9 @@ def test_entity_linking_is_decided_from_the_dev_ab_by_a_rule_fixed_before_the_re
 def test_the_code_under_ledgerql_is_the_declared_tree_or_a_new_configuration_must_be_declared():
     h = C.active(C.load())
     assert C.current_tree() == h["ledgerql_tree"], (
-        f"ledgerql/ changed since configuration {h['id']} was declared. A change is a new "
-        "configuration: declare it in evals/heldout_config.json (and the protocol) before any "
-        "held-out run."
+        f"ledgerql/ changed since configuration {h['id']} was declared. {h['id']} is final and "
+        "ledgerql/ is frozen until the held-out runs are done: revert the change and list the "
+        "issue in evals/KNOWN_PIPELINE_ISSUES.md (evals/HELDOUT_PROTOCOL.md 6a)."
     )
 
 

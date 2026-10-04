@@ -151,7 +151,10 @@ Per answer: its claims, each with kind, text, value, stated precision, and its s
 `weak`, `derived`, `unresolved`, `ungrounded`) and what grounded it. An answer is **clean** if none of
 its claims is ungrounded. Headline: the share of audited answers that are not clean, with the
 ungrounded claims listed; unresolved, weak and derived counts beside it, and every unresolved claim
-listed with its answer and SQL so it can be judged by reading.
+listed with its answer and SQL so it can be judged by reading. The headline is reported as a range
+(protocol 6a, fixed 2026-10-04): that share is the **point rate**, and beside it a **worst case**,
+the share of audited answers with an ungrounded or an unresolved claim, which reads every claim the
+auditor cannot resolve as invented. No claim's status changes for it.
 
 ## 5. Stated limits
 

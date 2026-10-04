@@ -8,6 +8,10 @@ that needs its own declaration. A held-out run (`run_eval` or `gen_only_eval` on
 `heldout*.jsonl` file) is refused unless the code tree and the linker environment match the
 active declaration and the linker decision has been recorded. That decision is made from the dev
 A/B and recorded before any held-out run; it is never chosen from held-out results.
+
+A declaration marked `final` freezes `ledgerql/`: until its `frozen.lifted` is set (after the
+held-out runs), no declaration may follow it. A verifier or pipeline issue found meanwhile is
+listed in `evals/KNOWN_PIPELINE_ISSUES.md` and not fixed, like a gold issue after the gold freeze.
 """
 
 from __future__ import annotations
@@ -31,6 +35,13 @@ def load(path: Path = CONFIG_PATH) -> list[dict]:
 
 def active(decls: list[dict] | None = None) -> dict:
     decls = decls if decls is not None else load()
+    for i, d in enumerate(decls):
+        if d.get("final") and d["frozen"]["lifted"] is None and i != len(decls) - 1:
+            raise ValueError(
+                f"configuration {d['id']} is final and ledgerql/ is frozen until the held-out runs "
+                f"are done: {decls[-1]['id']} cannot be declared. List the issue in "
+                f"{d['frozen']['issues_go_to']} instead"
+            )
     live = [d for d in decls if d["status"] == "active"]
     if len(live) != 1:
         raise ValueError(f"exactly one declaration must be active, found {len(live)}")

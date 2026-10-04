@@ -11,6 +11,17 @@ every disagreement is the auditor flagging something the verifier let through.
 
 Disagreements: 0 of 114 answered records.
 
+## Figure 1(b) as a range
+
+The point rate is the shipped answers with an ungrounded claim over all shipped answers. The
+worst case adds every shipped answer with a claim the auditor cannot resolve, as if each such
+claim were invented; an answer with both is counted once.
+
+| run | shipped | point rate | worst case |
+|---|---|---|---|
+| 30B H2 47412929 | 59 | 0 of 59 (0.0%) | 0 of 59 (0.0%) |
+| 30B H1 47367323 | 55 | 0 of 55 (0.0%) | 0 of 55 (0.0%) |
+
 ## Unresolved claims in shipped answers: 0
 
 A year or date some company in the database has, under SQL that restricts the company in a way

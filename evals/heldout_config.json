@@ -45,7 +45,7 @@
   },
   {
     "id": "H2",
-    "status": "active",
+    "status": "superseded",
     "declared": "2026-10-03",
     "supersedes": "H1",
     "what": "The pipeline configuration whose held-out results become the README headline figures (evals/HELDOUT_PROTOCOL.md 6a).",
@@ -104,6 +104,79 @@
       "reason": "dev A/B, mean per-case change in correct candidate share (strict v3, 50 ANSWER cases, N=5, linked minus unlinked, 95% bootstrap CI over cases): Qwen3-30B +0.2440 [+0.1560, +0.3400], XiYanSQL-32B +0.1120 [+0.0440, +0.1880]; rule: on unless either CI lies entirely below zero -> on. Evidence: reports/entity_link_ab_qwen3_30b.jsonl (job 47314848) and reports/entity_link_ab_xiyan_32b.jsonl (job 47367322). Descriptive only: pass@1 32->47 (30B) and 44->47 (XiYan).",
       "setting": "LEDGERQL_ENTITY_LINK=1 for on; unset for off"
     },
-    "note": "The 32B configuration for the agree-policy table is the same commit, tree, settings and linker decision. The linker decision is carried over from H1 unchanged: it was made from the dev A/B, which is gen-only and does not run the verifier, so neither change can affect it. A change under ledgerql/ is a new configuration: append a declaration with its own id; never edit this one (only `status` and `superseded_by` change when it is superseded; H2 itself was amended once, before anything ran under it, and `amended` records what it was)."
+    "note": "The 32B configuration for the agree-policy table is the same commit, tree, settings and linker decision. The linker decision is carried over from H1 unchanged: it was made from the dev A/B, which is gen-only and does not run the verifier, so neither change can affect it. A change under ledgerql/ is a new configuration: append a declaration with its own id; never edit this one (only `status` and `superseded_by` change when it is superseded; H2 itself was amended once, before anything ran under it, and `amended` records what it was).",
+    "superseded_by": "H3"
+  },
+  {
+    "id": "H3",
+    "status": "active",
+    "final": true,
+    "declared": "2026-10-04",
+    "supersedes": "H2",
+    "what": "The pipeline configuration whose held-out results become the README headline figures (evals/HELDOUT_PROTOCOL.md 6a).",
+    "why": "One change under ledgerql/ after H2, in ledgerql/verify.py, declared before any held-out question exists. The 30B dev run under H2 (job 47412929) had one verifier false positive: the result of a lookup was one accession number (0000037996-26-000015), the draft quoted it, and the verifier refused its three digit groups as the numbers 37996, 26 and 15 (case L11). An accession number is an identifier, not a quantity: three or more hyphen-joined digit groups are now one claim, grounded only if that exact string is in a string cell of the result. Held-out lookups will plausibly ask for accession numbers. Written from verify.py's own spec (its module docstring), not from the auditor's code. Nothing else in the pipeline changes.",
+    "code_commit": "458478a284d2f9a594d88e4b225d494d913078b8",
+    "ledgerql_tree": "8758231d5c11b904e8f3f30df828147a5855952a",
+    "frozen": {
+      "since": "2026-10-04",
+      "by": "MJ",
+      "what": "ledgerql/ is frozen at this configuration. A verifier or pipeline issue found from now on is listed and not fixed, exactly like the gold freeze (evals/KNOWN_GOLD_ISSUES.md): no further configuration is declared until the held-out runs are done.",
+      "until": "the held-out runs of this configuration and its policy partner are recorded in evals/heldout_runs.md",
+      "issues_go_to": "evals/KNOWN_PIPELINE_ISSUES.md",
+      "lifted": null
+    },
+    "regression_check": {
+      "how": "offline, no model run: the verifier at H2's commit (590188e) and at this commit (458478a) replayed on the stored drafts of the 30B dev run under H2 (python -m evals.replay_verifier --old-rev 590188e --new-rev 458478a)",
+      "run": "reports/eval_bridges2_qwen3_30b_pipeline_47412929.jsonl (job 47412929; sacct, read by MJ: COMPLETED, exit code 0:0, elapsed 4:57)",
+      "report": "reports/verifier_replay_h3_30b_47412929.md",
+      "drafts": 63,
+      "verdicts_changed": [
+        "L11"
+      ],
+      "result": "L11 goes from blocked to shipped and the auditor grounds every claim in it; the other 62 drafts keep their verdict (59 shipped, 3 blocked, all 3 invented by the auditor); 0 of the 60 shipped answers are flagged by the auditor. Beyond the declared check: over every stored draft in the 12 dev report files (594, 301 distinct) L11 is the only verdict that changes.",
+      "model_runs": 0
+    },
+    "changes_from_H2": [
+      "ledgerql/verify.py: an identifier (three or more digit groups joined by hyphens, such as an accession number) is one claim that states no quantity, grounded only by the exact string in a string cell of the result (not a piece of a longer run of digits and hyphens, not by its groups as numbers, not by the SQL); no group inside it is read as a year; a run in which every group is a year stays years"
+    ],
+    "code_includes": [
+      "ledgerql/intent.py (the deterministic intent check)",
+      "ledgerql/result_shape.py and ledgerql/pipeline.py (the NO_DATA rule, the tautology check)",
+      "ledgerql/refusal.py and ledgerql/known_gaps.json (the abstain templates)",
+      "ledgerql/frame.py (frame_answer) and ledgerql/verify.py (the year verifier, the precision-aware number verifier and the identifier rule)",
+      "ledgerql/pipeline.py (stores the draft the verifier blocked)",
+      "ledgerql/entity_link.py (present; used only if the decision below is on)"
+    ],
+    "models": {
+      "primary": "Qwen/Qwen3-Coder-30B-A3B-Instruct",
+      "policy_partner": "Qwen/Qwen2.5-Coder-32B-Instruct-AWQ"
+    },
+    "jobs": {
+      "primary": "scripts/bridges2/run_qwen3_coder_30b_fp16.sbatch",
+      "policy_partner": "scripts/bridges2/run_qwen25_coder_32b_awq.sbatch"
+    },
+    "settings": {
+      "prompt": "current (the pipeline's own)",
+      "candidates": 5,
+      "consensus_temperature": 0.7,
+      "seed": 42,
+      "exec_error_repair": "off",
+      "year_verifier": "on",
+      "low_agreement_threshold": 0.6,
+      "scored_against": "the frozen held-out gold (strict, gold v3 rules)",
+      "number_verifier": "precision-aware, hedged round numbers only (2026-10-03, amended)",
+      "blocked_drafts": "stored",
+      "identifiers": "one claim, grounded only by the exact string in the result (2026-10-04)"
+    },
+    "entity_link": {
+      "decision": "on",
+      "decided_from": "dev A/B (gen-only, gold v3), never from held-out results",
+      "rule": "on unless either model's 95% bootstrap CI lies entirely below zero. Metric: per ANSWER case, the share of the 5 candidates that are correct (strict v3), linked minus unlinked, averaged over the 50 ANSWER cases; CI by percentile bootstrap over cases, paired by case (10000 resamples, seed 20261002). Qwen3-30B and XiYanSQL-32B each get one CI. pass@1 and pass@N are descriptive only.",
+      "rule_amended": "2026-10-02, before either result of the 47367322 / 47367323 rerun was read, and with the 30B A/B (47314848) still packed and unscored",
+      "rule_superseded": "on iff, in the dev A/B, Qwen3-30B's net pass@1 gain is at least +2 cases (strict v3, the 50 ANSWER cases, N=5, the vote's pick, with minus without linking) AND XiYanSQL-32B's net pass@1 gain is not negative; otherwise off",
+      "reason": "dev A/B, mean per-case change in correct candidate share (strict v3, 50 ANSWER cases, N=5, linked minus unlinked, 95% bootstrap CI over cases): Qwen3-30B +0.2440 [+0.1560, +0.3400], XiYanSQL-32B +0.1120 [+0.0440, +0.1880]; rule: on unless either CI lies entirely below zero -> on. Evidence: reports/entity_link_ab_qwen3_30b.jsonl (job 47314848) and reports/entity_link_ab_xiyan_32b.jsonl (job 47367322). Descriptive only: pass@1 32->47 (30B) and 44->47 (XiYan).",
+      "setting": "LEDGERQL_ENTITY_LINK=1 for on; unset for off"
+    },
+    "note": "The 32B configuration for the agree-policy table is the same commit, tree, settings and linker decision. The linker decision is carried over from H1 unchanged: it was made from the dev A/B, which is gen-only and does not run the verifier. H3 is a new declaration and not an amendment of H2 because a run was made under H2 (the dev run 47412929); no held-out run was made under H1 or H2. H3 is final: while `frozen.lifted` is null no declaration may follow it (evals/heldout_config.py refuses one), and only `status`, `superseded_by` and `frozen.lifted` of this entry may ever change."
   }
 ]

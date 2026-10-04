@@ -3045,3 +3045,125 @@ Beside the H1 run (47367323; linker **off**, and its four blocked drafts never s
 MJ's 80 held-out questions and the blind labels; then the freeze. Open for MJ before it: whether `L11`'s
 accession-number false positive is fixed (a new configuration) or carried into the held-out run as a known
 verifier false positive that figure 1(a)'s split will show.
+
+---
+
+## 2026-10-04 (later) — The run confirmed complete, configuration H3 (final), `ledgerql/` frozen, and figure 1(b) as a range
+
+MJ's four answers to the open points of the last entry, each acted on the same day, before any held-out
+question exists.
+
+### 1. Job 47412929 is a complete run
+
+The last entry left one check open: "the `sacct` exit code was not checked here". MJ read it:
+**`COMPLETED`, `ExitCode 0:0`, elapsed 4:57.** `run_eval` exits 4 when any record failed for an
+infrastructure reason, so a partial run is `FAILED` in `sacct` (2026-10-02); exit 0 with 103 records, the
+verified commit and `LEDGERQL_ENTITY_LINK=1` in the log is therefore a complete, valid run. The figures of
+the last entry stand as read. (`reports/sacct_2026-10-03.txt` predates the job and does not hold this
+line; the values here are as MJ reported them.)
+
+### 2. Configuration H3: an accession number is an identifier, not three numbers
+
+`L11`'s false positive is fixed, as a new configuration (MJ): held-out lookups will plausibly ask for
+accession numbers, and a known false positive on exactly that form would sit in figure 1(a).
+
+**The rule, in `ledgerql/verify.py`'s own spec (its module docstring), written from it and not from the
+auditor's code:** three or more groups of digits joined by hyphens are an **identifier**: one claim that
+states no quantity. It is grounded only if that exact string is in a string cell of the result, whole.
+Not as a piece of a longer run of digits and hyphens (`...-00001` is not in `...-000015`), not with its
+leading zeros dropped, not by its groups as numbers in the result, and not by the SQL: the answer writer
+sees the result, never the query, so an identifier that is only in the query was not read from anywhere.
+No group inside an identifier is read as a year.
+
+What "similar hyphenated identifiers" was taken to mean, and why:
+
+- **Three or more groups, not the accession shape only** (10-2-6 digits). The exact-string rule is strict
+  on the grounding side, so the wider shape cannot let anything through that the narrow one would stop;
+  it only stops other identifiers of the same kind from being read as quantities.
+- **Not two groups.** `2024-2025` and `10-15` are ranges, and a range is two quantities that each have to
+  be grounded. Reading them as identifiers would block every true range.
+- **An ISO date stays a date** (dates are read first), and **a run in which every group is a year stays
+  years** (`2023-2024-2025`). The second was found by trying the forms before declaring: the first draft
+  of the rule read that run as an identifier and blocked a true statement that H2 accepts. It was fixed,
+  test first, before the commit; the declared rule has never been otherwise.
+
+**The regression check, offline, no model run** (`reports/verifier_replay_h3_30b_47412929.md`): the
+verifier at H2's commit (`590188e`) and at H3's (`458478a`), both loaded by revision, replayed on the 63
+drafts job 47412929 stored.
+
+| | H2 verifier (`590188e`) | H3 verifier (`458478a`) |
+|---|---|---|
+| drafted | 63 | 63 |
+| blocked (figure 1a) | 4 of 63 (6.3%) | 3 of 63 (4.8%) |
+| of the blocks: invented | 3 | 3 |
+| of the blocks: verifier false positive | 1 (`L11`) | 0 |
+| shipped | 59 | 60 |
+| shipped answers the auditor flags | 0 | 0 |
+| shipped with an unresolved, weak or derived claim | 0, 0, 0 | 0, 0, 0 |
+
+**One draft's verdict changes: `L11`, blocked to shipped, and the auditor grounds every claim in it.**
+The other 62 keep their verdict. That is what was asked for and nothing else.
+
+Two things beyond the declared check:
+
+- Over **every stored draft in the dev report files** (12 files, 594 drafts, 301 distinct) the same two
+  revisions differ on `L11` and on nothing else. Only that one draft states an identifier at all, so on
+  dev the rule is exercised once; the other forms are covered by tests, not by model output.
+- `L11`'s result is the gold answer (the gold SQL returns `0000037996-26-000015`), so the answer H3 ships
+  is a correct one. No dev figure is restated from the replay: 60 shipped is what H3 would have shipped
+  from these drafts, not a run.
+
+H3 is commit `458478a284d2f9a594d88e4b225d494d913078b8`, `ledgerql/` tree
+`8758231d5c11b904e8f3f30df828147a5855952a`; models, jobs, settings and the linker decision (on) are H2's.
+It is a new declaration, not an amendment of H2, because a run was made under H2. No held-out run was
+made under H1 or H2.
+
+### 3. H3 is final: `ledgerql/` is frozen until the held-out runs are done
+
+MJ: after H3, any further verifier or pipeline issue goes on a known-issues list, exactly like the gold
+freeze. **`evals/KNOWN_PIPELINE_ISSUES.md`** is that list; an issue is listed with its effect on the
+figures, not fixed, and there is no H4. The reason is the same as for the gold: every fix so far followed
+reading more output, and a configuration fixed up to the day of the run is one chosen with that output in
+view.
+
+Enforced, not trusted: the existing test fails if `ledgerql/` differs from the active declaration's
+tree, and `evals/heldout_config.py` now refuses any declaration that follows a `final` one while its
+`frozen.lifted` is null. The freeze is lifted by recording a date there, after the held-out runs of H3
+and the 32B are in `evals/heldout_runs.md`. `CLAUDE.md` says the same.
+
+The list opens with three entries, all limits of the identifier rule found on 2026-10-04 by trying forms,
+none from a model's output, the last two unchanged from H2:
+
+- an identifier that is only in the SQL filter is blocked (by design, above);
+- a two-group identifier (a ZIP+4) and an accession number written without hyphens are read as numbers
+  and refused;
+- a non-ASCII hyphen does not join an identifier.
+
+### 4. Figure 1(b) is a range
+
+Pre-registered in protocol 6a (and section 8, item 9), MJ: figure 1(b) is two rates over all shipped
+answers, always printed together.
+
+- **Point rate:** shipped answers with at least one `ungrounded` claim, over shipped.
+- **Worst case:** shipped answers with at least one `ungrounded` or at least one `unresolved` claim, over
+  shipped. An answer with both is counted once.
+
+This replaces "the figure, with the unresolved count printed beside it" from this morning. An
+`unresolved` claim keeps its status and is still listed to be read; the worst case only says how bad the
+figure is if every one of them was invented. `weak` and `derived` enter neither rate. `evals/audit_vs_verify.py`
+computes it (`figure_1b`) and both committed audit reports now print it. On dev it is the same number
+twice, because no dev answer has an unresolved claim: 0 of 59 and 0 of 59 for job 47412929, and 0 of 55,
+0 of 42, 0 of 44 for the three earlier runs.
+
+### 5. Also changed (not under `ledgerql/`)
+
+- `evals/replay_verifier.py` takes `--new-rev`, so both sides of a replay are committed revisions and the
+  report does not depend on the working tree. Its heading no longer says which side "produced this run":
+  in this replay the run's own verifier is the older one. `reports/verifier_replay_30b_47412929.md`
+  (this morning's: the verifier before H2, `3c235d1`, against H2's) is left as it was written.
+- A test pins that the verifier and the auditor agree on a quoted accession number, true and invented.
+
+### 6. Still owed
+
+MJ's 80 held-out questions and the blind labels; then the freeze of the set; then gen-only P1/P2/P3; then
+H3 and the 32B once each.
