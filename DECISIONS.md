@@ -3167,3 +3167,94 @@ twice, because no dev answer has an unresolved claim: 0 of 59 and 0 of 59 for jo
 
 MJ's 80 held-out questions and the blind labels; then the freeze of the set; then gen-only P1/P2/P3; then
 H3 and the 32B once each.
+
+---
+
+## 2026-10-04 (night) — H3 accepted, the SQL-only identifier case re-read, the human label check is 14 of 28, and the README drafted with placeholders
+
+### 1. H3 is accepted and the freeze stands; one known issue is re-read
+
+MJ accepted H3 and the freeze. One entry of `evals/KNOWN_PIPELINE_ISSUES.md` was recorded wrongly and is
+corrected: the first, an identifier that is only in the SQL filter (`WHERE adsh = '...'`, result a form
+type), was listed as "by design (MJ)". MJ: the rule came from the wording "only if the exact string
+appears in the result"; **an answer that restates an identifier the user supplied is not an invention.**
+It stays on the known-issues list. It does not lift the freeze, nothing under `ledgerql/` changes and
+there is no H4.
+
+What it does to the figures, checked today on a constructed answer, with no model run ("Filing
+0000037996-26-000015 is a 10-K." over a result of `10-K` and SQL that filters on that `adsh`):
+
+- the verifier blocks it, as listed;
+- **the auditor reads the same identifier as three ungrounded numbers** (`0000037996`, `26`, `000015`).
+  It masks a string that is in the result, and this one is only in the SQL. So `draft_rate` would file
+  the block under `invented`, where MJ's reading makes it a verifier false positive. The entry used to
+  say the auditor's verdict "says which part it falls in"; on this case the auditor's verdict is the
+  wrong part.
+
+The entry now says both. Not observed on dev: one stored dev draft states an identifier (`L11`), and its
+identifier is in the result. **Open for MJ, and nothing is changed here:** the auditor is not under the
+`ledgerql/` freeze, but its figure-1 rules are fixed in the protocol and may not change after a held-out
+result is seen. Either (a) the auditor's spec is amended before the set is frozen (an identifier is one
+claim, grounded by the exact string in the result or in a literal of the SQL), or (b) it is left, any
+such block in a held-out run is read by hand, and figure 1(a)'s split is printed with and without it.
+Recommendation: (a), because (b) leaves a pre-registered split that is known in advance to mislabel one
+kind of block.
+
+### 2. The human check of the `answer_must_state` labels covers 14 of the 28
+
+MJ labels a subset in place of all 28: `evals/must_state_labels_blind_subset.jsonl`, 14 rows.
+
+- **The four judgement calls**, all of them: the labels whose note the first labeller began with
+  "JUDGEMENT CALL" (`U08` on both models, `M01` and `M02` on the 32B). (The 2026-09-30 entry says "five
+  are marked" in one place and "four" in another; the file has four.)
+- **Ten of the other 24, drawn at random**: `random.Random(20261004).sample`, over the 24 in the label
+  file's order. The seed is today's date, fixed before the draw, as 20260930 and 20261002 were; one draw
+  was made and it was not redrawn.
+- **Shuffled together and unlabelled**: the rows are the full sheet's rows for those items (same
+  question, item text and full answer), `label` null and `note` empty, and nothing in the file says
+  which rows are the judgement calls.
+
+`python -m evals.must_state blind-subset` rebuilds it; a test pins the committed file to the four plus
+the seeded ten and to the full sheet's text, and keeps passing once MJ has filled the labels. `python -m
+evals.must_state agree` now reads the subset by default (`--blind-file` for any other sheet) and its
+report states the coverage: how many of the first labeller's items were labelled, and agreement
+separately for the judgement calls and for the others. The full 28-row sheet
+(`must_state_labels_blind.jsonl`) is kept, unlabelled and unchanged.
+
+**What a 14-of-28 check can and cannot say.** The 14 items MJ does not label carry the first labeller's
+(Claude's) label only. The judgement calls are in the subset on purpose, so agreement over the 14 is not
+an estimate for the 28: the ten are the sample that speaks for the other 24, and it is a small one. Ten
+agreements out of ten would still be compatible with up to four disagreements among those 24
+(hypergeometric: with four, a draw of ten misses all of them 9.4% of the time; with five, 4.7%). So the
+check can find a labeller who is often wrong and cannot certify one who is rarely wrong. As before,
+**patterns are not adjusted until MJ has adjudicated the disagreements.**
+
+### 3. The final README, drafted with placeholders
+
+`README.md` is rewritten in its final shape: the problem, the architecture (intent layer, generation,
+guardrails, consensus, writer, framing, verifier, abstain templates), the evaluation design (frozen dev
+gold, blind held-out set, pre-registration, frozen pipeline), "What our metrics got wrong" (the
+abstain-precision conflation, the invented years, the gold scoring errors, "0% by construction") and
+limits.
+
+- **Every held-out figure is the placeholder `[held-out: pending]`** (40 of them: the four figures of
+  protocol 6a with the parts printed beside them, the agree-policy table, and P1 to P4). `grep -c
+  "held-out: pending" README.md` must reach 0 when the figures are written in. **No sentence states or
+  anticipates a held-out outcome.**
+- The dev figures in it are labelled "development set" with the run each comes from, as protocol 6a
+  allows, and each is a figure already in this file or in a committed report: the H2 run (job 47412929,
+  linker on) for figure 1, its offline replay under H3, and the H1 run (job 47367323, linker off) for
+  execution accuracy, confidently wrong, coverage and the assumption cases. The two runs differ in
+  configuration and the table says so on each row. No dev figure was computed for it.
+- **Dropped from the old README because the tree does not support them:** the FastAPI and Streamlit
+  surface (`ledgerql/api.py` and `ledgerql/ui/` do not exist and never did in this history; the
+  `Makefile`'s `api`, `ui` and `run` targets point at them and are left as they are), "it never returns
+  a fabricated number", the 27-29% abstain precision as the open problem, and the phase roadmap.
+- Stated in it, for MJ to keep or cut: that the gold SQL and the calibration labels were written by
+  Claude, as the protocol's roles table says.
+
+### 4. Still owed
+
+MJ: the 14 blind labels, then `python -m evals.must_state agree`; the 80 held-out questions; a decision
+on (a) or (b) in section 1 before the set is frozen. Then the freeze of the set, gen-only P1/P2/P3, and
+H3 and the 32B once each.

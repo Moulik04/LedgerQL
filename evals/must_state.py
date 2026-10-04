@@ -24,6 +24,7 @@ Pattern-only grading checks that something was *said*, not that it is *true*: a 
 the year verifier's job (`ledgerql/verify.py`, `evals/year_audit.py`).
 
     python -m evals.must_state calibrate   # agreement with the hand-labelled answers
+    python -m evals.must_state agree       # MJ's blind labels (the 14-item subset) against both
 """
 
 from __future__ import annotations
@@ -261,21 +262,29 @@ def main(argv: list[str] | None = None) -> int:
     import argparse
 
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("command", choices=["calibrate", "judge-check", "blind", "agree"])
-    ap.add_argument("--blind-file", type=Path, default=BLIND_PATH)
+    ap.add_argument(
+        "command", choices=["calibrate", "judge-check", "blind", "blind-subset", "agree"]
+    )
+    ap.add_argument(
+        "--blind-file",
+        type=Path,
+        help="default: the full sheet for `blind`, the 14-item subset for `blind-subset` and `agree`",
+    )
     ap.add_argument("--reports-dir", type=Path, default=Path("reports"))
     ap.add_argument("--judge", action="store_true", help="also ask the local judge (Ollama)")
     ap.add_argument("--judge-model", default="llama3.1:8b")
     ap.add_argument("--write", type=Path)
     args = ap.parse_args(argv)
-    if args.command in ("blind", "agree"):
+    if args.command in ("blind", "blind-subset", "agree"):
         runs, patterns = _load_runs(args.reports_dir), load_patterns()
-        if args.command == "blind":
-            rows = build_blind(runs, patterns, load_labels())
-            args.blind_file.write_text("".join(json.dumps(r) + "\n" for r in rows))
-            print(f"wrote {args.blind_file}: {len(rows)} rows, no labels")
+        blind_file = args.blind_file or (BLIND_PATH if args.command == "blind" else SUBSET_PATH)
+        if args.command in ("blind", "blind-subset"):
+            build = build_blind if args.command == "blind" else build_blind_subset
+            rows = build(runs, patterns, load_labels())
+            blind_file.write_text("".join(json.dumps(r) + "\n" for r in rows))
+            print(f"wrote {blind_file}: {len(rows)} rows, no labels")
             return 0
-        blind = [json.loads(x) for x in args.blind_file.read_text().splitlines() if x.strip()]
+        blind = [json.loads(x) for x in blind_file.read_text().splitlines() if x.strip()]
         judge = OllamaJudge(args.judge_model) if args.judge else None
         text = _format_agreement(agreement(blind, load_labels(), runs, patterns, judge))
         if args.write:
@@ -385,6 +394,38 @@ def build_blind(
     return rows
 
 
+SUBSET_PATH = Path(__file__).resolve().parent / "must_state_labels_blind_subset.jsonl"
+
+
+def is_judgement_call(label: dict) -> bool:
+    """A label the first labeller marked as one a careful reader could give either way."""
+    return label.get("note", "").startswith("JUDGEMENT CALL")
+
+
+def subset_labels(labels: list[dict], n_random: int = 10, seed: int = 20261004) -> list[dict]:
+    """The labels the human check covers: every judgement call, and `n_random` of the others drawn
+    at random. The two parts are different things: the first is all of the hard items, the second
+    is a sample that speaks for the rest."""
+    import random
+
+    rest = [lab for lab in labels if not is_judgement_call(lab)]
+    return [lab for lab in labels if is_judgement_call(lab)] + random.Random(seed).sample(
+        rest, n_random
+    )
+
+
+def build_blind_subset(
+    records_by_run: dict[str, list[dict]],
+    patterns: dict[str, list[dict]],
+    labels: list[dict],
+    n_random: int = 10,
+    seed: int = 20261004,
+) -> list[dict]:
+    """A blind sheet for `subset_labels`: the same rows as the full sheet's, shuffled together, so
+    nothing in it says which rows are the judgement calls."""
+    return build_blind(records_by_run, patterns, subset_labels(labels, n_random, seed), seed)
+
+
 def agreement(
     blind: list[dict],
     claude_labels: list[dict],
@@ -395,6 +436,7 @@ def agreement(
     """MJ's blind labels against the grader and against the first labeller, per item and overall,
     with every disagreement listed for adjudication. Nothing is adjusted here."""
     claude = {(r["run"], r["case"], r["item"]): r["label"] for r in claude_labels}
+    calls = {(r["run"], r["case"], r["item"]) for r in claude_labels if is_judgement_call(r)}
     by_key = {(run, r["id"]): r for run, recs in records_by_run.items() for r in recs}
     rows, unlabelled = [], 0
     for b in blind:
@@ -412,13 +454,22 @@ def agreement(
                 "claude": claude.get(key), "grader": graded.passed,
                 "pattern": graded.pattern_pass, "judge": graded.judge_pass,
                 "decided_by": graded.decided_by, "mj_note": b.get("note", ""),
-                "answer": rec["answer"],
+                "answer": rec["answer"], "judgement_call": key in calls,
             }
         )  # fmt: skip
 
     def tally(field):
         gradable = [r for r in rows if r[field] is not None]
         return {"n": len(gradable), "agree": sum(r[field] == r["mj"] for r in gradable)}
+
+    def part(is_call: bool, of: int) -> dict:
+        mine = [r for r in rows if r["judgement_call"] is is_call]
+        return {
+            "n": len(mine),
+            "of": of,
+            "mj_claude": sum(r["claude"] == r["mj"] for r in mine),
+            "mj_grader": sum(r["grader"] == r["mj"] for r in mine),
+        }
 
     per_item: dict[tuple, dict] = {}
     for r in rows:
@@ -429,6 +480,11 @@ def agreement(
     return {
         "n": len(rows),
         "unlabelled": unlabelled,
+        # What the human check covers: the labels are a subset of the first labeller's, and not a
+        # uniform one (every judgement call, a random draw of the rest).
+        "first_labeller_total": len(claude_labels),
+        "judgement_calls": part(True, len(calls)),
+        "others": part(False, len(claude_labels) - len(calls)),
         "mj_vs_claude": tally("claude"),
         "mj_vs_grader": tally("grader"),
         "per_item": per_item,
@@ -438,14 +494,38 @@ def agreement(
 
 def _format_agreement(out: dict) -> str:
     c, g = out["mj_vs_claude"], out["mj_vs_grader"]
+    jc, rest = out["judgement_calls"], out["others"]
+
+    def share(t: dict) -> str:
+        return f"{t['agree']} of {t['n']}" + (f" ({t['agree'] / t['n']:.0%})" if t["n"] else "")
+
     lines = [
         "# answer_must_state: MJ's blind labels against the grader and the first labeller",
         "",
-        f"{out['n']} labelled ({out['unlabelled']} left blank). **MJ vs the grader:** {g['agree']} of "
-        f"{g['n']} gradable ({g['agree'] / g['n']:.0%}). **MJ vs the first labeller:** {c['agree']} of "
-        f"{c['n']} ({c['agree'] / c['n']:.0%}). Patterns are not adjusted until MJ has adjudicated "
-        "the disagreements below.",
+        f"{out['n']} labelled ({out['unlabelled']} left blank), of the {out['first_labeller_total']} "
+        f"items the first labeller labelled. **MJ vs the grader:** {share(g)} gradable. **MJ vs the "
+        f"first labeller:** {share(c)}. Patterns are not adjusted until MJ has adjudicated the "
+        "disagreements below.",
         "",
+        "## What the check covers",
+        "",
+        "| part | labelled by MJ | MJ = first labeller | MJ = grader |",
+        "|---|---|---|---|",
+        f"| items the first labeller marked a judgement call | {jc['n']} of {jc['of']} | "
+        f"{jc['mj_claude']} | {jc['mj_grader']} |",
+        f"| the other items | {rest['n']} of {rest['of']} | {rest['mj_claude']} | {rest['mj_grader']} |",
+        "",
+    ]
+    if rest["n"] < rest["of"]:
+        lines += [
+            f"The {out['first_labeller_total'] - jc['n'] - rest['n']} items MJ did not label carry "
+            "the first labeller's label only. The judgement calls are over-represented on purpose, "
+            "so the overall rate above is not an estimate for all "
+            f"{out['first_labeller_total']}: the second row is the sample that speaks for the "
+            "other items.",
+            "",
+        ]
+    lines += [
         "## Per item",
         "",
         "| case | item | n | MJ = first labeller | MJ = grader |",

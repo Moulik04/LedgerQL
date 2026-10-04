@@ -161,6 +161,89 @@ def test_the_blind_sheet_order_is_shuffled_but_reproducible():
     )
 
 
+def _six_labelled_answers(calls=("X0",)):
+    """Six answers on six cases; the first labeller marked those in `calls` as judgement calls."""
+    cases = [f"X{i}" for i in range(6)]
+    records = {"r": [{"id": c, "answer": f"answer {c}", "question": "q"} for c in cases]}
+    labels = [
+        {
+            "run": "r",
+            "case": c,
+            "item": 0,
+            "label": True,
+            "note": "JUDGEMENT CALL: either way" if c in calls else "plain",
+        }
+        for c in cases
+    ]
+    return records, {c: [ITEM] for c in cases}, labels
+
+
+def test_the_blind_subset_is_every_judgement_call_and_a_seeded_draw_of_the_rest():
+    records, patterns, labels = _six_labelled_answers(calls=("X0", "X3"))
+    rows = M.build_blind_subset(records, patterns, labels, n_random=2, seed=7)
+    cases = {r["case"] for r in rows}
+    assert len(rows) == 4 and {"X0", "X3"} <= cases  # both judgement calls, two of the other four
+    assert rows == M.build_blind_subset(records, patterns, labels, n_random=2, seed=7)
+    draws = {
+        frozenset(r["case"] for r in M.build_blind_subset(records, patterns, labels, 2, seed))
+        for seed in range(20)
+    }
+    assert len(draws) > 1  # the draw depends on the seed: it is a draw, not a fixed pick
+
+
+def test_the_blind_subset_does_not_say_which_rows_are_the_judgement_calls():
+    records, patterns, labels = _six_labelled_answers()
+    rows = M.build_blind_subset(records, patterns, labels, n_random=2, seed=7)
+    assert all(r["label"] is None and r["note"] == "" for r in rows)
+    assert "JUDGEMENT" not in json.dumps(rows) and "plain" not in json.dumps(rows)
+    assert len({tuple(sorted(r)) for r in rows}) == 1  # every row has the same fields
+
+
+def test_the_committed_blind_subset_is_the_four_judgement_calls_and_the_seeded_ten():
+    """Holds before and after MJ fills it: the labels and notes are MJ's, the rest is pinned."""
+
+    def read(path):
+        return [json.loads(x) for x in path.read_text().splitlines() if x.strip()]
+
+    def answer_id(lab):
+        return f"{lab['run']}:{lab['case']}:{lab['item']}"
+
+    labels = M.load_labels()
+    subset = read(M.SUBSET_PATH)
+    full = {r["answer_id"]: r for r in read(M.BLIND_PATH)}
+    calls = {answer_id(lab) for lab in labels if M.is_judgement_call(lab)}
+    ids = [r["answer_id"] for r in subset]
+    assert len(labels) == 28 and len(calls) == 4
+    assert len(ids) == len(set(ids)) == 14 and calls <= set(ids)
+    assert set(ids) == {answer_id(lab) for lab in M.subset_labels(labels)}  # the seeded draw
+    for row in subset:  # the same question, item and answer text as the full sheet
+        theirs = {k: v for k, v in row.items() if k not in ("label", "note")}
+        assert theirs == {k: v for k, v in full[row["answer_id"]].items() if k in theirs}
+
+
+def test_agreement_says_which_part_of_the_first_labellers_items_was_checked():
+    records, patterns, labels = _six_labelled_answers(calls=("X0",))
+    # MJ labels the judgement call and two of the other five, and differs on the judgement call.
+    blind = [
+        {"run": "r", "case": "X0", "item": 0, "label": False, "note": ""},
+        {"run": "r", "case": "X1", "item": 0, "label": True, "note": ""},
+        {"run": "r", "case": "X2", "item": 0, "label": True, "note": ""},
+    ]
+    out = M.agreement(blind, labels, records, patterns)
+    assert out["n"] == 3 and out["first_labeller_total"] == 6
+    assert out["judgement_calls"] == {"n": 1, "of": 1, "mj_claude": 0, "mj_grader": 1}
+    assert out["others"] == {"n": 2, "of": 5, "mj_claude": 2, "mj_grader": 0}
+    text = M._format_agreement(out)
+    assert "3 labelled (0 left blank), of the 6 items the first labeller labelled" in text
+    assert "| the other items | 2 of 5 | 2 | 0 |" in text
+    assert "The 3 items MJ did not label" in text
+    # With nothing labelled yet the report still renders (no rate to compute).
+    blank = [{**b, "label": None} for b in blind]
+    assert "0 labelled (3 left blank)" in M._format_agreement(
+        M.agreement(blank, labels, records, patterns)
+    )
+
+
 def test_agreement_reports_per_item_overall_and_every_disagreement_in_both_comparisons():
     patterns = {"X": [ITEM]}
     records = {"r": [{"id": "X", "answer": "It was 1", "question": "q"}]}  # no fiscal year stated

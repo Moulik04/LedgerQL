@@ -707,8 +707,15 @@ answered-correctly-not-stated, abstained and answered wrong. Execution outranks 
 An abstain has no text to grade (the pipeline records only a reason code), so refusal items are
 reported as not gradable, never as passes.
 
+**The human check covers 14 of the 28 labels** (2026-10-04): MJ labels
+`must_state_labels_blind_subset.jsonl`, the four items the first labeller marked as judgement calls
+plus ten of the other 24 drawn at random (seed 20261004), shuffled and unlabelled
+(`python -m evals.must_state blind-subset` rebuilds it). The other 14 carry the first labeller's
+label only, and `agree` reports the two parts separately.
+
     python -m evals.must_state calibrate [--judge]   # vs the 28 hand labels (labeller: Claude)
     python -m evals.must_state judge-check           # judge and patterns on 20 constructed answers
+    python -m evals.must_state agree [--judge]       # MJ's blind labels vs the grader and those labels
     python -m evals.rescore_v2 report --judge        # the figures, with the judge on
 
 ## 6k. Abstain explanations, the answer framing and the third state
