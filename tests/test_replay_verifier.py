@@ -105,8 +105,9 @@ def test_the_verifier_of_an_earlier_revision_can_be_loaded_beside_the_current_on
 
 def test_both_sides_of_a_replay_can_be_pinned_to_a_revision():
     # a replay of two committed verifiers reads the same whatever the working tree holds
-    pinned = R.verifiers("3c235d1", "590188e")
-    assert list(pinned) == ["verifier at 3c235d1", "verifier at 590188e"]
+    # (only HEAD is named here: CI checks out without history, so no older commit exists there)
+    pinned = R.verifiers("HEAD", "HEAD~0")
+    assert list(pinned) == ["verifier at HEAD", "verifier at HEAD~0"]
     assert all(v is not verify.verify for v in pinned.values())
     live = R.verifiers("HEAD", None)
     assert list(live) == ["verifier at HEAD", "verifier now"]

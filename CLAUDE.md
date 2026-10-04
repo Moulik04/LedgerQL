@@ -10,7 +10,9 @@ it as red.
 Why this is here: CI was red on every push from 2026-09-22 to 2026-10-01 and nobody looked for nine days.
 The cause was tests that need a gitignored 185 MB database; they had been failing loudly since the
 "a missing fixture fails, it does not skip" change, and the red runs were never read (`DECISIONS.md`,
-2026-10-01). A fresh clone of HEAD reproduces CI exactly, so run the suite there before pushing.
+2026-10-01). A fresh clone of HEAD reproduces CI exactly, so run the suite there before pushing. Make it a shallow
+one (`git clone --depth 1 file://$PWD <dir>`): CI checks out without history, and a full clone hid a test
+that read an older commit (2026-10-04).
 
 ```bash
 gh run list --limit 3 --json databaseId,headSha,conclusion,displayTitle
