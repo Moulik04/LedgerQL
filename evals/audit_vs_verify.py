@@ -190,6 +190,43 @@ def draft_rate(records: list[dict], db: str | None) -> dict[str, int]:
     }
 
 
+def figure_1b(rows: list[dict]) -> dict[str, int]:
+    """Figure 1(b) as the range the protocol reports (6a): over the shipped answers, how many have
+    an ungrounded claim (the point rate's numerator) and how many have an ungrounded or an
+    unresolved claim (the worst case's: every unresolved claim read as invented). An answer with
+    both is one answer."""
+    return {
+        "shipped": len(rows),
+        "ungrounded": sum(bool(r["ungrounded"]) for r in rows),
+        "unresolved": sum(bool(r["unresolved"]) for r in rows),
+        "worst_case": sum(bool(r["ungrounded"] or r["unresolved"]) for r in rows),
+    }
+
+
+def _rate(n: int, d: int) -> str:
+    return f"{n} of {d} ({n / d:.1%})" if d else "0 of 0"
+
+
+def render_range(rows: list[dict], totals: dict) -> list[str]:
+    lines = [
+        "## Figure 1(b) as a range",
+        "",
+        "The point rate is the shipped answers with an ungrounded claim over all shipped answers. The",
+        "worst case adds every shipped answer with a claim the auditor cannot resolve, as if each such",
+        "claim were invented; an answer with both is counted once.",
+        "",
+        "| run | shipped | point rate | worst case |",
+        "|---|---|---|---|",
+    ]
+    for label in totals:
+        f = figure_1b([r for r in rows if r["run"] == label])
+        lines.append(
+            f"| {label} | {f['shipped']} | {_rate(f['ungrounded'], f['shipped'])} | "
+            f"{_rate(f['worst_case'], f['shipped'])} |"
+        )
+    return [*lines, ""]
+
+
 def plant_table() -> list[dict]:
     out = []
     for form, text in PLANTS:
@@ -302,6 +339,7 @@ def render(
             f"- verifier: ok. auditor ungrounded: {r['ungrounded']}",
             "",
         ]
+    lines += render_range(rows, totals)
     lines += render_unresolved(rows)
     if blocks:
         lines += render_blocks(blocks)

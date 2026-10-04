@@ -244,6 +244,90 @@ def test_a_date_range_or_hyphenated_pair_is_not_a_negative_number():
     assert not flagged("Between 2024-2025 values rose.", ["fiscal_year", "v"], rows, sql="")
 
 
+# --- identifiers: an accession number is one string, not three quantities (H3, 2026-10-04) -----
+
+ADSH = "0000037996-26-000015"
+
+
+def test_an_accession_number_the_result_holds_is_not_three_numbers():
+    # L11 (30B, job 47412929): the result was this one cell, the draft quoted it, and the three
+    # digit groups were refused as the numbers 37996, 26 and 15.
+    text = (
+        f"The data shows a single filing with accession number {ADSH}. There are no other "
+        "values provided in the table to describe additional information about this filing."
+    )
+    result = check(text, ["adsh"], [(ADSH,)], sql="SELECT adsh FROM filings LIMIT 1")
+    assert result.ok, result.detail
+
+
+def test_an_identifier_is_one_claim_and_states_no_quantity():
+    claims = verify.extract_claims(f"Filing {ADSH} was found.")
+    assert [(c.kind, c.text) for c in claims] == [("identifier", ADSH)]
+    assert verify.extract_numbers(f"Filing {ADSH} was found.") == []
+
+
+def test_an_identifier_the_result_does_not_hold_is_refused_as_one_claim():
+    result = check("The filing is 0000037996-26-000016.", ["adsh"], [(ADSH,)], sql="")
+    assert not result.ok
+    assert result.ungrounded_claims == ["0000037996-26-000016"]
+    assert result.ungrounded_numbers == []
+
+
+def test_an_identifier_is_grounded_by_the_exact_string_and_by_nothing_else():
+    said = f"The filing is {ADSH}."
+    # its digit groups as numbers in the result are not the string
+    assert flagged(said, ["cik", "yy", "seq"], [(37996, 26, 15)], sql="")
+    # the SQL is not the result
+    assert flagged(said, ["form"], [("10-K",)], sql=f"SELECT form FROM f WHERE adsh = '{ADSH}'")
+    # a piece of a longer identifier is not that identifier, with or without its leading zeros
+    assert flagged("The filing is 0000037996-26-00001.", ["adsh"], [(ADSH,)], sql="")
+    assert flagged("The filing is 37996-26-000015.", ["adsh"], [(ADSH,)], sql="")
+    assert flagged("The filing is 37996-26-15.", ["adsh"], [(ADSH,)], sql="")
+    # the whole string inside a longer cell is
+    assert not flagged(said, ["path"], [(f"edgar/data/37996/{ADSH}.txt",)], sql="")
+    assert not flagged(said, ["path"], [(f"{ADSH}-index.htm",)], sql="")
+
+
+def test_each_identifier_in_a_list_is_checked_on_its_own():
+    rows = [(ADSH,), ("0000320193-24-000123",)]
+    assert not flagged(f"They are {ADSH} and 0000320193-24-000123.", ["adsh"], rows, sql="")
+    result = check(f"They are {ADSH} and 0000320193-24-000124.", ["adsh"], rows, sql="")
+    assert result.ungrounded_claims == ["0000320193-24-000124"]
+
+
+def test_a_number_beside_a_grounded_identifier_is_still_checked():
+    assert flagged(f"Filing {ADSH} reported 7 items.", ["adsh"], [(ADSH,)], sql="")
+    assert flagged(f"Filing {ADSH} was for fiscal 2022.", ["adsh"], [(ADSH,)], sql="")
+
+
+def test_a_year_shaped_group_inside_an_identifier_is_not_a_year():
+    # with a fiscal_year column a stated year must be one of its values; the 2024 here is no year
+    cols, rows = ["ref", "fiscal_year"], [("1234-2024-5678", 2025)]
+    result = check("Reference 1234-2024-5678, fiscal year 2025.", cols, rows, sql="")
+    assert result.ok, result.detail
+    # and an identifier that is not there is reported once, not also as a year
+    result = check("Reference 1234-2024-5679, fiscal year 2025.", cols, rows, sql="")
+    assert result.ungrounded_claims == ["1234-2024-5679"] and result.ungrounded_numbers == []
+
+
+def test_a_run_of_years_is_years_not_an_identifier():
+    # "2023-2024-2025" is three years, each checked as a year, as it was before identifiers
+    cols, rows = ["fiscal_year", "v"], [(2023, 1.0), (2024, 2.0), (2025, 3.0)]
+    assert verify.extract_claims("Fiscal years 2023-2024-2025.") == []
+    assert not flagged("Fiscal years 2023-2024-2025.", cols, rows, sql="")
+    result = check("Fiscal years 2022-2023-2024.", cols, rows, sql="")
+    assert result.ungrounded_claims == ["2022"]
+
+
+def test_two_digit_groups_and_a_date_are_not_identifiers():
+    # a range is two quantities, and an ISO date is a date
+    assert [c.kind for c in verify.extract_claims("Between 10-15 filings.")] == ["number"] * 2
+    assert flagged("Between 10-15 filings.", ["n"], [(10,)], sql="")
+    assert [c.kind for c in verify.extract_claims("Filed 2026-01-29.")] == ["date"]
+    assert not flagged("Filed 2026-01-29.", ["filed"], [("2026-01-29",)], sql="")
+    assert flagged("Filed 2026-01-28.", ["filed"], [("2026-01-29",)], sql="")
+
+
 # --- the result carries what was claimed, for the auditor -------------------------------------
 
 

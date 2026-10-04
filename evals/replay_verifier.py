@@ -2,7 +2,10 @@
 """Replay a pipeline run's drafts under two versions of the verifier, no model needed.
 
     python -m evals.replay_verifier reports/runs/<run>/eval_<date>.jsonl --old-rev 3c235d1 \\
-        [--write reports/verifier_replay_<run>.md]
+        [--new-rev <commit>] [--write reports/verifier_replay_<run>.md]
+
+Without `--new-rev` the second verifier is the one in the working tree; with it, both sides are
+committed revisions and the report reads the same whatever the working tree holds.
 
 The verifier runs after the answer is drafted, so a change to it cannot change a draft: only
 which drafts ship. A run made since blocked drafts were stored (2026-10-03, configuration H2) holds
@@ -51,6 +54,16 @@ def load_verifier(rev: str):
         sys.modules[name] = module
         spec.loader.exec_module(module)
     return module
+
+
+def verifiers(old_rev: str, new_rev: str | None) -> dict:
+    """The two verifiers to replay, by the name the report gives each."""
+    new = (
+        {f"verifier at {new_rev}": load_verifier(new_rev).verify}
+        if new_rev
+        else {"verifier now": current_verify.verify}
+    )
+    return {f"verifier at {old_rev}": load_verifier(old_rev).verify, **new}
 
 
 def replay(records: list[dict], verifiers: dict, questions: dict[str, str], db: str | None):
@@ -120,11 +133,11 @@ def _rate(n: int, d: int) -> str:
 def render(rows: list[dict], not_stored: list[str], old: str, new: str, source: str) -> str:
     o, n = summarize(rows, old), summarize(rows, new)
     lines = [
-        f"# The verifier before and after, replayed on the same drafts ({source})",
+        f"# Two versions of the verifier, replayed on the same drafts ({source})",
         "",
-        f"`{old}` is the verifier before the change, `{new}` the one that produced this run. The drafts",
-        "are identical on both sides (the verifier runs after the answer is written), so every",
-        "difference below is the verifier's. The auditor is `evals/number_audit.py`.",
+        f"`{old}` and `{new}` are two versions of `ledgerql/verify.py`, replayed on the drafts this run",
+        "stored. The drafts are identical on both sides (the verifier runs after the answer is written),",
+        "so every difference below is the verifier's. The auditor is `evals/number_audit.py`.",
         "",
         f"| | {old} | {new} |",
         "|---|---|---|",
@@ -177,13 +190,14 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("report", type=Path, help="a run_eval per-case jsonl made with stored drafts")
     ap.add_argument("--old-rev", required=True, help="git revision of the verifier to replay")
+    ap.add_argument("--new-rev", help="git revision of the second verifier (default: working tree)")
     ap.add_argument("--db", default=DEFAULT_DB)
     ap.add_argument("--write", type=Path)
     args = ap.parse_args(argv)
-    old, new = f"verifier at {args.old_rev}", "verifier now"
-    verifiers = {old: load_verifier(args.old_rev).verify, new: current_verify.verify}
+    both = verifiers(args.old_rev, args.new_rev)
+    old, new = both
     rows, not_stored = replay(
-        load_jsonl(args.report), verifiers, pipeline_acceptance._questions(), args.db
+        load_jsonl(args.report), both, pipeline_acceptance._questions(), args.db
     )
     text = render(rows, not_stored, old, new, args.report.name)
     if args.write:

@@ -144,3 +144,53 @@ def test_the_report_prints_unresolved_claims_separately_and_not_as_disagreements
     assert "## Unresolved claims in shipped answers: 1" in text and "### r / S1" in text
     assert "| run | drafted | blocked | invented | verifier false positive | unresolved |" in text
     assert "### r / cannot-tell: unresolved" in text
+
+
+# --- figure 1(b) is a range: the point rate, and a worst case with the unresolved answers -------
+
+
+def _shipped(i, ungrounded=(), unresolved=()):
+    return {"run": "r", "id": i, "answer": i, "columns": [], "rows": [], "sql": "",
+            "verifier_ok": True, "audit_clean": not ungrounded, "ungrounded": list(ungrounded),
+            "unresolved": list(unresolved), "weak": [], "derived": [], "claims": 1}  # fmt: skip
+
+
+def test_figure_1b_is_the_point_rate_and_a_worst_case_that_adds_the_unresolved_answers():
+    year, number = [("year", "2024")], [("number", "9")]
+    rows = [
+        _shipped("clean"),
+        _shipped("clean-2"),
+        _shipped("invented", ungrounded=number),
+        _shipped("cannot-tell", unresolved=year),
+        _shipped("both", ungrounded=number, unresolved=year),  # one answer, counted once
+    ]
+    assert A.figure_1b(rows) == {"shipped": 5, "ungrounded": 2, "unresolved": 2, "worst_case": 3}
+    text = A.render(rows, {"r": 5}, [], [])
+    assert "| run | shipped | point rate | worst case |" in text
+    assert "| r | 5 | 2 of 5 (40.0%) | 3 of 5 (60.0%) |" in text
+
+
+def test_figure_1b_with_nothing_shipped_has_no_rate():
+    assert A.figure_1b([]) == {"shipped": 0, "ungrounded": 0, "unresolved": 0, "worst_case": 0}
+    assert "| r | 0 | 0 of 0 | 0 of 0 |" in A.render([], {"r": 0}, [], [])
+
+
+# --- an identifier (an accession number), both implementations --------------------------------
+
+_ADSH = "0000037996-26-000015"
+
+
+@pytest.mark.parametrize(
+    "text,true",
+    [
+        (f"The filing's accession number is {_ADSH}.", True),
+        ("The filing's accession number is 0000037996-26-000016.", False),
+        ("The filing's accession number is 0000320193-24-000123.", False),
+    ],
+)
+def test_the_verifier_and_the_auditor_agree_on_a_quoted_accession_number(text, true):
+    from ledgerql import verify
+
+    columns, rows, sql = ["adsh"], [(_ADSH,)], "SELECT adsh FROM filings LIMIT 1"
+    assert verify.verify(text, columns, rows, sql=sql).ok is true
+    assert A.number_audit.audit_answer(text, columns, rows, sql).clean is true

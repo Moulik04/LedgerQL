@@ -75,6 +75,16 @@ planted values; the regression suite is `tests/planted_values.py`, shared with t
 - A date (`June 30, 2025`, `30 June 2025`, `2025-06-30`, `6/30/2025`, `June 30`) is one claim,
   grounded by the same month and day in a date in the result or a date literal in the SQL, or by a
   day the framing stated. The year inside a grounded date is not checked a second time.
+- **An identifier is one claim and states no quantity** (added 2026-10-04, configuration H3). Three
+  or more groups of digits joined by hyphens, such as an SEC accession number
+  (`0000037996-26-000015`), are a string that names something, not three numbers. It is grounded
+  only if that exact string is in a string cell of the result, whole: not as a piece of a longer
+  run of digits and hyphens, not with its leading zeros dropped, and never by its groups as
+  numbers or by the SQL (the answer writer sees the result, not the query). No group inside it is
+  read as a year. Two groups (`2024-2025`, `10-15`) stay two numbers, an ISO date stays a date, and
+  a run in which every group is a year (`2023-2024-2025`) stays years.
+  Why: the result of a lookup was one accession number, the draft quoted it, and its three groups
+  were refused as the numbers 37996, 26 and 15 (30B, job 47412929, case L11).
 """
 
 import datetime as dt
@@ -108,6 +118,10 @@ _FY_RE = re.compile(r"(?<![A-Za-z0-9])FY ?(?:\d{4}|\d{2})(?!\d)")
 _ORDINAL_RE = re.compile(r"(?<![\w.])\d+(?:st|nd|rd|th)\b", re.IGNORECASE)
 _LIST_MARKER_RE = re.compile(r"(?m)^[ \t]*\d{1,3}[.)](?=[ \t])")
 _LABEL_RE = re.compile(r"(?<![A-Za-z0-9])(?:Q[1-4]|H[12])(?![A-Za-z0-9])")
+# An identifier: three or more digit groups joined by hyphens (an accession number). Read after
+# dates, so an ISO date is a date; two groups are a range, which is two numbers; a run of years is
+# left to the year check.
+_IDENTIFIER_RE = re.compile(r"(?<![\w.-])\d+(?:-\d+){2,}(?![\w-])(?!\.\d)")
 
 _MONTH_NUMBER = {
     m: i + 1
@@ -179,7 +193,7 @@ _NUMBER_WORDS = set(_UNITS) | set(_TENS) | set(_WORD_SCALES) | {"hundred"}
 class Claim:
     """One thing the answer states that has to come from somewhere."""
 
-    kind: str  # "number", "percent", "date" or "label"
+    kind: str  # "number", "percent", "date", "label" or "identifier"
     text: str
     start: int
     end: int
@@ -353,9 +367,10 @@ def _date_claim(m: re.Match) -> Claim | None:
 
 
 def extract_claims(text: str, known_strings: list[str] | tuple[str, ...] = ()) -> list[Claim]:
-    """Every number, percentage, date and period label the text states, in order. Bare years are
-    not here (`extract_years`). `known_strings` are strings the result itself holds (a company
-    name such as "3M"): where the text repeats one, its digits and number words are not claims."""
+    """Every number, percentage, date, period label and identifier the text states, in order.
+    Bare years are not here (`extract_years`). `known_strings` are strings the result itself holds
+    (a company name such as "3M"): where the text repeats one, its digits and number words are not
+    claims."""
     claims: list[Claim] = []
 
     def blank(start: int, end: int) -> None:
@@ -370,6 +385,11 @@ def extract_claims(text: str, known_strings: list[str] | tuple[str, ...] = ()) -
             if claim:
                 claims.append(claim)
                 blank(*m.span())
+    for m in _IDENTIFIER_RE.finditer(text):
+        if all(_YEAR_RE.match(group) for group in m.group().split("-")):
+            continue  # "2023-2024-2025": a run of years, each checked as a year
+        claims.append(Claim("identifier", m.group(), m.start(), m.end()))
+        blank(*m.span())
     for m in _LABEL_RE.finditer(text):
         claims.append(Claim("label", m.group(), m.start(), m.end()))
         blank(*m.span())
@@ -429,6 +449,13 @@ def _dates_in(value: object) -> set[tuple[int, int, int]]:
     if isinstance(value, str):
         return {(int(y), int(m), int(d)) for y, m, d in _ISO_IN_DATA_RE.findall(value)}
     return set()
+
+
+def _holds_identifier(strings: list[str], identifier: str) -> bool:
+    """A string cell holds exactly this identifier: not as a piece of a longer run of digits and
+    hyphens (`...-000015` does not hold `...-00001`, nor the same digits without leading zeros)."""
+    whole = re.compile(rf"(?<!\d)(?<!\d-){re.escape(identifier)}(?!\d)(?!-\d)")
+    return any(whole.search(s) for s in strings)
 
 
 def _number(value: object) -> float | int | None:
@@ -496,9 +523,10 @@ def verify(
     ]  # fmt: skip
 
     ungrounded: list[float] = []
-    other: list[str] = []  # dates and labels: claims with no number to report
+    other: list[str] = []  # dates, labels and identifiers: claims with no number to report
     texts: list[str] = []
     dated: list[tuple[int, int]] = []  # spans of dates the result grounds, year included
+    identifiers: list[tuple[int, int]] = []  # spans of identifiers: no group in one is a year
     for claim in extract_claims(answer, known):
         if claim.kind == "date":
             year, month, day = claim.date
@@ -511,6 +539,10 @@ def verify(
             if not re.search(
                 rf"(?<![A-Za-z0-9]){claim.text}(?![A-Za-z0-9])", labelled, re.IGNORECASE
             ):
+                other.append(claim.text)
+        elif claim.kind == "identifier":
+            identifiers.append((claim.start, claim.end))
+            if not _holds_identifier(strings, claim.text):
                 other.append(claim.text)
         else:
             pool = percent_values if claim.kind == "percent" else grounded_values
@@ -529,7 +561,7 @@ def verify(
     else:
         grounded_years = result_years(rows) | sql_years(sql) | set(context_years or ())
     for at, year in _year_positions(answer):
-        if year not in grounded_years and not any(s <= at < e for s, e in dated):
+        if year not in grounded_years and not any(s <= at < e for s, e in dated + identifiers):
             ungrounded.append(float(year))
             texts.append(str(year))
 

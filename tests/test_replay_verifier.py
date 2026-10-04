@@ -101,3 +101,22 @@ def test_the_verifier_of_an_earlier_revision_can_be_loaded_beside_the_current_on
     head = R.load_verifier("HEAD")
     assert head.verify is not verify.verify
     assert head.verify("The value is 5.0.", ["v"], [(5.0,)]).ok
+
+
+def test_both_sides_of_a_replay_can_be_pinned_to_a_revision():
+    # a replay of two committed verifiers reads the same whatever the working tree holds
+    pinned = R.verifiers("3c235d1", "590188e")
+    assert list(pinned) == ["verifier at 3c235d1", "verifier at 590188e"]
+    assert all(v is not verify.verify for v in pinned.values())
+    live = R.verifiers("HEAD", None)
+    assert list(live) == ["verifier at HEAD", "verifier now"]
+    assert live["verifier now"] is verify.verify
+
+
+def test_the_report_does_not_say_which_side_produced_the_run():
+    # either side may be the one the run was made with: the replay of a later verifier on an
+    # earlier run's drafts has the run's own verifier on the left
+    rows, not_stored = _replayed()
+    text = R.render(rows, not_stored, "old", "new", "x.jsonl")
+    assert "produced this run" not in text
+    assert "`old` and `new` are two versions of `ledgerql/verify.py`" in text
