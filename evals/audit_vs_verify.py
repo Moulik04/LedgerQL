@@ -7,8 +7,10 @@ For every answered record of the committed dev pipeline runs, the verifier's ver
 pipeline gave it: `run_eval.verify_as_pipeline`) and the auditor's (`evals/number_audit.py`). A
 shipped answer has passed the verifier, so every disagreement here is the auditor flagging
 something the verifier let through; each is printed with its claims, to be judged by reading which
-side is right. Then the same two on planted invented values in every form, which is where the
-verifier's blind spots show without waiting for a model to produce them.
+side is right. A claim the auditor cannot resolve (a year or date some company has, under SQL whose
+company it cannot tell) is its own status: listed, and counted on neither side. Then the same two
+on planted invented values in every form, which is where the verifier's blind spots show without
+waiting for a model to produce them.
 
 This module is the only place the auditor and the verifier meet; `number_audit.py` imports neither.
 """
@@ -115,9 +117,11 @@ def compare_runs(db: str, runs: dict[str, str] | None = None) -> tuple[list[dict
                     "answer": rec["answer"],
                     "columns": rec["columns"],
                     "rows": rec["rows"][:3],
+                    "sql": sql,
                     "verifier_ok": v.ok,
                     "audit_clean": a.clean,
                     "ungrounded": [(c.kind, c.text) for c in a.ungrounded],
+                    "unresolved": [(c.kind, c.text) for c in a.unresolved],
                     "weak": [(c.kind, c.text) for c in a.of("weak")],
                     "derived": [(c.kind, c.text) for c in a.of("derived")],
                     "claims": len(a.claims),
@@ -134,14 +138,17 @@ def classify_blocks(records: list[dict], db: str | None) -> list[dict]:
     """Every draft the verifier blocked, judged by the auditor on the stored draft text
     (`blocked_draft`, recorded since 2026-10-03). `invented`: the auditor finds an ungrounded claim
     too, so the block was right. `verifier false positive`: the auditor grounds every claim, so the
-    verifier refused a true statement. A weak or derived claim is listed and never makes a draft
-    invented (protocol 6a). A record from before drafts were stored is `draft not stored`."""
+    verifier refused a true statement. `unresolved`: no claim is ungrounded but the auditor cannot
+    resolve at least one, so it gives no verdict and the block counts on neither side. A weak or
+    derived claim is listed and never makes a draft invented (protocol 6a). A record from before
+    drafts were stored is `draft not stored`."""
     out = []
     for rec in records:
         if rec.get("reason_code") != BLOCKED:
             continue
-        block = {"id": rec["id"], "draft": rec.get("blocked_draft"), "ungrounded": [], "weak": [],
-                 "derived": [], "refused": rec.get("blocked_claims", [])}  # fmt: skip
+        block = {"id": rec["id"], "draft": rec.get("blocked_draft"), "ungrounded": [],
+                 "unresolved": [], "weak": [], "derived": [],
+                 "refused": rec.get("blocked_claims", [])}  # fmt: skip
         if not block["draft"]:
             out.append({**block, "verdict": "draft not stored"})
             continue
@@ -153,9 +160,14 @@ def classify_blocks(records: list[dict], db: str | None) -> list[dict]:
             db,
         )
         block["ungrounded"] = [(c.kind, c.text) for c in a.ungrounded]
+        block["unresolved"] = [(c.kind, c.text) for c in a.unresolved]
         block["weak"] = [(c.kind, c.text) for c in a.of("weak")]
         block["derived"] = [(c.kind, c.text) for c in a.of("derived")]
-        verdict = "invented" if block["ungrounded"] else "verifier false positive"
+        verdict = (
+            "invented"
+            if block["ungrounded"]
+            else "unresolved" if block["unresolved"] else "verifier false positive"
+        )
         out.append({**block, "verdict": verdict})
     return out
 
@@ -166,13 +178,14 @@ def draft_rate(records: list[dict], db: str | None) -> dict[str, int]:
     blocks = classify_blocks(records, db)
     shipped = sum(1 for r in records if r.get("answer"))
     count = {v: sum(b["verdict"] == v for b in blocks) for v in
-             ("invented", "verifier false positive", "draft not stored")}  # fmt: skip
+             ("invented", "verifier false positive", "unresolved", "draft not stored")}  # fmt: skip
     return {
         "drafted": shipped + len(blocks),
         "shipped": shipped,
         "blocked": len(blocks),
         "invented": count["invented"],
         "verifier_false_positive": count["verifier false positive"],
+        "unresolved": count["unresolved"],
         "draft_not_stored": count["draft not stored"],
     }
 
@@ -202,17 +215,18 @@ def render_blocks(by_run: dict[str, dict]) -> list[str]:
         "",
         "Of the answers the pipeline drafted (shipped plus blocked), the ones the verifier blocked, each",
         "judged by the auditor on the stored draft. A block the auditor also flags is an invented number;",
-        "a block the auditor grounds completely is a verifier false positive. Runs from before 2026-10-03",
-        "did not store the draft, so their blocks cannot be judged.",
+        "a block the auditor grounds completely is a verifier false positive. A block with no ungrounded",
+        "claim but one the auditor cannot resolve is unresolved: counted on neither side. Runs from before",
+        "2026-10-03 did not store the draft, so their blocks cannot be judged.",
         "",
-        "| run | drafted | blocked | invented | verifier false positive | draft not stored |",
-        "|---|---|---|---|---|---|",
+        "| run | drafted | blocked | invented | verifier false positive | unresolved | draft not stored |",
+        "|---|---|---|---|---|---|---|",
     ]
     for label, b in by_run.items():
         r = b["rate"]
         lines.append(
             f"| {label} | {r['drafted']} | {r['blocked']} | {r['invented']} | "
-            f"{r['verifier_false_positive']} | {r['draft_not_stored']} |"
+            f"{r['verifier_false_positive']} | {r['unresolved']} | {r['draft_not_stored']} |"
         )
     lines.append("")
     for label, b in by_run.items():
@@ -224,9 +238,32 @@ def render_blocks(by_run: dict[str, dict]) -> list[str]:
                 "",
                 f"- draft: {blk['draft']}",
                 f"- the verifier refused: {blk['refused']}",
-                f"- auditor ungrounded: {blk['ungrounded']}; weak: {blk['weak']}; derived: {blk['derived']}",
+                f"- auditor ungrounded: {blk['ungrounded']}; unresolved: {blk['unresolved']}; weak: {blk['weak']}; derived: {blk['derived']}",
                 "",
             ]
+    return lines
+
+
+def render_unresolved(rows: list[dict]) -> list[str]:
+    """Shipped answers with a claim the auditor cannot resolve, each to be judged by reading."""
+    open_ = [r for r in rows if r["unresolved"]]
+    lines = [
+        f"## Unresolved claims in shipped answers: {len(open_)}",
+        "",
+        "A year or date some company in the database has, under SQL that restricts the company in a way",
+        "the auditor cannot resolve (a pattern, a range, a negation, a subquery that names none). It can",
+        "neither be tied to the answer nor ruled out: reported here, never counted as ungrounded.",
+        "",
+    ]
+    for r in open_:
+        lines += [
+            f"### {r['run']} / {r['id']}",
+            "",
+            f"- answer: {r['answer']}",
+            f"- sql: {r['sql']}",
+            f"- unresolved: {r['unresolved']}",
+            "",
+        ]
     return lines
 
 
@@ -245,13 +282,14 @@ def render(
         "answered record of the committed dev pipeline runs. A shipped answer has passed the verifier, so",
         "every disagreement is the auditor flagging something the verifier let through.",
         "",
-        "| run | answered | auditor flags | weak | derived |",
-        "|---|---|---|---|---|",
+        "| run | answered | auditor flags | unresolved | weak | derived |",
+        "|---|---|---|---|---|---|",
     ]
     for label, n in totals.items():
         rs = [r for r in rows if r["run"] == label]
         lines.append(
             f"| {label} | {n} | {sum(not r['audit_clean'] for r in rs)} | "
+            f"{sum(bool(r['unresolved']) for r in rs)} | "
             f"{sum(bool(r['weak']) for r in rs)} | {sum(bool(r['derived']) for r in rs)} |"
         )
     lines += ["", f"Disagreements: {len(dis)} of {len(rows)} answered records.", ""]
@@ -264,6 +302,7 @@ def render(
             f"- verifier: ok. auditor ungrounded: {r['ungrounded']}",
             "",
         ]
+    lines += render_unresolved(rows)
     if blocks:
         lines += render_blocks(blocks)
     lines += [

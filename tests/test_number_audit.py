@@ -238,3 +238,126 @@ def test_unhedged_trailing_zeros_are_stated_digits():
 def test_a_spelled_out_number_is_judged_at_the_scale_word_it_ends_on():
     assert bad("four hundred sixteen billion") == []
     assert bad("four hundred seventeen billion") == ["four hundred seventeen billion"]
+
+
+# --- which company the SQL names: resolved, none at all, or unresolved --------------------------
+
+# In the `db` fixture these are Apple's labels (cik 2); 3M's (cik 1) are 2024 and 2024-12-31.
+_APPLE = "Fiscal year 2025, ended September 27, 2025."
+_JOIN = "SELECT f.v FROM filings AS f JOIN companies AS c ON c.cik = f.cik"
+
+
+def _labels(sql, db, text=_APPLE):
+    return N.audit_answer(text, ["v"], [(1.5,)], sql, db)
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "SELECT v FROM financial_facts WHERE cik = 2",
+        "SELECT v FROM financial_facts AS f WHERE f.cik IN (2)",
+        "SELECT v FROM financial_facts WHERE cik = '2'",
+        "SELECT v FROM financial_facts WHERE CAST(cik AS VARCHAR) = '0000000002'",
+    ],
+)
+def test_a_numeric_cik_literal_names_the_company(db, sql):
+    assert [(c.status, c.source) for c in _labels(sql, db).claims] == [
+        ("grounded", "database, for the company the SQL names")
+    ] * 2
+    other = _labels(sql.replace("2", "1"), db)  # 3M: real labels, wrong company
+    assert [c.status for c in other.claims] == ["ungrounded"] * 2
+    assert "not for the company" in other.claims[0].source
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "SELECT v FROM filings WHERE cik = (SELECT cik FROM companies WHERE ticker = 'AAPL')",
+        "SELECT v FROM filings WHERE cik IN (SELECT cik FROM companies WHERE name = 'Apple Inc.')",
+        "SELECT v FROM filings WHERE cik IN (SELECT c.cik FROM companies AS c WHERE c.cik = 2)",
+        "SELECT v FROM filings WHERE EXISTS (SELECT 1 FROM companies WHERE lower(ticker) = 'aapl')",
+        "WITH co AS (SELECT cik FROM companies WHERE ticker = 'AAPL') "
+        "SELECT f.v FROM filings AS f JOIN co ON co.cik = f.cik",
+    ],
+)
+def test_a_literal_inside_a_subquery_names_the_company(db, sql):
+    assert [c.status for c in _labels(sql, db).claims] == ["grounded"] * 2
+    # the same forms naming 3M: Apple's labels are another company's
+    for own, others in (("'AAPL'", "'MMM'"), ("'Apple Inc.'", "'3M'"), ("= 2", "= 1")):
+        sql = sql.replace(own, others)
+    sql = sql.replace("'aapl'", "'mmm'")
+    assert [c.status for c in _labels(sql, db).claims] == ["ungrounded"] * 2
+
+
+@pytest.mark.parametrize(
+    "where",
+    [
+        " WHERE c.ticker = 'AAPL'",
+        " AND c.name = 'Apple Inc.'",  # in the join condition itself
+        " WHERE c.cik = 2",
+        " WHERE c.name ILIKE 'apple inc.'",  # no wildcard: an equality
+    ],
+)
+def test_a_company_named_through_a_join_is_found(db, where):
+    assert [c.status for c in _labels(_JOIN + where, db).claims] == ["grounded"] * 2
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "SELECT 1",
+        _JOIN,  # a join key compares two columns: it names no company
+        "SELECT r.ticker FROM v_revenue AS r JOIN v_cash AS k ON r.ticker = k.ticker",
+        "SELECT c.ticker FROM companies AS c LEFT JOIN filings AS f ON c.cik = f.cik "
+        "WHERE f.cik IS NULL",  # an anti-join: a null test names no company either
+        "SELECT 'AAPL' AS ticker, v FROM filings WHERE form = '10-K'",  # a literal, no predicate
+    ],
+)
+def test_with_no_predicate_on_a_company_the_query_is_cross_company_and_a_label_is_ungrounded(
+    db, sql
+):
+    a = _labels(sql, db)
+    assert [c.status for c in a.claims] == ["ungrounded"] * 2 and not a.clean
+    assert a.unresolved == []
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        # a subquery that picks companies without naming one
+        "SELECT v FROM filings WHERE cik IN (SELECT cik FROM companies WHERE gics_sector = 'IT')",
+        "SELECT v FROM v_revenue WHERE cik = (SELECT cik FROM v_revenue ORDER BY v DESC LIMIT 1)",
+        _JOIN + " WHERE c.name LIKE '%Apple%'",  # a pattern
+        "SELECT v FROM v_revenue WHERE ticker = 'ZZZZ'",  # no such company in the table
+        "SELECT v FROM financial_facts WHERE cik = 999",
+        "SELECT v FROM v_revenue WHERE ticker <> 'MMM'",
+        "SELECT v FROM v_revenue WHERE ticker <> 'AAPL'",  # excluded, so not named
+        "SELECT v FROM v_revenue WHERE NOT ticker IN ('AAPL')",
+        "SELECT v FROM v_revenue WHERE cik BETWEEN 1 AND 2",
+        "SELECT v FROM WHERE ticker =",  # does not parse: the auditor cannot tell
+    ],
+)
+def test_a_company_predicate_the_auditor_cannot_resolve_makes_a_label_unresolved(db, sql):
+    a = _labels(sql, db)
+    assert [c.status for c in a.claims] == ["unresolved"] * 2
+    assert sorted(c.text for c in a.unresolved) == ["2025", "September 27, 2025"]
+    assert "cannot resolve" in a.claims[0].source
+    # its own status: never counted as ungrounded, never as grounded
+    assert a.ungrounded == [] and a.clean and a.of("grounded") == []
+
+
+def test_unresolved_is_only_for_a_label_some_company_has(db):
+    pattern = "SELECT v FROM v_revenue WHERE name LIKE '%Apple%'"
+    # no company in the database has fiscal 2022 or this date: invented whichever company it is
+    a = _labels(pattern, db, "Fiscal year 2022, ended September 28, 2025.")
+    assert [c.status for c in a.claims] == ["ungrounded"] * 2
+    # and a number is never unresolved
+    assert [c.status for c in _labels(pattern, db, "There were 2,025 widgets.").claims] == [
+        "ungrounded"
+    ]
+
+
+def test_a_partly_resolved_predicate_grounds_what_it_names_and_leaves_the_rest_unresolved(db):
+    sql = "SELECT v FROM v_revenue WHERE ticker = 'AAPL' OR name LIKE '%3M%'"
+    assert [c.status for c in _labels(sql, db).claims] == ["grounded"] * 2
+    assert [c.status for c in _labels(sql, db, "Fiscal year 2024.").claims] == ["unresolved"]

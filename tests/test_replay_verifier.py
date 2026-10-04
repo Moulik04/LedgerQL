@@ -47,13 +47,46 @@ def test_every_draft_is_replayed_shipped_or_blocked_and_an_unstored_block_is_nam
 def test_the_summary_separates_false_abstains_from_inventions_on_each_side():
     rows, _ = _replayed()
     assert R.summarize(rows, "old") == {
-        "drafted": 4, "blocked": 2, "blocked_invented": 1, "false_abstains": 1,
-        "shipped": 2, "shipped_flagged": 1, "shipped_weak": 0, "shipped_derived": 0,
+        "drafted": 4, "blocked": 2, "blocked_invented": 1, "blocked_unresolved": 0,
+        "false_abstains": 1, "shipped": 2, "shipped_flagged": 1, "shipped_unresolved": 0,
+        "shipped_weak": 0, "shipped_derived": 0,
     }  # fmt: skip
     assert R.summarize(rows, "new") == {
-        "drafted": 4, "blocked": 2, "blocked_invented": 2, "false_abstains": 0,
-        "shipped": 2, "shipped_flagged": 0, "shipped_weak": 0, "shipped_derived": 0,
+        "drafted": 4, "blocked": 2, "blocked_invented": 2, "blocked_unresolved": 0,
+        "false_abstains": 0, "shipped": 2, "shipped_flagged": 0, "shipped_unresolved": 0,
+        "shipped_weak": 0, "shipped_derived": 0,
     }  # fmt: skip
+
+
+def _row(i, ok, **tiers):
+    verdicts = {"v": {"ok": ok, "detail": "" if ok else "unsupported"}}
+    return {"id": i, "text": i, "ungrounded": [], "unresolved": [], "weak": [], "derived": [],
+            "verdicts": verdicts, **tiers}  # fmt: skip
+
+
+def test_an_unresolved_claim_is_neither_a_false_abstain_nor_an_invention():
+    year = [("year", "2024")]
+    rows = [
+        _row("blocked-cannot-tell", False, unresolved=year),
+        _row("blocked-grounded", False),
+        _row("blocked-invented", False, ungrounded=[("number", "9")], unresolved=year),
+        _row("shipped-cannot-tell", True, unresolved=year),
+        _row("shipped-clean", True),
+    ]
+    s = R.summarize(rows, "v")
+    assert (s["blocked"], s["blocked_invented"], s["blocked_unresolved"]) == (3, 1, 1)
+    assert s["false_abstains"] == 1  # only the block the auditor grounds completely
+    assert (s["shipped"], s["shipped_flagged"], s["shipped_unresolved"]) == (2, 0, 1)
+    text = R.render(rows, [], "v", "v", "x.jsonl")
+    assert "### blocked-cannot-tell: unresolved" in text
+    assert "### blocked-grounded: false abstain" in text
+    assert "### blocked-invented: invented" in text
+    assert "## Shipped with an unresolved claim: 1" in text and "### shipped-cannot-tell" in text
+
+
+def test_every_replayed_row_carries_its_unresolved_claims():
+    rows, _ = _replayed()
+    assert all(r["unresolved"] == [] for r in rows)
 
 
 def test_the_drafts_whose_verdict_changed_are_listed_with_both_verdicts():

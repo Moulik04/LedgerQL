@@ -3,7 +3,8 @@
 Written from the spec, deliberately not from `ledgerql/verify.py`: it imports nothing from
 `ledgerql/` (a test checks this), and it does not use `evals/year_audit.py`, which imports
 `verify`. Its inputs are the answer text, the executed result, the executed SQL text and,
-optionally, a read-only database for year and date labels.
+optionally, a read-only database for year and date labels. The SQL is read structurally (sqlglot)
+for one thing only: which company its predicates name.
 
     audit_answer(answer, columns, rows, sql=None, db_path=None) -> Audit
 """
@@ -16,6 +17,9 @@ import re
 from dataclasses import dataclass, field
 from decimal import Decimal
 from functools import lru_cache
+
+import sqlglot
+from sqlglot import exp
 
 # ---------------------------------------------------------------------------------------------
 # vocabulary
@@ -131,7 +135,7 @@ class Claim:
     percent: bool = False
     date: tuple[int | None, int | None, int | None] | None = None  # (year, month, day)
     hedged: bool = False  # "about", "roughly", "~" ... stands directly before the number
-    status: str = "ungrounded"  # grounded | weak | derived | ungrounded
+    status: str = "ungrounded"  # grounded | weak | derived | unresolved | ungrounded
     source: str = ""  # what grounded it
 
     @property
@@ -150,6 +154,11 @@ class Audit:
     @property
     def ungrounded(self) -> list[Claim]:
         return self.of("ungrounded")
+
+    @property
+    def unresolved(self) -> list[Claim]:
+        """Labels the auditor cannot tie to a company or rule out: neither clean nor invented."""
+        return self.of("unresolved")
 
     @property
     def clean(self) -> bool:
@@ -372,9 +381,11 @@ class Evidence:
     db_dates: set[dt.date] = field(default_factory=set)
     co_years: set[int] = field(default_factory=set)  # the companies the SQL names
     co_dates: set[dt.date] = field(default_factory=set)
+    # the SQL restricts the company, and the auditor cannot tell to which
+    company_unresolved: bool = False
 
 
-def build_evidence(columns, rows, sql, db=None, company=None) -> Evidence:
+def build_evidence(columns, rows, sql, db=None, company=None, company_unresolved=False) -> Evidence:
     cells: list[float] = []
     operands: list[float] = []
     years: set[int] = set()
@@ -416,6 +427,7 @@ def build_evidence(columns, rows, sql, db=None, company=None) -> Evidence:
         ev.db_years, ev.db_dates = db
     if company:
         ev.co_years, ev.co_dates = company
+    ev.company_unresolved = company_unresolved
     return ev
 
 
@@ -451,28 +463,158 @@ def load_db_labels(db_path: str) -> tuple[frozenset[int], frozenset[dt.date], fr
         con.close()
 
 
+# Which company the SQL names. A company predicate compares `cik`, `ticker` or `name` with a
+# value. Comparing it with another column is a join key and a null test is an anti-join: neither
+# restricts the query to a company, so a query with only those is cross-company.
+_COMPANY_COLUMNS = {"cik", "ticker", "name"}
+_WRAPPERS = (exp.Paren, exp.Cast, exp.TryCast, exp.Lower, exp.Upper, exp.Trim)
+
+
+@dataclass(frozen=True)
+class CompanyRefs:
+    """What the SQL's company predicates say. `restricted`: there is at least one. `open`: at
+    least one cannot be read as naming a company (a pattern, a range, a negation, a subquery that
+    names none, SQL that does not parse)."""
+
+    ciks: frozenset[int] = frozenset()  # numeric literals compared with cik
+    names: frozenset[str] = frozenset()  # string literals compared with ticker or name, lowered
+    restricted: bool = False
+    open: bool = False
+
+
+def _unwrap(node):
+    while isinstance(node, _WRAPPERS):
+        node = node.this
+    return node
+
+
+def _company_column(node) -> str | None:
+    node = _unwrap(node)
+    if isinstance(node, exp.Tuple):
+        return next(filter(None, map(_company_column, node.expressions)), None)
+    if isinstance(node, exp.Column) and node.name.lower() in _COMPANY_COLUMNS:
+        return node.name.lower()
+    return None
+
+
+def _company_predicates(tree):
+    """(predicate, column name, value side) for every comparison of a company column with
+    something that is not a column. The value side is None unless the comparison is binary."""
+    for p in tree.find_all(exp.Binary, exp.In, exp.Between):
+        if not isinstance(p, exp.Predicate) or isinstance(p, exp.Is):
+            continue
+        if not isinstance(p, exp.Binary):
+            if column := _company_column(p.this):
+                yield p, column, None
+            continue
+        left, right = _company_column(p.this), _company_column(p.expression)
+        if bool(left) == bool(right):
+            continue  # no company column, or one on each side: a join key
+        value = p.expression if left else p.this
+        if not isinstance(_unwrap(value), exp.Column):  # against any other column: a join key
+            yield p, left or right, value
+
+
+def _negated(p) -> bool:
+    if isinstance(p, exp.NEQ):
+        return True
+    while p := p.parent:
+        if isinstance(p, exp.Not):
+            return True
+    return False
+
+
+def company_refs(sql: str | None) -> CompanyRefs:
+    if not (sql or "").strip():
+        return CompanyRefs()
+    try:
+        trees = [t for t in sqlglot.parse(sql, read="duckdb") if t is not None]
+    except sqlglot.errors.SqlglotError:
+        return CompanyRefs(restricted=True, open=True)
+    ciks: set[int] = set()
+    names: set[str] = set()
+    restricted = unreadable = False
+
+    def literal(column: str, node) -> bool:
+        node = _unwrap(node)
+        if not isinstance(node, exp.Literal):
+            return False
+        text = str(node.this).strip()
+        if column == "cik":
+            if text.isdigit():
+                ciks.add(int(text))
+            return text.isdigit()
+        if node.is_string and text:
+            names.add(text.lower())
+        return bool(node.is_string and text)
+
+    for tree in trees:
+        for p, column, value in _company_predicates(tree):
+            restricted = True
+            sub = p.args.get("query") if isinstance(p, exp.In) else _unwrap(value)
+            if isinstance(sub, exp.Query):
+                # a subquery names a company only through a company predicate of its own, and
+                # those are read where they stand
+                ok = any(True for _ in _company_predicates(sub)) and not _negated(p)
+            elif _negated(p):
+                ok = False
+            elif isinstance(p, exp.EQ):
+                ok = literal(column, value)
+            elif isinstance(p, exp.Like | exp.ILike):  # without a wildcard, an equality
+                v = _unwrap(value)
+                ok = (
+                    isinstance(v, exp.Literal)
+                    and not re.search(r"[%_]", str(v.this))
+                    and literal(column, v)
+                )
+            elif isinstance(p, exp.In) and isinstance(_unwrap(p.this), exp.Column):
+                ok = bool(p.expressions) and all([literal(column, v) for v in p.expressions])
+            else:
+                ok = False
+            unreadable = unreadable or not ok
+    return CompanyRefs(frozenset(ciks), frozenset(names), restricted, unreadable)
+
+
+@lru_cache(maxsize=4)
+def load_companies(db_path: str) -> tuple[tuple[int, str, str], ...]:
+    """(cik, ticker, name) of every company, ticker and name lowered."""
+    import duckdb
+
+    con = duckdb.connect(db_path, read_only=True, config={"enable_external_access": "false"})
+    try:
+        rows = con.execute("SELECT cik, ticker, name FROM companies").fetchall()
+        return tuple(
+            (int(c), (ticker or "").lower(), (name or "").lower()) for c, ticker, name in rows
+        )
+    finally:
+        con.close()
+
+
+def resolve_companies(db_path: str, refs: CompanyRefs) -> tuple[frozenset[int], bool]:
+    """The ciks of the companies the SQL names, through the companies table, and whether every
+    company predicate was resolved: each literal is a cik, a ticker or a name (case-insensitive)
+    of a company in the table."""
+    companies = load_companies(db_path)
+    by_cik = {cik for cik, _, _ in companies}
+    found = {cik for cik in refs.ciks if cik in by_cik}
+    missing = len(found) < len(refs.ciks)
+    for literal in refs.names:
+        hits = {cik for cik, ticker, name in companies if literal in (ticker, name)}
+        found |= hits
+        missing = missing or not hits
+    return frozenset(found), not (refs.open or missing)
+
+
 @lru_cache(maxsize=64)
-def load_company_labels(db_path: str, literals: frozenset[str]) -> tuple[set[int], set[dt.date]]:
-    """Fiscal years and period-end dates of the companies the SQL names, by a string literal
-    equal to a ticker or a name (case-insensitive). Empty if it names none."""
-    if not literals:
+def load_company_labels(db_path: str, ciks: frozenset[int]) -> tuple[set[int], set[dt.date]]:
+    """Fiscal years and period-end dates of the companies with these ciks. Empty if none."""
+    if not ciks:
         return set(), set()
     import duckdb
 
     con = duckdb.connect(db_path, read_only=True, config={"enable_external_access": "false"})
     try:
-        marks = ",".join("?" for _ in literals)
-        lowered = [x.lower() for x in literals]
-        ciks = [
-            c
-            for (c,) in con.execute(
-                f"SELECT cik FROM companies WHERE lower(ticker) IN ({marks}) "
-                f"OR lower(name) IN ({marks})",
-                [*lowered, *lowered],
-            ).fetchall()
-        ]
-        if not ciks:
-            return set(), set()
+        ciks = sorted(ciks)
         cm = ",".join("?" for _ in ciks)
         dates = {
             d
@@ -551,12 +693,24 @@ def _derived(c: Claim, operands: list[float]) -> bool:
 # figure is a misattributed period, so it is ungrounded (it was `weak` until 2026-10-03). The source
 # text says why, so a reader can tell it from a label the database does not hold at all.
 _OTHER_COMPANY = "the database holds this label, but not for the company the SQL names"
+# The SQL restricts the company, the auditor cannot tell to which, and some company does have the
+# label: it can neither be tied to this answer nor ruled out. Its own status, reported separately
+# and never counted as ungrounded (the same principle as a timeout not scoring as wrong). With no
+# company predicate at all the query is cross-company, and a single company's label is ungrounded.
+_UNRESOLVED = (
+    "the database holds this label, and the auditor cannot resolve which company the SQL names"
+)
 
 
 def ground(claim: Claim, ev: Evidence) -> Claim:
     def set_(status: str, source: str = "") -> Claim:
         claim.status, claim.source = status, source
         return claim
+
+    def other_company() -> Claim:  # a label the database holds, but not for a company named
+        if ev.company_unresolved:
+            return set_("unresolved", _UNRESOLVED)
+        return set_("ungrounded", _OTHER_COMPANY)
 
     if claim.kind == "period_label":
         return set_("grounded", "result/sql") if claim.text in ev.labels else set_("ungrounded")
@@ -575,7 +729,7 @@ def ground(claim: Claim, ev: Evidence) -> Claim:
         if any(fits(x) for x in ev.co_dates):
             return set_("grounded", "database, for the company the SQL names")
         if any(fits(x) for x in ev.db_dates):
-            return set_("ungrounded", _OTHER_COMPANY)
+            return other_company()
         return set_("ungrounded")
     if claim.kind == "year":
         if int(claim.value) in ev.years or _grounded_by_cells(claim, ev.cells):
@@ -583,7 +737,7 @@ def ground(claim: Claim, ev: Evidence) -> Claim:
         if int(claim.value) in ev.co_years:
             return set_("grounded", "database, for the company the SQL names")
         if int(claim.value) in ev.db_years:
-            return set_("ungrounded", _OTHER_COMPANY)
+            return other_company()
         return set_("ungrounded")
     if _grounded_by_cells(claim, ev.cells):
         return set_("grounded", "result")
@@ -606,11 +760,14 @@ def audit_answer(
     rows = [tuple(r) for r in rows or []]
     masks = [v for r in rows for v in r if isinstance(v, str) and re.search(r"\d", v)]
     db = company = None
+    unresolved = False
     if db_path:
         years, dates, db_names = load_db_labels(str(db_path))
         db = (set(years), set(dates))
         masks += list(db_names)
-        literals = frozenset(re.findall(r"'([^']+)'", sql or ""))
-        company = load_company_labels(str(db_path), literals)
-    ev = build_evidence(columns or [], rows, sql, db, company)
+        refs = company_refs(sql)
+        ciks, resolved = resolve_companies(str(db_path), refs)
+        company = load_company_labels(str(db_path), ciks)
+        unresolved = refs.restricted and not resolved
+    ev = build_evidence(columns or [], rows, sql, db, company, unresolved)
     return Audit([ground(c, ev) for c in extract_claims(answer or "", masks)])

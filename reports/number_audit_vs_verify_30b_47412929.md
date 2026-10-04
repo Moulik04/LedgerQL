@@ -6,11 +6,10 @@ every disagreement is the auditor flagging something the verifier let through.
 
 | run | answered | auditor flags | unresolved | weak | derived |
 |---|---|---|---|---|---|
-| 30B rerun 47367323 | 55 | 0 | 0 | 0 | 0 |
-| 30B partial 47314853 | 42 | 0 | 0 | 0 | 0 |
-| 32B 47314855 | 44 | 0 | 0 | 0 | 0 |
+| 30B H2 47412929 | 59 | 0 | 0 | 0 | 0 |
+| 30B H1 47367323 | 55 | 0 | 0 | 0 | 0 |
 
-Disagreements: 0 of 141 answered records.
+Disagreements: 0 of 114 answered records.
 
 ## Unresolved claims in shipped answers: 0
 
@@ -28,9 +27,32 @@ claim but one the auditor cannot resolve is unresolved: counted on neither side.
 
 | run | drafted | blocked | invented | verifier false positive | unresolved | draft not stored |
 |---|---|---|---|---|---|---|
-| 30B rerun 47367323 | 59 | 4 | 0 | 0 | 0 | 4 |
-| 30B partial 47314853 | 46 | 4 | 0 | 0 | 0 | 4 |
-| 32B 47314855 | 47 | 3 | 0 | 0 | 0 | 3 |
+| 30B H2 47412929 | 63 | 4 | 3 | 1 | 0 | 0 |
+| 30B H1 47367323 | 59 | 4 | 0 | 0 | 0 | 4 |
+
+### 30B H2 47412929 / L08: invented
+
+- draft: The table shows JPMorgan Chase's financial data with total assets of 3,460,750 million USD and total liabilities of 2,981,100 million USD. The data represents the company's balance sheet information as of a specific period.
+- the verifier refused: ['3,460,750 million', '2,981,100 million']
+- auditor ungrounded: [('number', '3,460,750 million'), ('number', '2,981,100 million')]; unresolved: []; weak: []; derived: []
+
+### 30B H2 47412929 / L11: verifier false positive
+
+- draft: The data shows a single filing with accession number 0000037996-26-000015. There are no other values provided in the table to describe additional information about this filing.
+- the verifier refused: ['0000037996', '26', '000015']
+- auditor ungrounded: []; unresolved: []; weak: []; derived: []
+
+### 30B H2 47412929 / L12: invented
+
+- draft: The data shows information for the stock ticker "KO" which represents The Coca-Cola Company. The table contains financial metrics including operating cash flow of $10,894 million, capital expenditures of $2,563 million, and free cash flow of $8,331 million. All values are presented in millions of US dollars.
+- the verifier refused: ['$10,894 million', '$2,563 million', '$8,331 million']
+- auditor ungrounded: [('number', '$10,894 million'), ('number', '$2,563 million'), ('number', '$8,331 million')]; unresolved: []; weak: []; derived: []
+
+### 30B H2 47412929 / T07: invented
+
+- draft: The table lists 29 company tickers and their corresponding names, with Federal Realty Investment Trust appearing twice. All entries are presented as stock ticker symbols paired with full company names.
+- the verifier refused: ['29']
+- auditor ungrounded: [('number', '29')]; unresolved: []; weak: []; derived: []
 
 ## Planted invented values, both implementations
 

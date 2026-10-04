@@ -13,6 +13,7 @@ noise, which a second model run could not do.
 For each version: the draft rate (blocked over drafted), and what the independent auditor
 (`evals/number_audit.py`) says of each side. A blocked draft the auditor grounds completely is a
 false abstain; a shipped answer the auditor flags is an invented number the verifier let through.
+A draft with no ungrounded claim but one the auditor cannot resolve is counted as neither.
 """
 
 from __future__ import annotations
@@ -69,6 +70,7 @@ def replay(records: list[dict], verifiers: dict, questions: dict[str, str], db: 
             "id": rec["id"],
             "text": text,
             "ungrounded": [(c.kind, c.text) for c in audit.ungrounded],
+            "unresolved": [(c.kind, c.text) for c in audit.unresolved],
             "weak": [(c.kind, c.text) for c in audit.of("weak")],
             "derived": [(c.kind, c.text) for c in audit.of("derived")],
             "verdicts": {},
@@ -82,6 +84,14 @@ def replay(records: list[dict], verifiers: dict, questions: dict[str, str], db: 
     return rows, not_stored
 
 
+def _verdict(row: dict) -> str:
+    """The auditor on a blocked draft. An unresolved claim is no verdict: with nothing ungrounded
+    beside it, the block is neither an invention nor a false abstain."""
+    if row["ungrounded"]:
+        return "invented"
+    return "unresolved" if row["unresolved"] else "false abstain"
+
+
 def summarize(rows: list[dict], name: str) -> dict[str, int]:
     blocked = [r for r in rows if not r["verdicts"][name]["ok"]]
     shipped = [r for r in rows if r["verdicts"][name]["ok"]]
@@ -89,9 +99,11 @@ def summarize(rows: list[dict], name: str) -> dict[str, int]:
         "drafted": len(rows),
         "blocked": len(blocked),
         "blocked_invented": sum(bool(r["ungrounded"]) for r in blocked),
-        "false_abstains": sum(not r["ungrounded"] for r in blocked),
+        "blocked_unresolved": sum(_verdict(r) == "unresolved" for r in blocked),
+        "false_abstains": sum(_verdict(r) == "false abstain" for r in blocked),
         "shipped": len(shipped),
         "shipped_flagged": sum(bool(r["ungrounded"]) for r in shipped),
+        "shipped_unresolved": sum(bool(r["unresolved"]) for r in shipped),
         "shipped_weak": sum(bool(r["weak"]) for r in shipped),
         "shipped_derived": sum(bool(r["derived"]) for r in shipped),
     }
@@ -120,8 +132,10 @@ def render(rows: list[dict], not_stored: list[str], old: str, new: str, source: 
         f"| **draft rate** (blocked / drafted) | {_rate(o['blocked'], o['drafted'])} | {_rate(n['blocked'], n['drafted'])} |",
         f"| blocked, and the auditor also finds an invented number | {o['blocked_invented']} | {n['blocked_invented']} |",
         f"| **false abstains** (blocked, but the auditor grounds every claim) | {o['false_abstains']} | {n['false_abstains']} |",
+        f"| blocked, nothing ungrounded, but a claim the auditor cannot resolve (counted as neither) | {o['blocked_unresolved']} | {n['blocked_unresolved']} |",
         f"| shipped | {o['shipped']} | {n['shipped']} |",
         f"| **shipped, and the auditor flags an invented number** | {o['shipped_flagged']} | {n['shipped_flagged']} |",
+        f"| shipped with an unresolved claim (reported, not counted) | {o['shipped_unresolved']} | {n['shipped_unresolved']} |",
         f"| shipped with a weak claim (reported, not counted) | {o['shipped_weak']} | {n['shipped_weak']} |",
         f"| shipped with a derived claim | {o['shipped_derived']} | {n['shipped_derived']} |",
         "",
@@ -138,21 +152,24 @@ def render(rows: list[dict], not_stored: list[str], old: str, new: str, source: 
             f"- draft: {r['text']}",
             f"- {old}: {was['detail'] or 'accepted'}",
             f"- {new}: {now['detail'] or 'accepted'}",
-            f"- auditor: ungrounded {r['ungrounded']}; weak {r['weak']}; derived {r['derived']}",
+            f"- auditor: ungrounded {r['ungrounded']}; unresolved {r['unresolved']}; weak {r['weak']}; derived {r['derived']}",
             "",
         ]
     still = [r for r in rows if not r["verdicts"][new]["ok"] and r not in diff]
     lines += [f"## Drafts blocked by both: {len(still)}", ""]
     for r in still:
-        verdict = "invented" if r["ungrounded"] else "false abstain"
         lines += [
-            f"### {r['id']}: {verdict}",
+            f"### {r['id']}: {_verdict(r)}",
             "",
             f"- draft: {r['text']}",
             f"- {new}: {r['verdicts'][new]['detail']}",
-            f"- auditor: ungrounded {r['ungrounded']}; weak {r['weak']}; derived {r['derived']}",
+            f"- auditor: ungrounded {r['ungrounded']}; unresolved {r['unresolved']}; weak {r['weak']}; derived {r['derived']}",
             "",
         ]
+    open_ = [r for r in rows if r["verdicts"][new]["ok"] and r["unresolved"]]
+    lines += [f"## Shipped with an unresolved claim: {len(open_)}", ""]
+    for r in open_:
+        lines += [f"### {r['id']}", "", f"- answer: {r['text']}", f"- unresolved: {r['unresolved']}", ""]  # fmt: skip
     return "\n".join(lines) + "\n"
 
 

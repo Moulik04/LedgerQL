@@ -181,6 +181,9 @@ Amended 2026-10-03, before any held-out question exists: H1 is superseded by **H
 fixed and blocked drafts stored), and how figure 1 counts the auditor's tiers is fixed. H2 and the
 tiers were themselves amended once the same day, before anything ran under H2 (a round number passes
 as a rounding only when hedged; another company's year or date is ungrounded, not weak).
+Amended 2026-10-04, before any held-out question exists and before any held-out run: the auditor
+gains a fifth status, **`unresolved`**, and how figure 1 treats it is fixed below. This is in the
+auditor and this protocol only; nothing under `ledgerql/` changes, so H2 stands.
 
 - **The headline configuration is H2** (it supersedes H1; both are in `evals/heldout_config.json`,
   which is append-only). H2 is H1 with two changes under `ledgerql/`, declared together as one
@@ -255,8 +258,8 @@ as a rounding only when hedged; another company's year or date is ungrounded, no
      The old figure (the verifier's own rate on shipped answers) may be printed beside them, labelled
      as zero by construction.
      **How the auditor's tiers are counted (fixed 2026-10-03, before any held-out run).** The auditor
-     gives every claim one of four statuses (`evals/NUMBER_AUDIT_SPEC.md` section 3), and figure 1(b)
-     treats them as follows, with no later choice:
+     gives every claim one of five statuses (`evals/NUMBER_AUDIT_SPEC.md` section 3; four until
+     2026-10-04), and figure 1(b) treats them as follows, with no later choice:
      - `ungrounded` **counts as an invented number.** Figure 1(b) is the share of shipped answers with
        at least one ungrounded claim, and every such claim is listed.
      - `weak` is **reported separately and is not counted** as invented, and never as grounded
@@ -265,7 +268,20 @@ as a rounding only when hedged; another company's year or date is ungrounded, no
        Unhedged, `420 billion` is `ungrounded`.
      - **A year or date the database holds only for a different company is `ungrounded`**, not weak
        (amended 2026-10-03): another company's period attached to this company's figure is the
-       misattributed-period error the year rule exists to catch.
+       misattributed-period error the year rule exists to catch. The same holds when the SQL has no
+       predicate on `cik`, `ticker` or `name` at all (a cross-company query): a single company's
+       period label is tied to nothing in the answer.
+     - `unresolved` is **reported separately and never counted as ungrounded**, and never as grounded
+       either (fixed 2026-10-04, before any held-out run). It is a year or date that some company in
+       the database has, under SQL that does restrict the company (a predicate on `cik`, `ticker` or
+       `name`) in a way the auditor cannot resolve to a company through the `companies` table: the
+       auditor cannot tell, which is not the same as the answer having invented it. The same
+       principle as a timeout not scoring as a wrong answer. Figure 1(b)'s numerator is unchanged
+       (shipped answers with at least one `ungrounded` claim) and so is its denominator (all shipped
+       answers): an answer whose only open claims are unresolved is not in the numerator. The number
+       of shipped answers with an unresolved claim is printed beside the figure, and every such claim
+       is listed with its answer and SQL. Which SQL forms resolve is fixed in
+       `evals/NUMBER_AUDIT_SPEC.md` section 3, and is not changed after seeing held-out results.
      - `derived` (a sum, difference, ratio or percentage change of two numeric cells) **counts as
        grounded only under the three-significant-digit rule**: a claim that states fewer than three
        significant digits cannot be derived and is `ungrounded`. Derived claims are counted and
@@ -275,8 +291,11 @@ as a rounding only when hedged; another company's year or date is ungrounded, no
      which is an invented number only if the verifier is right. The pipeline stores every blocked
      draft (`blocked_draft`, since configuration H2), and the auditor judges each on the same tiers
      (`evals/audit_vs_verify.py`, `draft_rate`): `invented` if it has an ungrounded claim,
-     `verifier false positive` if it has none. Figure 1(a) stays blocked over drafted; printed with
-     it, always, are the two parts, so an over-strict verifier cannot pass as a high invention rate;
+     `verifier false positive` if the auditor grounds every claim, and `unresolved` (2026-10-04) if
+     it has no ungrounded claim but one the auditor cannot resolve: such a block is counted as
+     neither an invention nor a verifier false positive. Figure 1(a) stays blocked over drafted;
+     printed with it, always, are the three parts, so an over-strict verifier cannot pass as a high
+     invention rate;
   2. the **confidently-wrong rate**: wrong answers over answered cases;
   3. **coverage**: answered over answerable cases (`ANSWER` and `ANSWER_WITH_ASSUMPTION`);
   4. the **agree-policy table**: "answer only where both models answered and agree", with
@@ -315,5 +334,10 @@ configuration is run once for its confirmatory comparison.
    rounding only, reported separately and not counted; `derived` counts as grounded only under the
    three-significant-digit rule; figure 1(a) is printed with its split into invented blocks and verifier
    false positives.
-6. Still open: whether an `informal` share of one quarter of the mention styles is right (3.2),
+6. **The `unresolved` status** (2026-10-04, MJ, before any held-out question exists): a year or date
+   some company has, under SQL whose company predicate the auditor cannot resolve, is `unresolved`:
+   reported separately, never counted as ungrounded or as grounded, with figure 1(b)'s numerator and
+   denominator unchanged; a blocked draft with only such claims is its own part of figure 1(a). With
+   no company predicate at all the query is cross-company and the label stays `ungrounded`.
+7. Still open: whether an `informal` share of one quarter of the mention styles is right (3.2),
    and the four confirmatory comparisons in 6.

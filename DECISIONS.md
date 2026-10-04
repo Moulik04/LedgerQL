@@ -2959,3 +2959,89 @@ it and writes it to `run_meta.json` (`entity_link`), so a run made with the link
 ### 6. Still owed
 
 The 30B dev run under H2 and its two reports; then MJ's 80 held-out questions and the blind labels.
+
+---
+
+## 2026-10-04 — The auditor separates "cannot tell" from "invented", and the 30B dev run under H2
+
+### 1. A fifth auditor status: `unresolved` (MJ, before any held-out question exists)
+
+Until today the auditor found "the company the SQL names" from any string literal in the SQL text equal to a
+ticker or a name. A company named by a numeric `cik` was not found, and a year or date that was right for it was
+`ungrounded`: the auditor not being able to tell was counted as the answer inventing. Two changes, both in
+`evals/number_audit.py` and `evals/NUMBER_AUDIT_SPEC.md` section 3, neither under `ledgerql/` (**H2 stands**):
+
+- **Resolution.** The SQL is parsed (sqlglot) and its company predicates are read: a comparison of `cik`,
+  `ticker` or `name` with a value, in the `WHERE` clause, a join condition, a subquery or a CTE. A numeric `cik`
+  literal, and a ticker or name literal, are resolved through the `companies` table.
+- **Two cases, told apart by structure.** With **no** company predicate at all the query is cross-company, and
+  a single company's year or date is `ungrounded`, as before. With a company predicate the auditor **cannot
+  resolve** (a wildcard pattern, a range, a negation, a subquery that names no company, a literal that is no
+  company in the table, SQL that does not parse), a year or date that some company has is **`unresolved`**: its
+  own status, reported separately, never counted as ungrounded and never as grounded. The same principle as a
+  timeout not scoring as a wrong answer.
+
+A join key (`f.cik = c.cik`) and a null test (`cik IS NULL`) are not company predicates: neither restricts the
+query to a company. A literal under `<>` or `NOT IN` is excluded, not named. A label the database holds for no
+company is `ungrounded` whatever the SQL. Only years and dates can be `unresolved`.
+
+**Pre-registered in protocol 6a** (and section 8, item 6): figure 1(b)'s numerator and denominator are unchanged,
+the number of shipped answers with an unresolved claim is printed beside it with every such claim listed, and in
+figure 1(a) a blocked draft with no ungrounded claim but an unresolved one is a third part, neither `invented`
+nor `verifier false positive`. `evals/audit_vs_verify.py` and `evals/replay_verifier.py` report it that way.
+
+Two things the tests showed that the last entry had wrong or left open:
+
+- **String literals inside a subquery or behind a join were already found** (the old rule read every string
+  literal in the SQL text). What was missed was the numeric `cik` form. The spec's stated limit said otherwise.
+- **A string literal that is in no company predicate no longer names a company** (`SELECT 'AAPL' AS ticker`):
+  that follows from reading predicates, and it is a change from the old rule.
+
+**On dev it changes nothing:** 291 distinct stored drafts across the 13 dev report files, old auditor against
+new, no claim changes status, and no claim is `unresolved`. Like the 2026-10-03 amendments, it is a rule for text
+the dev runs did not produce.
+
+### 2. The 30B dev pipeline run under H2, linker on (job 47412929)
+
+Valid by the runbook's checks that can be made from the files: `run_meta.json` has `"entity_link": "1"` and commit
+`9c191d419e0f5df51c2654572a8811d6bf93a0c7`, the job log shows the commit verified and `LEDGERQL_ENTITY_LINK=1`,
+and the per-case file has 103 records. The `sacct` exit code was not checked here.
+
+| | H2 run 47412929 |
+|---|---|
+| drafted (shipped plus blocked), all with the draft stored | 63 |
+| shipped | 59 |
+| **draft rate** (figure 1a) | 4 of 63 (6.3%) |
+| of the 4 blocks: invented | 3 (`L08`, `L12`, `T07`) |
+| of the 4 blocks: verifier false positive | 1 (`L11`) |
+| of the 4 blocks: unresolved | 0 |
+| **shipped answers the auditor flags** (figure 1b) | 0 of 59 |
+| shipped with an unresolved, weak or derived claim | 0, 0, 0 |
+
+**The regression check** (`reports/verifier_replay_30b_47412929.md`): the verifier as it was at `3c235d1`,
+replayed on these same 63 drafts, gives the same verdict on every one. **No draft's verdict changed**, in either
+direction: the H2 verifier neither blocked anything the old one shipped nor released anything it blocked, on
+this run. That is no regression, and also no measured benefit on real drafts: the forms the fix was for
+(`$416B`, spelled-out numbers, figures inside the old 1% tolerance) did not occur in this run's drafts.
+
+**The blocks, read:**
+
+- `L08`, `L12`: the result is one string cell (a company name; a ticker) and the draft states balance-sheet and
+  cash-flow figures in millions. Invented.
+- `T07`: the draft says 29 companies over a result of 24 rows. Invented (a miscount). The H1 run's `T07` detail
+  string also said 29, which was guessed to be a miscount without the draft.
+- `L11`: **a verifier false positive that the fix did not address.** The result is one cell, the accession
+  number `0000037996-26-000015`, and the draft quotes it. The verifier reads it as three numbers (`0000037996`,
+  `26`, `000015`) and refuses them, at `3c235d1` and now. The auditor does not count a string from the result
+  that holds a digit as a claim. Fixing this is a change under `ledgerql/` and would be a new configuration;
+  nothing is changed here.
+
+Beside the H1 run (47367323; linker **off**, and its four blocked drafts never stored): 59 answered against 55,
+4 blocks each. That difference mixes the linker, sampling and the verifier and is not attributed to any of them
+(`reports/number_audit_vs_verify_30b_47412929.md`).
+
+### 3. Still owed
+
+MJ's 80 held-out questions and the blind labels; then the freeze. Open for MJ before it: whether `L11`'s
+accession-number false positive is fixed (a new configuration) or carried into the held-out run as a known
+verifier false positive that figure 1(a)'s split will show.

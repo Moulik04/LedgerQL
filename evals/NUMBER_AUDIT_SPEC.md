@@ -10,7 +10,7 @@ and does not read or reuse `verify.py`'s extraction code, nor `evals/year_audit.
 `verify`). Its only inputs are the answer text, the executed result (column names and rows), the
 executed SQL text, and, optionally, a read-only connection to the database for labels. Where this
 spec and `verify.py` choose differently, that is deliberate: the differences are what the comparison
-is for.
+is for. The SQL is parsed (sqlglot) for one purpose only: to read which company it names (section 3).
 
 ## 1. Claims
 
@@ -91,17 +91,49 @@ A claim is **grounded** if it is correct (section 2) for:
 6. for a **period label**: the same label in a result string or the SQL.
 
 7. for a **year or date** that is in none of the above: a label the database holds **for the
-   company the SQL names** (a string literal in the SQL equal to a company's ticker or name; a
-   `filings.fiscal_year`, a `filings.period_end_date` or a `financial_facts.ddate` of that company).
-   The framing's "fiscal year 2025 (period ended June 30, 2025)" is grounded this way.
+   company the SQL names** (a `filings.fiscal_year`, a `filings.period_end_date` or a
+   `financial_facts.ddate` of that company). The framing's "fiscal year 2025 (period ended June 30,
+   2025)" is grounded this way.
 
-**A label the database holds only for another company is ungrounded** (amended 2026-10-03; it was
-`weak`). A year or date that is in none of the above, and for which the SQL names no company that has
-it, is `ungrounded` even if it exists as a label in the database for some company. That it is a real
-label does not make it this answer's: another company's period attached to this company's figure is
-the misattributed period the year rule exists to catch. The claim's source records that the database
-holds the label, so a reader can tell this from a label that exists nowhere. **`weak` is coarse
-rounding only** (section 2).
+**Which company the SQL names** (amended 2026-10-04; until then it was any string literal in the SQL
+text equal to a ticker or a name). The SQL is parsed (sqlglot, DuckDB dialect) and its **company
+predicates** are read. A company predicate compares a column called `cik`, `ticker` or `name` with a
+value, anywhere in the statement: the `WHERE` clause, a join condition, a subquery, a CTE. The
+column may be wrapped in `lower`, `upper`, `trim`, a cast or parentheses. Two things are not company
+predicates, because neither restricts the query to a company: a comparison of two columns (a join
+key, `f.cik = c.cik`) and a null test (`cik IS NULL`, an anti-join).
+
+A company predicate **names a company** when it is `=`, `IN` with a list of literals, or `LIKE` /
+`ILIKE` with no wildcard, and every literal in it is found in the `companies` table: a string equal
+to a ticker or a name (case-insensitive) or, against `cik`, a number or a string of digits equal to
+a `cik`. A comparison with a subquery names whatever the subquery's own company predicates name
+(`cik = (SELECT cik FROM companies WHERE ticker = 'AAPL')` names Apple). Every other company
+predicate is one the auditor **cannot resolve**: a pattern with a wildcard, a range, a negation
+(`<>`, `NOT IN`: the literal is excluded, not named), a subquery with no company predicate of its
+own (`cik IN (SELECT cik FROM companies WHERE gics_sector = ...)`), a literal that is no company in
+the table. SQL that does not parse is treated as one unresolvable predicate.
+
+**A year or date that is in none of 1 to 7** falls into one of four cases (the third added
+2026-10-04):
+
+- **The database holds it for no company:** `ungrounded`, whatever the SQL. It cannot be right for
+  any company.
+- **The database holds it, and the SQL has no company predicate at all** (a cross-company query):
+  `ungrounded`. A single company's period label is tied to nothing in the answer.
+- **The database holds it, and the SQL has a company predicate the auditor cannot resolve:**
+  **`unresolved`**. The label may be right for the company the SQL means, and the auditor cannot
+  tell. This is its own status: reported separately, never counted as ungrounded and never as
+  grounded (the same principle as a timeout not scoring as a wrong answer).
+- **The database holds it, every company predicate is resolved, and no named company has it:**
+  `ungrounded` (amended 2026-10-03; it was `weak`). That it is a real label does not make it this
+  answer's: another company's period attached to this company's figure is the misattributed period
+  the year rule exists to catch.
+
+In the two database-holds-it `ungrounded` cases and in the `unresolved` case the claim's source says
+so, so a reader can tell them from a label that exists nowhere. A label a resolved part of the SQL
+does name is grounded even if another part is unresolved (`ticker = 'AAPL' OR name LIKE '%Amazon%'`
+grounds Apple's labels and leaves any other company's `unresolved`). Only years and dates can be
+`unresolved`; a number or a period label never is. **`weak` is coarse rounding only** (section 2).
 Numbers get no weak grounding.
 
 **Derived:** a claim not grounded by 1 to 6 but equal to the sum, difference, ratio, or percentage
@@ -116,16 +148,20 @@ pass as the percentage change between a row count and a year).
 ## 4. What the audit reports
 
 Per answer: its claims, each with kind, text, value, stated precision, and its status (`grounded`,
-`weak`, `derived`, `ungrounded`) and what grounded it. An answer is **clean** if none of its claims is
-ungrounded. Headline: the share of audited answers that are not clean, with the ungrounded claims
-listed; weak and derived counts beside it.
+`weak`, `derived`, `unresolved`, `ungrounded`) and what grounded it. An answer is **clean** if none of
+its claims is ungrounded. Headline: the share of audited answers that are not clean, with the
+ungrounded claims listed; unresolved, weak and derived counts beside it, and every unresolved claim
+listed with its answer and SQL so it can be judged by reading.
 
 ## 5. Stated limits
 
 Not counted: a bare `one`, `half`, `a third`, `a dozen`, ordinals in words, "twice" and the like
 (relative statements); a quantity hidden in a word the lists do not know. Abbreviation `m`/`b`/`t`/`k`
-attached to a number is read as a magnitude even if it meant minutes or bytes. A company named only by a join or
-a subquery is not found, so a year or date that is right for that company is flagged `ungrounded`
-(since 2026-10-03; before, it was `weak` and uncounted). It is listed with its source like every
-ungrounded claim, and is the audit's own false positive to look for when reading the list. A number that happens to equal the row count or any unrelated cell is
+attached to a number is read as a magnitude even if it meant minutes or bytes. The company is read
+only from predicates on columns called `cik`, `ticker` or `name` (section 3): a company restricted
+through a column under another name (an alias, `company_name`) is not seen, so its query reads as
+cross-company and a year or date that is right for it is `ungrounded`, the audit's own false positive
+to look for when reading the list. An `unresolved` claim is not a finding in either direction: an
+invented year that happens to be some other company's label is `unresolved`, not caught, whenever the
+SQL's company cannot be resolved. A number that happens to equal the row count or any unrelated cell is
 grounded by it: the audit cannot tell a coincidence from a transcription.
