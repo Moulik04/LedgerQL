@@ -187,6 +187,10 @@ auditor and this protocol only; nothing under `ledgerql/` changes, so H2 stands.
 Amended 2026-10-04 (later), at MJ's request, before any held-out question exists: H2 is superseded by
 **H3** (an accession number is an identifier, not three numbers), **H3 is final and `ledgerql/` is
 frozen**, and figure 1(b) is reported as a range, not one number.
+Amended 2026-10-04 (night), at MJ's request, before the held-out set is frozen and before any
+held-out run: the auditor reads a hyphenated identifier as one claim, grounded by the exact string
+in the result or in a string literal of the SQL (below, under figure 1(a)). This is in the auditor
+and its spec only; nothing under `ledgerql/` changes, so H3 and the freeze stand.
 
 - **The headline configuration is H3, and it is final** (it supersedes H2; all three are in
   `evals/heldout_config.json`, which is append-only). H3 is H2 with one change under `ledgerql/`, in
@@ -343,7 +347,18 @@ frozen**, and figure 1(b) is reported as a range, not one number.
      it has no ungrounded claim but one the auditor cannot resolve: such a block is counted as
      neither an invention nor a verifier false positive. Figure 1(a) stays blocked over drafted;
      printed with it, always, are the three parts, so an over-strict verifier cannot pass as a high
-     invention rate;
+     invention rate.
+     **An identifier in a blocked draft (fixed 2026-10-04, night, before any held-out run).** The
+     auditor reads three or more hyphen-joined digit groups as one claim, grounded by the exact
+     string, whole, in a string cell of the result **or in a string literal of the executed SQL**
+     (`evals/NUMBER_AUDIT_SPEC.md` 1.8 and 3.8), as it already grounds a year by the SQL's
+     literals. The frozen verifier grounds an identifier by the result only
+     (`evals/KNOWN_PIPELINE_ISSUES.md`), so it blocks an answer that restates an accession number
+     the query was given. Restating it is not inventing it: the auditor finds nothing ungrounded in
+     such a draft and the block is counted as a **verifier false positive**. Before this the
+     auditor read the identifier as three ungrounded numbers and would have counted the block as
+     `invented`. An identifier in neither place is `ungrounded`, one claim. Figure 1(b) is not
+     affected under H3: an answer whose identifier is not in the result is never shipped;
   2. the **confidently-wrong rate**: wrong answers over answered cases;
   3. **coverage**: answered over answerable cases (`ANSWER` and `ANSWER_WITH_ASSUMPTION`);
   4. the **agree-policy table**: "answer only where both models answered and agree", with
@@ -397,5 +412,15 @@ configuration is run once for its confirmatory comparison.
 9. **Figure 1(b) is a range** (2026-10-04, MJ, before any held-out question exists): the point rate
    (shipped answers with an ungrounded claim over shipped) and a worst case (shipped answers with an
    ungrounded or an unresolved claim over shipped), always together.
-10. Still open: whether an `informal` share of one quarter of the mention styles is right (3.2),
+10. **The auditor reads an identifier as one claim** (2026-10-04, MJ, before the set is frozen and
+   before any held-out run): three or more hyphen-joined digit groups, grounded by the exact string
+   in the result or in a string literal of the SQL. A block for restating an identifier the query
+   was given is a verifier false positive in figure 1(a)'s split. The verifier is unchanged and
+   frozen.
+11. **Owed before any held-out run: the measurement code is pinned** (MJ, 2026-10-04). The tree
+   hash of the scoring, comparator, auditor and `answer_must_state` grader code is recorded in
+   `heldout_config.json` and held-out scoring refuses to run if it differs, as the pipeline is
+   pinned. It is done after MJ has labelled the blind subset and adjudicated any disagreement,
+   because that may change the grader.
+12. Still open: whether an `informal` share of one quarter of the mention styles is right (3.2),
    and the four confirmatory comparisons in 6.

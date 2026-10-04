@@ -4,7 +4,7 @@ Written from the spec, deliberately not from `ledgerql/verify.py`: it imports no
 `ledgerql/` (a test checks this), and it does not use `evals/year_audit.py`, which imports
 `verify`. Its inputs are the answer text, the executed result, the executed SQL text and,
 optionally, a read-only database for year and date labels. The SQL is read structurally (sqlglot)
-for one thing only: which company its predicates name.
+for one thing only: which company its predicates name. Its string literals are read from the text.
 
     audit_answer(answer, columns, rows, sql=None, db_path=None) -> Audit
 """
@@ -119,6 +119,9 @@ _YEAR_SHAPE = re.compile(r"^(?:19|20)\d\d$")
 # Spec section 2: only a hedged round number leaves its precision unstated.
 _HEDGE = ("about", "approximately", "roughly", "around", "nearly")
 _GLUED_ID = re.compile(r"\b(?=[A-Za-z0-9]*\d)(?=[A-Za-z0-9]*[A-Za-z])[A-Za-z0-9]+\b")
+# Spec 1.8: three or more groups of digits joined by hyphens (an accession number) are one claim.
+_IDENTIFIER = re.compile(r"(?<![\w.,-])\d+(?:-\d+){2,}(?![\w-]|[.,]\d)")
+_SQL_STRING = re.compile(r"'((?:[^']|'')*)'")
 
 
 # ---------------------------------------------------------------------------------------------
@@ -127,7 +130,7 @@ _GLUED_ID = re.compile(r"\b(?=[A-Za-z0-9]*\d)(?=[A-Za-z0-9]*[A-Za-z])[A-Za-z0-9]
 
 @dataclass
 class Claim:
-    kind: str  # number | percent | year | date | period_label
+    kind: str  # number | percent | year | date | period_label | identifier
     text: str
     value: float | None = None
     decimals: int = 0
@@ -283,6 +286,12 @@ def extract_claims(text: str, mask_strings: list[str] | None = None) -> list[Cla
                 continue
             take(m, Claim("date", m.group(0).strip(), date=(year, month, day)))
 
+    # An identifier is one claim and none of its groups is a number or a year. A run in which every
+    # group is a year is years, and is left for the number pass below.
+    for m in _IDENTIFIER.finditer(text):
+        if free(m) and not all(_YEAR_SHAPE.match(g) for g in m.group(0).split("-")):
+            take(m, Claim("identifier", m.group(0)))
+
     for pat, build in (
         (_PERIOD_LABEL, lambda m: Claim("period_label", m.group(1))),
         (_FY_LABEL, lambda m: Claim("year", m.group(0), value=float(_to_year(m.group(1))))),
@@ -383,6 +392,8 @@ class Evidence:
     co_dates: set[dt.date] = field(default_factory=set)
     # the SQL restricts the company, and the auditor cannot tell to which
     company_unresolved: bool = False
+    strings: list[str] = field(default_factory=list)  # the result's string cells
+    sql_strings: list[str] = field(default_factory=list)  # the string literals of the SQL
 
 
 def build_evidence(columns, rows, sql, db=None, company=None, company_unresolved=False) -> Evidence:
@@ -423,6 +434,8 @@ def build_evidence(columns, rows, sql, db=None, company=None, company_unresolved
         for m in re.finditer(r"(?<![\d.])\d[\d,]*(?:\.\d+)?", _ISO.sub(" ", t)):
             cells.append(float(m.group(0).replace(",", "")))
     ev = Evidence(cells, years, dates, labels, operands)
+    ev.strings = strings
+    ev.sql_strings = _SQL_STRING.findall(str(sql or ""))
     if db:
         ev.db_years, ev.db_dates = db
     if company:
@@ -714,6 +727,15 @@ def ground(claim: Claim, ev: Evidence) -> Claim:
 
     if claim.kind == "period_label":
         return set_("grounded", "result/sql") if claim.text in ev.labels else set_("ungrounded")
+    if claim.kind == "identifier":
+        # The exact string, whole: not a piece of a longer run of digits and hyphens, and never
+        # its groups as numbers (spec 3.8).
+        whole = re.compile(rf"(?<![\d-]){re.escape(claim.text)}(?![\d-])")
+        if any(whole.search(s) for s in ev.strings):
+            return set_("grounded", "result")
+        if any(whole.search(s) for s in ev.sql_strings):
+            return set_("grounded", "sql literal")
+        return set_("ungrounded")
     if claim.kind == "date":
         y, mo, d = claim.date
 

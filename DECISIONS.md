@@ -3258,3 +3258,110 @@ limits.
 MJ: the 14 blind labels, then `python -m evals.must_state agree`; the 80 held-out questions; a decision
 on (a) or (b) in section 1 before the set is frozen. Then the freeze of the set, gen-only P1/P2/P3, and
 H3 and the 32B once each.
+
+---
+
+## 2026-10-04 (late night) — The draw on record, the dead Makefile targets and a README check, the auditor's identifier rule, and the measurement pin owed
+
+MJ's four decisions on the last entry.
+
+### 1. The draw is on record before any label
+
+The blind subset, its builder and its test were committed and pushed as `fb4c02a` before MJ labelled
+anything, and CI is green on that commit (test, lint, eval-validate). The draw (the four judgement calls
+and the seeded ten) is therefore fixed in history ahead of the labels.
+
+### 2. README: what stays, the dead Makefile targets, and a check
+
+MJ: the dev figures stay, labelled as they are. The note that Claude wrote the gold SQL and the calibration
+labels stays: who wrote what is part of the evaluation's integrity.
+
+**The Makefile's `api`, `ui` and `run` targets are removed.** They ran `ledgerql.api:app` and
+`ledgerql/ui/app.py`, neither of which was ever built. A thin demo can come after the held-out run, in a
+directory outside `ledgerql/`, so the freeze holds.
+
+**A check, in the test suite and so in CI** (`tests/test_readme_claims.py`). "Exists" means in a fresh
+clone: tracked, or new and not ignored.
+
+- Every relative link in the README, every path it writes in code (`dir/file`, `dir/`, a bare `FILE.ext`),
+  every `make <target>` in its code, and every first-party module it names (`python -m pkg.mod`, an
+  import, and the names an import takes from a module) must exist.
+- Every Makefile target must run something that exists: a `.PHONY` name must be a target, and a recipe's
+  first-party modules and paths must exist.
+- A path that is built locally and gitignored is declared with the target that builds it
+  (`data/ledgerql.duckdb`, `make data`) and is allowed only while that target exists.
+
+**What it would and would not have caught, replayed on the files as they were at `56d0d09`:**
+
+- the old Makefile fails it, on both targets (`ledgerql.api` and `ledgerql/ui/app.py` do not exist);
+- **the old README passes it.** Its claim was a sentence ("FastAPI (`/ask`, `/audit/{id}`, `/health`) + a
+  Streamlit demo UI"), which names no file, no target and no module. A check of paths and targets cannot
+  read a sentence. It stops the README pointing at a file, a target or a module that is not there, and it
+  stops the Makefile carrying a target for something unbuilt; a capability claimed in plain words still has
+  to be caught by reading.
+
+Related, found while checking and **not changed**: `pyproject.toml` declares `fastapi`, `uvicorn`,
+`streamlit`, `pydantic` and `typer`, and no file in the repository imports any of them. Removing them
+changes `uv.lock` and what CI installs, and the demo may want some of them back, so it is MJ's call.
+
+### 3. The auditor reads an identifier as one claim (option (a))
+
+Spec first (`evals/NUMBER_AUDIT_SPEC.md` 1.8 and 3.8), then tests, then the code; the auditor still imports
+nothing from `ledgerql/`, and nothing under `ledgerql/` changed, so H3 and the freeze stand.
+
+**The rule.** Three or more groups of digits joined by ASCII hyphens are one claim of kind `identifier`,
+with no value and no precision. It is `grounded` by the same string, whole, in a string cell of the result
+or **in a string literal of the executed SQL**, consistent with a year being grounded by the SQL's
+literals. Whole means every digit as written and not as a piece of a longer run of digits and hyphens. It
+is never grounded by its groups as numbers, by a numeric cell, or by the SQL outside a string literal
+(arithmetic, a comment). In neither place it is `ungrounded`, one claim where it used to be three numbers.
+It is never `weak`, `derived` or `unresolved`.
+
+Choices made in writing it:
+
+- **Three or more groups, not two**: `2024-2025` and `10-15` are ranges, two claims that each have to be
+  grounded. A well-formed ISO date is a date. A run in which every group is a year (`2023-2024-2025`) is
+  years. A run with one year-shaped group among others (`12-2024-7`) is an identifier.
+- **An identifier that is the whole of a result cell is still masked and is not a claim**, as before
+  (spec 1, "not claims" (a)). The new kind is for the rest: one inside a longer result string, one in the
+  SQL, one in neither. So no existing claim count moves.
+- **String literals are read from the SQL text** (single-quoted spans), not by parsing: the auditor
+  parses SQL for one purpose only, and a literal does not need a parse.
+
+**What it does to figure 1(a).** The frozen verifier blocks an answer that restates an accession number
+the query was given. The auditor now grounds every claim in that draft, so the block is counted as a
+**verifier false positive**. A test pins the pair on the constructed case of the last entry: the verifier
+refuses, `classify_blocks` says `verifier false positive`, and an identifier in neither place is
+`invented` with one ungrounded claim. Protocol 6a and its section 8 (item 10) record the amendment, made
+before the set is frozen and before any held-out run, and the known-issues entry now says what the
+auditor does.
+
+**On dev it changes nothing.** The auditor at `fb4c02a` against the new one, over every stored answer and
+blocked draft in the dev report files (12 of the 17 `reports/*.jsonl` files store text; 291 distinct
+texts, 489 claims): no claim's kind, text or status differs, and no claim of kind `identifier` arises
+(`L11`'s accession number is a whole result cell). Like the amendments of 2026-10-03 and this morning, it
+is a rule for text the dev runs did not produce. Tests: 11 new cases (ten in `tests/test_number_audit.py`,
+one in `tests/test_audit_vs_verify.py`).
+
+**One thing on the evidence side, stated in the spec and not changed.** A numeral inside a string cell
+still grounds a number (spec 3.3), so a number that equals one group of an identifier in the result ("26
+filings" beside `0000037996-26-000015`) is grounded by it. That is an audit false negative of the
+coincidence kind the spec already lists. Closing it (dropping identifiers from string cells before their
+numerals are read, as ISO dates already are) was not asked for and would be a second change to the
+measurement; it is for MJ to decide before the measurement code is pinned.
+
+### 4. Owed: the measurement code is pinned before any held-out run
+
+MJ: the tree hash of the scoring, comparator, auditor and `answer_must_state` grader code goes into
+`heldout_config.json`, and held-out scoring refuses to run if it differs, as the pipeline is pinned. **Not
+done now, on purpose:** it follows MJ's blind labels and the adjudication of any disagreement, which may
+change the grader. Recorded in the protocol (section 8, item 11). One thing to settle then: `evals/` as a
+whole cannot be the pinned tree, because it also holds `heldout_config.json` itself, the held-out files
+and the run log, which all change after the pin; the pin has to be over a named list of files.
+
+### 5. Still owed
+
+MJ: the 14 blind labels, then `python -m evals.must_state agree` and the adjudication; the 80 held-out
+questions; whether to close the evidence-side case in section 3; whether to drop the five unused
+dependencies. Then the measurement pin, the freeze of the set, gen-only P1/P2/P3, and H3 and the 32B once
+each.

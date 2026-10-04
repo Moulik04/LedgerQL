@@ -361,3 +361,83 @@ def test_a_partly_resolved_predicate_grounds_what_it_names_and_leaves_the_rest_u
     sql = "SELECT v FROM v_revenue WHERE ticker = 'AAPL' OR name LIKE '%3M%'"
     assert [c.status for c in _labels(sql, db).claims] == ["grounded"] * 2
     assert [c.status for c in _labels(sql, db, "Fiscal year 2024.").claims] == ["unresolved"]
+
+
+# --- identifiers (spec 1.8, 3.8): one claim, grounded by the exact string ----------------------
+
+_ADSH = "0000037996-26-000015"
+_BY_ADSH = f"SELECT form FROM filings WHERE adsh = '{_ADSH}'"
+
+
+def _ids(text, columns=("form",), rows=(("10-K",),), sql=_BY_ADSH):
+    return [
+        (c.kind, c.text, c.status) for c in N.audit_answer(text, list(columns), rows, sql).claims
+    ]
+
+
+def test_an_identifier_the_sql_literal_supplies_is_one_grounded_claim():
+    # the result is a form type; the accession number is only in the query's filter
+    assert _ids(f"Filing {_ADSH} is a 10-K.") == [("identifier", _ADSH, "grounded")]
+    (claim,) = N.audit_answer(f"Filing {_ADSH} is a 10-K.", ["form"], [("10-K",)], _BY_ADSH).claims
+    assert claim.source == "sql literal"
+
+
+def test_an_identifier_in_neither_the_result_nor_the_sql_is_one_ungrounded_claim_not_three():
+    other = "0000320193-24-000123"
+    assert _ids(f"Filing {other} is a 10-K.") == [("identifier", other, "ungrounded")]
+    assert _ids(f"Filing {_ADSH} is a 10-K.", sql="SELECT form FROM filings LIMIT 1") == [
+        ("identifier", _ADSH, "ungrounded")
+    ]
+
+
+def test_an_identifier_inside_a_longer_result_string_is_grounded_by_the_result():
+    rows = ((f"edgar/data/37996/{_ADSH}.txt",),)
+    a = N.audit_answer(f"The file is {_ADSH}.", ["path"], rows, "SELECT path FROM t LIMIT 1")
+    assert [(c.kind, c.status, c.source) for c in a.claims] == [
+        ("identifier", "grounded", "result")
+    ]
+
+
+def test_an_identifier_that_is_a_whole_result_cell_is_still_not_a_claim():
+    a = N.audit_answer(f"It is {_ADSH}.", ["adsh"], [(_ADSH,)], "SELECT adsh FROM filings LIMIT 1")
+    assert a.claims == [] and a.clean
+
+
+@pytest.mark.parametrize(
+    "stated",
+    [
+        "0000037996-26-00001",  # a piece of the real one
+        "0000037996-26-0000150",  # the real one with a digit added
+        "37996-26-15",  # leading zeros dropped
+        "0000037996-26-000016",  # one digit off
+    ],
+)
+def test_an_identifier_is_grounded_only_by_the_exact_string_whole(stated):
+    assert _ids(f"Filing {stated} is a 10-K.") == [("identifier", stated, "ungrounded")]
+
+
+def test_an_identifier_is_not_grounded_by_its_groups_as_numbers_or_outside_a_string_literal():
+    # the three groups as numeric cells, and as numerals inside a string cell
+    numeric = N.audit_answer(f"It is {_ADSH}.", ["a", "b", "c"], [(37996, 26, 15)], "SELECT 1")
+    assert [c.status for c in numeric.claims] == ["ungrounded"]
+    pieces = N.audit_answer(f"It is {_ADSH}.", ["s"], [("0000037996 26 000015",)], "SELECT 1")
+    assert [c.status for c in pieces.claims] == ["ungrounded"]
+    # in the SQL, but as arithmetic and in a comment: not a string literal
+    sql = f"SELECT form FROM filings WHERE x = 0000037996-26-000015 -- {_ADSH}"
+    assert _ids(f"Filing {_ADSH} is a 10-K.", sql=sql) == [("identifier", _ADSH, "ungrounded")]
+
+
+def test_a_date_a_run_of_years_and_a_range_are_not_identifiers():
+    sql = "SELECT 1 FROM t WHERE d = '2025-06-30' AND fiscal_year IN (2023, 2024, 2025)"
+    kinds = [k for k, _, _ in _ids("On 2025-06-30, for 2023-2024-2025.", sql=sql)]
+    assert kinds == ["date", "year", "year", "year"]
+    assert [s for _, _, s in _ids("On 2025-06-30, for 2023-2024-2025.", sql=sql)] == [
+        "grounded"
+    ] * 4
+    # two groups are two claims, each grounded or not on its own
+    assert _ids("Between 10-15 rows.", rows=(("x",),) * 10) == [
+        ("number", "10", "grounded"),  # the row count
+        ("number", "15", "ungrounded"),
+    ]
+    # a run that is not all years is an identifier even if one group looks like a year
+    assert _ids("Case 12-2024-7.") == [("identifier", "12-2024-7", "ungrounded")]

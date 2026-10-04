@@ -45,9 +45,17 @@ label. Each claim has a value and a stated precision (section 2). The kinds:
    is not a month.
 7. **Period labels.** `Q1` to `Q4`, `H1`, `H2`. A label with a year after it (`Q3 2025`) is a label
    plus a year claim.
+8. **Identifiers** (added 2026-10-04, before the held-out set is frozen). Three or more groups of
+   digits joined by ASCII hyphens, with nothing else between them: an SEC accession number
+   (`0000037996-26-000015`). It is **one** claim, the whole string. It states no quantity, so it has
+   no value and no precision; its groups are not separate numbers and none of them is read as a
+   year. Three things that look like one are read as what they are: a well-formed ISO date
+   (`2025-06-30`) is a date (6); a run in which every group is a year (`2023-2024-2025`) is years
+   (5); two groups (`2024-2025`, `10-15`) are a range, two claims that each have to be grounded.
 
 **Not claims** (masked before extraction): (a) a company name or ticker from the database, or a
-string in the result, that contains a digit (`3M`); (b) an SEC form code from a fixed list (`10-K`,
+string in the result, that contains a digit (`3M`; an identifier that is the whole of a result
+cell is masked here, as it always was, and is a claim of kind 8 only when it is not); (b) an SEC form code from a fixed list (`10-K`,
 `10-K/A`, `10-KT`, `10-Q`, `8-K`, `20-F`, `40-F`, `6-K`, `11-K`, `S-1`, `S-3`, `S-4`, `F-1`, `DEF 14A`);
 anything else shaped like a form code (`5-K`) is an ordinary number followed by a letter; (c) a digit
 ordinal (`1st`, `2nd`, `3rd`, `4th`); (d) a list marker at the start of a line (`1.`, `2)`); (e) an
@@ -89,6 +97,16 @@ A claim is **grounded** if it is correct (section 2) for:
 5. for a **date**: the same date in a result cell or SQL literal (a month-year or month-day claim
    needs a date with that month and year, or month and day);
 6. for a **period label**: the same label in a result string or the SQL.
+
+8. for an **identifier**: the same string, whole, in a string cell of the result or in a string
+   literal of the executed SQL (`WHERE adsh = '0000037996-26-000015'`). Whole means every digit as
+   written (no leading zero dropped) and not as a piece of a longer run of digits and hyphens
+   (`0000037996-26-00001` is not in `0000037996-26-000015`). It is never grounded by its groups as
+   numbers, by a numeric cell, or by anything in the SQL outside a string literal. An identifier in
+   the SQL's own literal was supplied to the query, by the question or by the model's reading of
+   it, exactly as a year in the SQL's filter was (4): an answer that restates it has not invented
+   it. An identifier in neither place is `ungrounded`. An identifier is never `weak`, `derived` or
+   `unresolved`.
 
 7. for a **year or date** that is in none of the above: a label the database holds **for the
    company the SQL names** (a `filings.fiscal_year`, a `filings.period_end_date` or a
@@ -157,6 +175,17 @@ the share of audited answers with an ungrounded or an unresolved claim, which re
 auditor cannot resolve as invented. No claim's status changes for it.
 
 ## 5. Stated limits
+
+**An identifier, where this spec and the pipeline's verifier differ on purpose** (2026-10-04): the
+verifier grounds an identifier by the result only, so it blocks an answer that restates an
+accession number found only in the query's filter (`evals/KNOWN_PIPELINE_ISSUES.md`; the pipeline
+is frozen). This audit grounds it by the SQL literal too. On the stored draft of such a block the
+audit therefore finds nothing ungrounded, and figure 1(a)'s split counts the block as a verifier
+false positive, which is what it is. On the evidence side nothing changed: a numeral inside a
+string cell still grounds a number (3), so a number that equals one group of an identifier in the
+result (`26` beside `0000037996-26-000015`) is grounded by it, a case of the coincidence limit
+below.
+
 
 Not counted: a bare `one`, `half`, `a third`, `a dozen`, ordinals in words, "twice" and the like
 (relative statements); a quantity hidden in a word the lists do not know. Abbreviation `m`/`b`/`t`/`k`

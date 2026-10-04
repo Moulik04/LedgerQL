@@ -194,3 +194,26 @@ def test_the_verifier_and_the_auditor_agree_on_a_quoted_accession_number(text, t
     columns, rows, sql = ["adsh"], [(_ADSH,)], "SELECT adsh FROM filings LIMIT 1"
     assert verify.verify(text, columns, rows, sql=sql).ok is true
     assert A.number_audit.audit_answer(text, columns, rows, sql).clean is true
+
+
+def test_a_block_for_restating_an_identifier_from_the_query_is_a_verifier_false_positive():
+    """The one place the two differ on purpose (evals/KNOWN_PIPELINE_ISSUES.md): the frozen verifier
+    grounds an identifier by the result only, the auditor by the SQL's string literal too."""
+    from ledgerql import verify
+
+    draft = f"Filing {_ADSH} is a 10-K."
+    columns, rows = ["form"], [("10-K",)]
+    sql = f"SELECT form FROM filings WHERE adsh = '{_ADSH}'"
+    assert verify.verify(draft, columns, rows, sql=sql).ok is False  # the pipeline blocks it
+    record = {"id": "restated", "answer": None, "reason_code": "UNGROUNDED_ANSWER",
+              "columns": columns, "rows": [list(r) for r in rows], "generated_sql": sql,
+              "blocked_draft": draft}  # fmt: skip
+    (block,) = A.classify_blocks([record], None)
+    assert block["verdict"] == "verifier false positive" and block["ungrounded"] == []
+    rate = A.draft_rate([record], None)
+    assert (rate["blocked"], rate["invented"], rate["verifier_false_positive"]) == (1, 0, 1)
+    # an identifier that is in neither place is still an invention, and one claim
+    invented = {**record, "blocked_draft": "Filing 0000320193-24-000123 is a 10-K."}
+    (block,) = A.classify_blocks([invented], None)
+    assert block["verdict"] == "invented"
+    assert block["ungrounded"] == [("identifier", "0000320193-24-000123")]
