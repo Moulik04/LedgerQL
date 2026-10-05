@@ -441,3 +441,50 @@ def test_a_date_a_run_of_years_and_a_range_are_not_identifiers():
     ]
     # a run that is not all years is an identifier even if one group looks like a year
     assert _ids("Case 12-2024-7.") == [("identifier", "12-2024-7", "ungrounded")]
+
+
+# --- identifiers are atomic in the evidence too (spec 3.3, 3.4) --------------------------------
+
+
+def _statuses(text, cell, sql="SELECT s FROM t LIMIT 1"):
+    return [(c.kind, c.text, c.status) for c in N.audit_answer(text, ["s"], [(cell,)], sql).claims]
+
+
+def test_a_number_is_not_grounded_by_one_group_of_an_identifier_in_the_result():
+    assert _statuses("There were 26 filings.", _ADSH) == [("number", "26", "ungrounded")]
+    assert _statuses("There were 15 filings.", f"see {_ADSH}.txt") == [
+        ("number", "15", "ungrounded")
+    ]
+    # the leading group, with and without its zeros
+    assert [s for _, _, s in _statuses("It is 37996 or 0000037996.", f"({_ADSH})")] == [
+        "ungrounded"
+    ] * 2
+
+
+def test_another_numeral_in_the_same_cell_as_an_identifier_still_grounds_a_number():
+    cell = f"{_ADSH} (3 exhibits, 26 pages)"
+    assert _statuses("It has 3 exhibits.", cell) == [("number", "3", "grounded")]
+    # 26 is stated by the cell on its own account, not as a group of the identifier
+    assert _statuses("It has 26 pages.", cell) == [("number", "26", "grounded")]
+
+
+def test_a_year_is_not_grounded_by_a_year_shaped_group_of_an_identifier():
+    assert _statuses("In 2024.", "12-2024-7") == [("year", "2024", "ungrounded")]
+    in_sql = "SELECT s FROM t WHERE ref = '12-2024-7'"
+    assert _statuses("In 2024.", "x", in_sql) == [("year", "2024", "ungrounded")]
+    # the SQL's own year filter still grounds it
+    assert _statuses("In 2024.", "x", in_sql + " AND fiscal_year = 2024") == [
+        ("year", "2024", "grounded")
+    ]
+
+
+def test_a_date_and_a_run_of_years_in_a_string_cell_still_ground_what_they_state():
+    assert _statuses("It ended on 2025-06-30, in 2025.", "period 2025-06-30") == [
+        ("date", "2025-06-30", "grounded"),
+        ("year", "2025", "grounded"),
+    ]
+    assert [s for _, _, s in _statuses("From 2023 to 2025.", "2023-2024-2025")] == ["grounded"] * 2
+    # and the identifier itself is still grounded by the cell that holds it
+    assert _statuses(f"The file is {_ADSH}.", f"path/{_ADSH}.txt") == [
+        ("identifier", _ADSH, "grounded")
+    ]

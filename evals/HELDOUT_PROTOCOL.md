@@ -191,6 +191,9 @@ Amended 2026-10-04 (night), at MJ's request, before the held-out set is frozen a
 held-out run: the auditor reads a hyphenated identifier as one claim, grounded by the exact string
 in the result or in a string literal of the SQL (below, under figure 1(a)). This is in the auditor
 and its spec only; nothing under `ledgerql/` changes, so H3 and the freeze stand.
+Amended 2026-10-05, at MJ's request, before the held-out set is frozen and before any held-out
+run: in the auditor an identifier is atomic in the evidence too. A number or a year in an answer is
+not grounded by one group of an identifier in the result or the SQL. Auditor and spec only.
 
 - **The headline configuration is H3, and it is final** (it supersedes H2; all three are in
   `evals/heldout_config.json`, which is append-only). H3 is H2 with one change under `ledgerql/`, in
@@ -358,7 +361,14 @@ and its spec only; nothing under `ledgerql/` changes, so H3 and the freeze stand
      such a draft and the block is counted as a **verifier false positive**. Before this the
      auditor read the identifier as three ungrounded numbers and would have counted the block as
      `invented`. An identifier in neither place is `ungrounded`, one claim. Figure 1(b) is not
-     affected under H3: an answer whose identifier is not in the result is never shipped;
+     affected under H3: an answer whose identifier is not in the result is never shipped.
+     **An identifier is atomic in both directions (fixed 2026-10-05, before any held-out run).** A
+     number or a year in an answer is not grounded by one group of an identifier in a string cell of
+     the result or in the SQL (`26`, or `2024`, beside `0000037996-26-000015` or `12-2024-7`), as
+     an ISO date in a string cell was already a date and not three numbers
+     (`evals/NUMBER_AUDIT_SPEC.md` 3.3, 3.4). Any other numeral in the same cell still counts. This
+     can move figure 1(b) and the split of 1(a) in one direction only, toward more claims counted
+     `ungrounded`: a number that used to be grounded by such a group no longer is;
   2. the **confidently-wrong rate**: wrong answers over answered cases;
   3. **coverage**: answered over answerable cases (`ANSWER` and `ANSWER_WITH_ASSUMPTION`);
   4. the **agree-policy table**: "answer only where both models answered and agree", with
@@ -417,10 +427,13 @@ configuration is run once for its confirmatory comparison.
    in the result or in a string literal of the SQL. A block for restating an identifier the query
    was given is a verifier false positive in figure 1(a)'s split. The verifier is unchanged and
    frozen.
-11. **Owed before any held-out run: the measurement code is pinned** (MJ, 2026-10-04). The tree
+11. **In the auditor an identifier is atomic in the evidence too** (2026-10-05, MJ, before the set is
+   frozen and before any held-out run): its groups ground no number and no year. On dev no claim
+   changes (291 distinct stored texts; two of them have an identifier in their evidence).
+12. **Owed before any held-out run: the measurement code is pinned** (MJ, 2026-10-04). The tree
    hash of the scoring, comparator, auditor and `answer_must_state` grader code is recorded in
    `heldout_config.json` and held-out scoring refuses to run if it differs, as the pipeline is
    pinned. It is done after MJ has labelled the blind subset and adjudicated any disagreement,
    because that may change the grader.
-12. Still open: whether an `informal` share of one quarter of the mention styles is right (3.2),
+13. Still open: whether an `informal` share of one quarter of the mention styles is right (3.2),
    and the four confirmatory comparisons in 6.

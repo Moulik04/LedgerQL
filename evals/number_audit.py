@@ -396,6 +396,20 @@ class Evidence:
     sql_strings: list[str] = field(default_factory=list)  # the string literals of the SQL
 
 
+def _without_identifiers(text: str) -> str:
+    """`text` with every identifier blanked (spec 3.3, 3.4): in the evidence, as in an answer, an
+    identifier is one string, and its groups state no number and no year. An ISO date and a run of
+    years are not identifiers and are kept."""
+
+    def blank(m: re.Match) -> str:
+        run = m.group(0)
+        if _ISO.fullmatch(run) or all(_YEAR_SHAPE.match(g) for g in run.split("-")):
+            return run
+        return " " * len(run)
+
+    return _IDENTIFIER.sub(blank, text)
+
+
 def build_evidence(columns, rows, sql, db=None, company=None, company_unresolved=False) -> Evidence:
     cells: list[float] = []
     operands: list[float] = []
@@ -426,12 +440,15 @@ def build_evidence(columns, rows, sql, db=None, company=None, company_unresolved
     for t in [*strings, str(sql or "")]:
         for m in _ISO.finditer(t):
             dates.add(dt.date(int(m.group(1)), int(m.group(2)), int(m.group(3))))
-        years.update(int(y) for y in re.findall(r"(?<!\d)((?:19|20)\d\d)(?!\d)", t))
+        years.update(
+            int(y) for y in re.findall(r"(?<!\d)((?:19|20)\d\d)(?!\d)", _without_identifiers(t))
+        )
         labels.update(_PERIOD_LABEL.findall(t))
-    for (
-        t
-    ) in strings:  # numerals inside a string cell (spec 3.3); the SQL's numbers are not evidence
-        for m in re.finditer(r"(?<![\d.])\d[\d,]*(?:\.\d+)?", _ISO.sub(" ", t)):
+    # numerals inside a string cell (spec 3.3); the SQL's numbers are not evidence
+    for t in strings:
+        for m in re.finditer(
+            r"(?<![\d.])\d[\d,]*(?:\.\d+)?", _ISO.sub(" ", _without_identifiers(t))
+        ):
             cells.append(float(m.group(0).replace(",", "")))
     ev = Evidence(cells, years, dates, labels, operands)
     ev.strings = strings

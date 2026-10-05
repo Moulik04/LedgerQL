@@ -91,9 +91,14 @@ A claim is **grounded** if it is correct (section 2) for:
    `_mm`, `_k`); a percentage claim matches the cell as it is or the cell times 100; the sign is
    ignored (a "fell 5%" statement over a −5 cell);
 2. **the number of rows** in the result (a count of what was returned: "the ten companies");
-3. **a numeral inside a string cell** (a date, `FY2024`, a ticker with digits);
+3. **a numeral inside a string cell** (a date, `FY2024`, a ticker with digits), **but not a group
+   of an identifier** (1.8) in that cell: `26` is not grounded by a cell that holds
+   `0000037996-26-000015` (amended 2026-10-05, before the held-out set is frozen). An identifier is
+   one thing in the result as it is in the answer, exactly as an ISO date in a string cell is a date
+   and not three numbers. Any other numeral in the same cell still counts;
 4. for a **year**: a year in a result cell or date, or a year or date literal in the executed SQL
-   (`fiscal_year = 2025`, `'2024-09-28'`);
+   (`fiscal_year = 2025`, `'2024-09-28'`), and likewise never a year-shaped group of an identifier
+   in a string cell or in the SQL (`2024` is not grounded by `'12-2024-7'`);
 5. for a **date**: the same date in a result cell or SQL literal (a month-year or month-day claim
    needs a date with that month and year, or month and day);
 6. for a **period label**: the same label in a result string or the SQL.
@@ -181,11 +186,13 @@ verifier grounds an identifier by the result only, so it blocks an answer that r
 accession number found only in the query's filter (`evals/KNOWN_PIPELINE_ISSUES.md`; the pipeline
 is frozen). This audit grounds it by the SQL literal too. On the stored draft of such a block the
 audit therefore finds nothing ungrounded, and figure 1(a)'s split counts the block as a verifier
-false positive, which is what it is. On the evidence side nothing changed: a numeral inside a
-string cell still grounds a number (3), so a number that equals one group of an identifier in the
-result (`26` beside `0000037996-26-000015`) is grounded by it, a case of the coincidence limit
-below.
+false positive, which is what it is.
 
+**An identifier is atomic in both directions** (2026-10-05). In an answer it is one claim (1.8); in
+the evidence it is one string, and its groups ground no number and no year (3.3, 3.4). Until this
+amendment a number that equalled one group of an identifier in the result (`26` beside
+`0000037996-26-000015`) was grounded by it. What counts as an identifier is the same on both
+sides: three or more hyphen-joined digit groups that are not an ISO date and not a run of years.
 
 Not counted: a bare `one`, `half`, `a third`, `a dozen`, ordinals in words, "twice" and the like
 (relative statements); a quantity hidden in a word the lists do not know. Abbreviation `m`/`b`/`t`/`k`
