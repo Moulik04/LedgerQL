@@ -194,6 +194,9 @@ and its spec only; nothing under `ledgerql/` changes, so H3 and the freeze stand
 Amended 2026-10-05, at MJ's request, before the held-out set is frozen and before any held-out
 run: in the auditor an identifier is atomic in the evidence too. A number or a year in an answer is
 not grounded by one group of an identifier in the result or the SQL. Auditor and spec only.
+Amended 2026-10-05 (later), at MJ's request, before any held-out run: what the figures depend on
+outside `ledgerql/` (the measurement code and the environment) is pinned separately from H. H3 is
+not amended and `heldout_config.json` is not touched.
 
 - **The headline configuration is H3, and it is final** (it supersedes H2; all three are in
   `evals/heldout_config.json`, which is append-only). H3 is H2 with one change under `ledgerql/`, in
@@ -225,6 +228,36 @@ not grounded by one group of an identifier in the result or the SQL. Auditor and
   `evals/heldout_runs.md`). The freeze covers `ledgerql/` only: the evaluator and the auditor are
   under the rules fixed below. An issue is not a reason H "cannot be run as specified" (the last
   bullet of this section): that clause is for a run that cannot be made at all.
+- **The measurement and the environment are pinned too, separately from H (MJ, 2026-10-05).** H3
+  pins `ledgerql/`. A figure also depends on code and inputs outside it, and on the versions of the
+  packages that parse and execute SQL. So, before any held-out run:
+  - **The measurement pin** (`evals/measurement_pin.py`, stored in `evals/measurement_pin.json`):
+    the SHA-256 of each file on a named list, not of `evals/` as a tree, because `evals/` also holds
+    files that change after the pin (the configuration declarations, the held-out files, the run
+    log). The list is every `evals` module that a command producing a held-out figure imports,
+    directly or not (the scorer and comparator, the metrics, the auditor and its specification,
+    the `answer_must_state` grader and its patterns, the generation-only prompts, the gold check,
+    the configuration and pin code), plus `docs/schema.md`, the schema text that `ledgerql/` puts
+    in every generation prompt and that H3's tree hash does not cover, plus the job scripts. A test
+    fails if such a module is missing from the list, and every other `evals` module is listed with
+    the reason it is not pinned. **The list is a draft until MJ approves it, and the pin is
+    recorded only after MJ's blind labels are in and any grader disagreement is adjudicated**,
+    since that may change the grader.
+  - **The environment pin**, in the same record: the SHA-256 of `uv.lock`. A held-out run is refused
+    if `uv.lock` differs from it, **or if the installed `duckdb` or `sqlglot` is not the version
+    that `uv.lock` names**, since a matching file proves nothing about an environment that was not
+    built from it.
+  - **A held-out run is refused** (`run_eval`, `gen_only_eval`) unless a pin is recorded and every
+    pinned file, `uv.lock` and those two installed versions match it. Until a pin is recorded every
+    held-out run is refused. A change after the pin needs a new pin (`M2`), declared before any
+    held-out run, as a pipeline change needs a new configuration; the old one is kept.
+  - **Recorded, not enforced:** every run's `run_meta.json` carries the resolved `duckdb` and
+    `sqlglot`, `uv.lock`'s hash, the database file's hash, the settings variables as set or unset,
+    and the model server's `vllm`, `transformers` and `torch`. The server environment on the
+    cluster is installed without a lock file (`docs/bridges2.md`), so there is nothing to refuse
+    against: its versions are read from it by each job, and each held-out run's entry in
+    `evals/heldout_runs.md` states them. If the H3 run and the 32B run report different server
+    versions, that is stated beside the agree-policy table.
 - **Configuration H2** (superseded by H3 on 2026-10-04; kept as written). H2 supersedes H1; both
   are in `evals/heldout_config.json`, which is append-only. H2 is H1 with two changes under `ledgerql/`, declared together as one
   configuration on 2026-10-03: the verifier (`verify.py`) accepts true values in the forms it used
@@ -430,10 +463,12 @@ configuration is run once for its confirmatory comparison.
 11. **In the auditor an identifier is atomic in the evidence too** (2026-10-05, MJ, before the set is
    frozen and before any held-out run): its groups ground no number and no year. On dev no claim
    changes (291 distinct stored texts; two of them have an identifier in their evidence).
-12. **Owed before any held-out run: the measurement code is pinned** (MJ, 2026-10-04). The tree
-   hash of the scoring, comparator, auditor and `answer_must_state` grader code is recorded in
-   `heldout_config.json` and held-out scoring refuses to run if it differs, as the pipeline is
-   pinned. It is done after MJ has labelled the blind subset and adjudicated any disagreement,
-   because that may change the grader.
+12. **The measurement and the environment are pinned separately from H** (MJ, 2026-10-04 and
+   2026-10-05; H3 is not amended). A named file list and the hash of `uv.lock`, in
+   `evals/measurement_pin.json`; a held-out run is refused unless a pin is recorded and the files,
+   `uv.lock` and the installed `duckdb` and `sqlglot` match it; every run records its resolved
+   versions, the model server's included. **Owed:** MJ's approval of the list (drafted 2026-10-05,
+   `python -m evals.measurement_pin draft`), then the pin itself, recorded after the blind labels
+   are in and any grader disagreement is adjudicated.
 13. Still open: whether an `informal` share of one quarter of the mention styles is right (3.2),
    and the four confirmatory comparisons in 6.

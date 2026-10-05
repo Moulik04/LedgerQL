@@ -405,3 +405,69 @@ different set of drafts, and it ran with the linker **off**, so a difference bet
 draft rates mixes the linker, sampling and the verifier; and its four blocked drafts were never
 stored, so they stay unclassified. Give `--write` a new file name: the committed
 `reports/number_audit_vs_verify.md` covers the three committed runs and should not be overwritten.
+
+## How the cluster environment is built, and what pins it (2026-10-05)
+
+The configuration pins the code (`ledgerql/`, by tree hash; the job checks the commit). The same code
+behaves differently on a different SQL parser, engine or model server, so this section says where each
+of those comes from. **It is read from the scripts in this directory, not from the cluster: nothing was
+run on Bridges-2 to write it.** From this commit on, every job records what it actually resolved.
+
+There are two environments, built differently.
+
+| | eval environment | model server environment |
+|---|---|---|
+| where | `~/ledgerql-bridges2/ledgerql/.venv` | `~/ledgerql-bridges2/vllm-env/.venv` |
+| holds | `duckdb`, `sqlglot`, `httpx`: everything `evals/` and `ledgerql/` import | `vllm` and what it pulls in (`torch`, `transformers`), `huggingface_hub` |
+| built by | `setup_env.sh`: `uv venv --python <3.13.7>` then `uv sync --all-groups` | `setup_env.sh`: `uv pip install vllm "huggingface_hub[cli]"` |
+| **from a lock file?** | **yes, `uv.lock`.** Every command a job runs goes through `uv run`, which brings the environment to `uv.lock` before it runs | **no.** No version is named and nothing is locked: it holds whatever was current the first time `setup_env.sh` ran. The script skips the install when the venv exists, so it changes only if the venv is rebuilt |
+| Python | 3.13.7, the interpreter of `module load pytorch/26.05-2.11-py3` (the laptop uses 3.12; `uv.lock` names the same package versions for both) | the same interpreter |
+
+Also outside the commit: the modules a job loads (`pytorch/26.05-2.11-py3`, `cuda-h100/13.3.1`), and
+`data/ledgerql.duckdb`, which is gitignored and copied to the cluster by hand.
+
+**What is known about the server environment today.** One retrieved server log states it: job 47412929
+(2026-10-04, the 30B dev run under H2) ran **vLLM 0.29.0** on **torch 2.11.0+cu126**. No retrieved log
+states the `transformers` version, and earlier jobs' server logs were not retrieved, so whether every
+earlier run used the same vLLM is not known from the files.
+
+**What every job records now** (`run_meta.json`, key `environment`, written by `python -m evals.run_env`
+before any GPU work):
+
+- `packages`: the installed `duckdb` and `sqlglot`, beside `locked`, what `uv.lock` names for them;
+- `uv_lock_sha256`, and `database_sha256` for `data/ledgerql.duckdb`;
+- `server`: `vllm`, `transformers` and `torch`, read by the server environment's own interpreter;
+- `settings`: the variables that override a pipeline default (`OLLAMA_SEED`, `OLLAMA_TEMPERATURE`,
+  `OLLAMA_CONSENSUS_TEMPERATURE`, `LEDGERQL_ENTITY_LINK`, `LEDGERQL_ROW_LIMIT`,
+  `LEDGERQL_QUERY_TIMEOUT_SECONDS`, `LEDGERQL_DB_PATH`), as set or unset. The job inherits the
+  submitting shell's environment, so one of these left set would change a run without changing a file.
+
+Reading never stops a job; what cannot be read is recorded as `unavailable`.
+
+**What is enforced, and what is only recorded.**
+
+| | a held-out run is refused if it differs | recorded in `run_meta.json` |
+|---|---|---|
+| `ledgerql/` | yes (configuration H, tree hash) | commit |
+| scoring, auditor, grader, prompts, `docs/schema.md`, job scripts | yes, once the measurement pin is recorded (`evals/measurement_pin.py`) | commit |
+| `uv.lock` | yes, with the measurement pin | hash |
+| installed `duckdb`, `sqlglot` | yes, with the measurement pin: they must be the versions the pinned `uv.lock` names | versions |
+| `vllm`, `transformers`, `torch` | **no**: there is no lock to compare with | versions |
+| the database file | **no** | hash |
+| the settings variables above | only `LEDGERQL_ENTITY_LINK` (configuration H) | all of them |
+
+Until a measurement pin is recorded, every held-out run is refused.
+
+**Before the held-out runs, on the login node:**
+
+```bash
+cd ~/ledgerql-bridges2/ledgerql && git pull --ff-only origin main
+uv sync --all-groups          # also drops the packages removed from uv.lock on 2026-10-05
+uv run python -m evals.run_env --server-python ~/ledgerql-bridges2/vllm-env/.venv/bin/python \
+    --db data/ledgerql.duckdb
+```
+
+The last command prints what a job would record. `packages` must equal `locked`, and `server` must show
+a version for `vllm`, `transformers` and `torch`. **Do not rebuild `vllm-env` between the H3 run and the
+32B run**: the two are compared in the agree-policy table and nothing but the record would show that
+they ran on different servers.

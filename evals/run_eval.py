@@ -31,7 +31,7 @@ import duckdb
 # This bootstrap makes the script self-sufficient regardless of that.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from evals import heldout_config, must_state, scoring
+from evals import heldout_config, measurement_pin, must_state, scoring
 from evals.abstain_scoring import compute_abstain_metrics
 from evals.confidently_wrong import compute_confidently_wrong_rate
 from evals.repair_scoring import compute_repair_stats
@@ -671,6 +671,7 @@ def main(argv: list[str] | None = None) -> int:
     heldout_config.require_declared(
         args.gold
     )  # ... and unless the code is the declared configuration
+    measurement_pin.require_pinned(args.gold)  # ... and the scoring code and environment are pinned
     judge = must_state.OllamaJudge(args.judge_model) if args.judge_model else None
     only = set(args.cases.split(",")) if args.cases else None
     summary = run(Path(args.gold), args.db, judge=judge, only=only)

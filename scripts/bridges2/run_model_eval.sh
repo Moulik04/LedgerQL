@@ -58,6 +58,16 @@ if [ ! -f data/ledgerql.duckdb ]; then
     exit 1
 fi
 
+# What this job runs on, read before any GPU work and written to run_meta.json at the end: the
+# resolved duckdb and sqlglot of the eval environment beside what uv.lock names, uv.lock's hash,
+# the database's hash, and the versions in the vLLM environment, which is installed without a
+# lock file (setup_env.sh) and so is known only by asking it. The commit pins the code, not these.
+# Reading never stops a job: what cannot be read is recorded as unavailable. Whether a held-out
+# run may proceed is decided by the eval itself (evals/measurement_pin.py).
+RUN_ENV="$(uv run python -m evals.run_env --server-python "$VLLM_PYTHON/python" --db data/ledgerql.duckdb)" \
+    || RUN_ENV='{"unavailable": "python -m evals.run_env failed"}'
+echo "Run environment: $RUN_ENV"
+
 # Model weights (~20-80GB) are downloaded fresh into this job's node-local
 # scratch, not pre-staged on $HOME -- $HOME/jet has a hard 25GiB project
 # quota (confirmed real, too small for these checkpoints), while $LOCAL is
@@ -216,7 +226,8 @@ cat > "$OUT/run_meta.json" <<META
   "tensor_parallel_size": $TP_SIZE,
   "slurm_job_id": "${SLURM_JOB_ID:-}",
   "host": "$(hostname)",
-  "finished_utc": "$(date -u +%FT%TZ)"
+  "finished_utc": "$(date -u +%FT%TZ)",
+  "environment": $RUN_ENV
 }
 META
 

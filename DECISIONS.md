@@ -3365,3 +3365,135 @@ MJ: the 14 blind labels, then `python -m evals.must_state agree` and the adjudic
 questions; whether to close the evidence-side case in section 3; whether to drop the five unused
 dependencies. Then the measurement pin, the freeze of the set, gen-only P1/P2/P3, and H3 and the 32B once
 each.
+
+---
+
+## 2026-10-05 — Identifiers atomic in the evidence, five unused dependencies removed, the environment recorded, and the measurement pin built and drafted
+
+MJ's four decisions on the last entry. Nothing under `ledgerql/` changed and `heldout_config.json` was not
+touched: H3 and the freeze stand.
+
+### 1. In the auditor an identifier is atomic in both directions
+
+Spec first (`evals/NUMBER_AUDIT_SPEC.md` 3.3, 3.4 and section 5), then tests, then the code. A number in
+an answer is no longer grounded by one group of an identifier in a string cell of the result (`26` beside
+`0000037996-26-000015`), and a year is not grounded by a year-shaped group of one in a string cell or in
+the SQL (`2024` beside `'12-2024-7'`). It is the treatment an ISO date in a string cell already had. What
+counts as an identifier is the same on both sides (three or more hyphen-joined digit groups, not an ISO
+date, not a run of years), and any other numeral in the same cell still grounds a number.
+
+**The replay, old auditor (`b13f747`) against new, over every stored dev answer and blocked draft** (the
+12 of 17 `reports/*.jsonl` files that store text; 291 distinct texts, 489 claims): **no claim changes**,
+in kind, text, status or source. Two of the 291 have an identifier in their evidence at all (`J05`'s and
+`L11`'s results hold accession numbers), so on dev the rule is exercised twice and moves nothing; the
+rest is covered by tests. Four new tests: two failed before the change, two are guards that passed
+before and after (another numeral in the same cell; a date and a run of years in a cell). The amendment
+can move figure 1 in one direction only, toward more claims counted `ungrounded`. Recorded in protocol
+6a and section 8 (item 11).
+
+### 2. Five unused dependencies removed
+
+`uv remove fastapi uvicorn streamlit pydantic typer` (uv 0.12.9). **The lock diff was checked by parsing
+the lock before and after, not by reading it:**
+
+- 79 packages before, 40 after. **39 removed, none added.** The 39 are `fastapi`, `uvicorn`,
+  `streamlit` and `typer` and the 35 packages that only they reached: `altair`, `annotated-doc`, `attrs`,
+  `charset-normalizer`, `httptools`, `itsdangerous`, `jinja2`, `jsonschema`,
+  `jsonschema-specifications`, `markdown-it-py`, `markupsafe`, `mdurl`, `narwhals`, `numpy`, `pandas`,
+  `pillow`, `protobuf`, `pyarrow`, `pydeck`, `python-dateutil`, `python-multipart`, `referencing`,
+  `requests`, `rich`, `rpds-py`, `shellingham`, `six`, `starlette`, `toml`, `tzdata`, `urllib3`,
+  `uvloop`, `watchdog`, `watchfiles`, `websockets`.
+- **No kept package's version changed**, and the only kept entry that differs at all is the project's
+  own (its list of dependencies). `duckdb` 1.5.5 and `sqlglot` 30.17.0 are unchanged. In the old lock,
+  the packages reachable from the remaining dependencies are exactly the new lock's 40, and none of the
+  39 is among them. `uv.lock`'s diff is 1,352 deleted lines and no added line.
+- **`pydantic` is no longer declared and is still installed**, at the same 2.13.5: `ollama` depends on
+  it. That is the one of the five that was not "used exclusively by them".
+- No file imports any of the 39 (every import name was searched, `numpy` and `pandas` included, and no
+  code asks DuckDB for a data frame). The suite passes in the pruned environment and in a fresh one built
+  from the new lock.
+
+They come back when the demo is built.
+
+### 3. The freeze had a gap: the environment
+
+H3 pins the code under `ledgerql/`. The same code gives different results on a different `sqlglot`
+(parsing, the guardrails, the auditor's company predicates), a different `duckdb` (execution) or a
+different model server. Three things were done, and H3 was not amended.
+
+**(a) How the cluster environment is built** (`docs/bridges2.md`, new section; **read from the scripts,
+nothing was run on the cluster**). Two environments. The eval environment is built from `uv.lock` (`uv
+sync` in `setup_env.sh`, and every job command goes through `uv run`, which brings it to the lock). The
+**model server's environment is not built from any lock**: `uv pip install vllm` with no version, once,
+whatever was current then. One retrieved log states what that was: vLLM 0.29.0 on torch 2.11.0+cu126 (job
+47412929). No retrieved log states the `transformers` version.
+
+**(b) Every job records what it resolved** (`python -m evals.run_env`, written into `run_meta.json` as
+`environment`, read before any GPU work): installed `duckdb` and `sqlglot` beside what `uv.lock` names,
+`uv.lock`'s hash, the server's `vllm`, `transformers` and `torch` read by the server environment's own
+interpreter, and, added beyond what was asked because they are the same kind of gap, the database file's
+hash and the settings variables that override a pipeline default (`OLLAMA_SEED` and the like, which a job
+inherits from the submitting shell). Reading never stops a job.
+
+**(c) A held-out run is refused if `uv.lock` differs from the pin**, and also if the installed `duckdb`
+or `sqlglot` is not the version the pinned lock names: a byte-identical lock file says nothing about an
+environment that was not built from it. This lives in the measurement pin (section 4), and until a pin is
+recorded every held-out run is refused.
+
+**Where the pin is stored: `evals/measurement_pin.json`, not `heldout_config.json`** as the last entry
+said. That file is the list of configuration declarations, its tests read it as exactly H1 to H3, and
+"without amending H3" is simplest to guarantee by not touching it.
+
+**Recorded and not enforced**, each for MJ to decide: the server's versions (nothing to compare with
+until MJ reads them on the cluster; they could then go into the pin); the database's hash; the settings
+variables other than `LEDGERQL_ENTITY_LINK`.
+
+### 4. The measurement pin: built, the list drafted, nothing applied
+
+`evals/measurement_pin.py`. The pin is the SHA-256 of each file on a named list plus `uv.lock`'s. **No
+pin is recorded**: the list waits for MJ's approval, and the pin for the blind labels and their
+adjudication. `python -m evals.measurement_pin draft` prints the list.
+
+**The draft, 40 files.** Its rule: every `evals` module that a command producing a held-out figure
+imports, directly or not, and the non-code inputs of those figures. A test fails if such a module is
+missing, and every other `evals` module must be listed with the reason it is left out.
+
+- *Commands that produce a held-out figure:* `run_eval`, `gen_only_eval`, `audit_vs_verify`,
+  `summarize_run`, `entity_link_eval`, `heldout_gold_check`, and the pin code itself (`heldout_config`,
+  `measurement_pin`, `run_env`).
+- *Scorer and comparator:* `scoring`, `gold_v2`, `gold_v3`, `passn_scoring`, `offline_exec`.
+- *Metrics:* `abstain_scoring`, `confidently_wrong`, `repair_scoring`, `rescore_v2`,
+  `pairwise_agreement`, `signal_precheck`, `replay_repair_off`, `replay_year_rule`, `bakeoff_evidence`,
+  `pipeline_acceptance`.
+- *Auditor:* `number_audit`, `NUMBER_AUDIT_SPEC.md`.
+- *Grader:* `must_state`, `must_state_patterns.json`.
+- *Not in MJ's list, proposed:* `gen_prompts` (the prompts of the generation-only runs); **`docs/schema.md`**;
+  and ten job scripts under `scripts/bridges2/` (the job body, the commit check, `submit.sh`, and the
+  seven job files of H3, its partner, P1, P2 and P3).
+
+**`docs/schema.md` is a gap in the H3 freeze, found while drafting.** `ledgerql/schema_index.py` reads it
+into every generation prompt, and it is outside `ledgerql/`, so the tree hash does not cover it: the
+schema text could change and H3 would still verify. It has not changed since H3's commit. The pin closes
+it.
+
+**Not pinned, 15 modules, each with its reason in the code:** the dev-set diagnostics no held-out
+command imports (`check_replay`, `comparator_audit`, `diagnose_abstains`, `entity_upper_bound`,
+`gold_audit`, `nodata_audit`, `pool_experiment`, `replay_derived`, `replay_frame`, `replay_refusals`,
+`year_audit`), `replay_verifier` (a regression check for a new configuration, not a figure),
+`colocation_audit`, and `heldout_slots` and `validate_gold`, whose outputs are pinned by their own
+hashes.
+
+**One thing the refusal does not reach, for MJ to decide with the list.** The refusal is at `run_eval`
+and `gen_only_eval`, where the pipeline's is. Figure 1 is computed afterwards, on the laptop, by
+`audit_vs_verify` from the retrieved records; it is given no gold file and cannot tell a held-out run
+from a dev one. Once a pin is recorded, a test fails if any pinned file differs from it, which guards
+every commit; an uncommitted edit on the laptop is not guarded. Proposal: once a pin is active, the
+offline figure commands refuse to run on a tree that differs from it.
+
+### 5. Still owed
+
+MJ: the 14 blind labels and the adjudication; the 80 held-out questions; approval of the measurement
+list, with the offline-commands proposal; whether the server versions, the database hash and the
+settings variables are enforced or only recorded; on the cluster, the three commands at the end of
+`docs/bridges2.md`'s new section. Then the pin, the freeze of the set, gen-only P1/P2/P3, and H3 and the
+32B once each.

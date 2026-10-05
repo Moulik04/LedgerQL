@@ -9,6 +9,7 @@ are moving fast, so every check here must stop the script, not just print.
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 from pathlib import Path
@@ -403,3 +404,44 @@ def test_pick_free_port_returns_a_bindable_port_and_two_calls_can_differ(tmp_pat
     s = socket.socket()
     s.bind(("0.0.0.0", port))  # it really is free
     s.close()
+
+
+def _job_text() -> str:
+    return (SCRIPTS / "run_model_eval.sh").read_text()
+
+
+def test_the_job_reads_its_environment_before_any_gpu_work_and_a_failed_read_does_not_stop_it(
+    tmp_path,
+):
+    text = _job_text()
+    read = text.index('RUN_ENV="$(uv run python -m evals.run_env')
+    assert read < text.index('"$VLLM_PYTHON/vllm" serve')  # before the server is started
+    assert '--server-python "$VLLM_PYTHON/python"' in text[read : read + 200]
+    # the two lines as the job runs them, with a `uv` that fails, under the job's own `set -e`
+    lines = text[read : text.index("\n", text.index("|| RUN_ENV=", read))]
+    (tmp_path / "uv").write_text("#!/bin/bash\nexit 1\n")
+    (tmp_path / "uv").chmod(0o755)
+    script = f'set -euo pipefail\nVLLM_PYTHON=/none\n{lines}\necho "$RUN_ENV"\n'
+    done = subprocess.run(
+        ["bash", "-c", script],
+        capture_output=True,
+        text=True,
+        env={**ENV, "PATH": f"{tmp_path}:{ENV['PATH']}"},
+    )
+    assert done.returncode == 0 and "unavailable" in json.loads(done.stdout)
+
+
+def test_run_meta_is_valid_json_and_carries_the_environment_the_job_read():
+    text = _job_text()
+    start = text.index('cat > "$OUT/run_meta.json" <<META')
+    heredoc = text[start : text.index("\nMETA\n", start) + len("\nMETA\n")]
+    env_json = json.dumps({"packages": {"duckdb": "1.5.5"}, "server": {"vllm": "0.29.0"}}, indent=2)
+    script = (
+        'OUT=/dev; EXPECTED_COMMIT=abc; REPO_ID="org/model"; TP_SIZE=1; PORT=1234\n'
+        f"RUN_ENV='{env_json}'\n" + heredoc.replace('"$OUT/run_meta.json"', "/dev/stdout")
+    )
+    done = subprocess.run(["bash", "-c", script], capture_output=True, text=True, env=ENV)
+    meta = json.loads(done.stdout)
+    assert meta["environment"]["server"]["vllm"] == "0.29.0"
+    assert meta["environment"]["packages"]["duckdb"] == "1.5.5"
+    assert meta["model"] == "org/model" and meta["tensor_parallel_size"] == 1
