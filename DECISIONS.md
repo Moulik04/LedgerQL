@@ -3600,3 +3600,52 @@ pending. Tests: 1,040 before, 1,093 after; the new ones were each seen to fail f
 **Owed, in order.** MJ: the 14 blind labels and the adjudication; the 80 held-out questions; on the
 cluster, the three commands, and the record they print. Then the pin (`apply --cluster-env`), the
 freeze of the set, gen-only P1/P2/P3, and H3 and the 32B once each.
+
+## 2026-10-05 (night) — The weights pinned to a commit
+
+MJ's decision on the gap the last entry left open (its section 5). Nothing under `ledgerql/` changed
+and `heldout_config.json` was not touched. No pin is recorded yet.
+
+**The revision the development runs used is recoverable, for every model.** No job script ever named
+a revision (`git log -S"--revision" -- scripts/bridges2` is empty) and job 47412929's server log
+shows `revision=main`, so every run was served the head of `main` on its day. Read from the Hugging
+Face API on 2026-10-05 (`/api/models/<repo>` and `/commits/main`; `lastModified` agrees with the
+latest commit's date in each case):
+
+| model | used by | head of `main` | its latest commit |
+|---|---|---|---|
+| `Qwen/Qwen3-Coder-30B-A3B-Instruct` | H3's primary; P1, P3 | `b2cff646eb4bb1d68355c01b18ae02e7cf42d120` | 2025-12-03, "Update config.json" |
+| `Qwen/Qwen2.5-Coder-32B-Instruct-AWQ` | H3's policy partner; P3 | `1ed0a6145da0ce550c628e8e8b678f51e695995d` | 2024-11-18 |
+| `XGenerationLab/XiYanSQL-QwenCoder-32B-2504` | P2, P3 | `50c30a65a388e9cdc39965b76c30cdbe427a2365` | 2025-12-04, "Update README.md" |
+
+The first cluster run was 2026-09-14. Each repository's latest commit is nine months or more before
+that, so `main` has been that one commit for the whole life of this project: **each development run
+of each model necessarily used the commit in the table.** Neither of MJ's two models changed after
+Sep 14, and neither did the third.
+
+**XiYanSQL is pinned too, beyond the two models MJ named.** The generation-only held-out runs (P2 and
+P3) serve it from pinned job files, the same reasoning applies and it gave the same answer, so leaving
+it on `main` would have left the gap open for those two comparisons.
+
+**What was done.**
+
+- Each of the seven pinned job files sets `MODEL_REVISION` to its model's commit, and the job body
+  passes it to `vllm serve` as `--revision` and `--tokenizer-revision`. vLLM takes the two
+  separately and the log shows each defaulting to `main`, so naming only the first would have left
+  the tokenizer on `main`. A job file that names none still gets `main` (the unpinned OmniSQL job).
+- The commits are in the measurement pin (`MODEL_REVISIONS`, copied into the record as `models`). A
+  test requires a pinned revision for every declared model and each pinned job file to download it.
+- **A held-out run is refused on a mismatch, judged by what was downloaded, not by what was asked
+  for.** Each job downloads into a cache of its own (`HF_HOME` on node-local scratch), so the
+  snapshots that cache holds for the model are what the server was given. The eval is told where
+  the cache is (`--model-cache`) and stops unless it holds the pinned commit and no other. So a
+  revision flag that did not take effect would be caught, as would a cache that cannot be read.
+- `run_meta.json` records the revision asked for and the snapshots found, for every run.
+
+**Not tested on the cluster.** The `vllm serve` flags and the cache layout the check reads
+(`hub/models--<org>--<name>/snapshots/<commit>`) are from vLLM's and Hugging Face's documented
+behaviour, not from a run. A development run made before the held-out ones will show both in
+`run_meta.json`. If the layout is not what the check expects, a held-out run is refused before any
+question is sent: it costs a submission, not a figure.
+
+Tests: 1,093 before, 1,100 after; the new ones were seen to fail first.

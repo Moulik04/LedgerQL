@@ -362,6 +362,11 @@ def parser() -> argparse.ArgumentParser:
         help="the interpreter of the model server's environment; a held-out run is refused "
         "unless the versions it reports are the pinned ones",
     )
+    ap.add_argument(
+        "--model-cache",
+        help="the HF_HOME the model server downloaded its weights into; a held-out run is "
+        "refused unless it holds the pinned revision of the model and no other",
+    )
     return ap
 
 
@@ -375,13 +380,15 @@ def main(argv: list[str] | None = None) -> int:
     heldout_config.require_declared(
         args.gold
     )  # ... and unless the code is the declared configuration
-    # ... and the measurement, the environment, the database, the server and the settings are pinned
+    # ... and the measurement, the environment, the database, the server, the weights and the
+    # settings are the pinned ones
     measurement_pin.require_pinned(
         args.gold,
         mode="gen_only",
         settings=heldout_settings(args),
         db=args.db,
         server_python=args.server_python,
+        model_cache=args.model_cache,
     )
     gold = load_jsonl(args.gold)
     cases = select_cases(gold, set(args.cases.split(",")) if args.cases else None)

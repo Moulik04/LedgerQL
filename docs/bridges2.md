@@ -466,17 +466,34 @@ enforced; only what legitimately varies between runs is recorded and not compare
 | the database file | yes, by SHA-256 | the pin, from the cluster's record; it must also be the laptop's |
 | `vllm`, `transformers`, `torch` of the server | yes: read through `--server-python`, the interpreter of the venv `vllm serve` was started from | the pin, from the cluster's record; `setup_env.sh` names the vLLM version |
 | model, backend, seed, both temperatures, number of candidates, the generation-only token limit, the linker | yes: what the run resolved must equal the declaration | `SETTINGS` in `evals/measurement_pin.py`, which restates H3 where H3 speaks (a test holds it to H3) |
+| the weights: the commit of the model's repository | yes: the one snapshot in the job's own download cache (`--model-cache`, its `HF_HOME`) must be the pinned commit | `MODEL_REVISIONS` in `evals/measurement_pin.py`; each pinned job file downloads that commit (`MODEL_REVISION`), for weights and tokenizer |
 | the variables that override a default (the list above) | yes: any of them set in the job's environment stops the run, `LEDGERQL_ENTITY_LINK` apart (H3 requires it to be `1`) | nothing may be exported |
-| context length, extra server flags, mode, profiles | by construction: every pinned job file sets them itself, so none is inherited from the submitting shell, and the job files are pinned | the job files |
+| context length, extra server flags, mode, profiles, the revision asked for | by construction: every pinned job file sets them itself, so none is inherited from the submitting shell, and the job files are pinned | the job files |
 | job id, node, port, time | **recorded only** (`run_meta.json`): these vary legitimately | |
 
 The pipeline sends no token limit of its own, so a pipeline reply is bounded by the server's context
 length: `MAX_MODEL_LEN=8192` in the two pipeline job files (job 47412929's log shows
 `max_seq_len=8192`). The generation-only eval sends `max_tokens` 2048, which is compared.
 
-**Not enforced and not recorded: which revision of the weights is served.** Every job downloads its
-model from Hugging Face at `revision=main` (the server log says so). If a model's repository is
-updated between two runs, they are served different weights and no file here shows it. Open, for MJ.
+**The weights are pinned to a commit (2026-10-05).** Until now every job downloaded its model from
+Hugging Face at `revision=main` (job 47412929's server log says so, and no job script ever named a
+revision), which is whatever the repository holds that day. Read from the Hugging Face API on
+2026-10-05:
+
+| model | head of `main` | its latest commit |
+|---|---|---|
+| `Qwen/Qwen3-Coder-30B-A3B-Instruct` | `b2cff646eb4bb1d68355c01b18ae02e7cf42d120` | 2025-12-03 |
+| `Qwen/Qwen2.5-Coder-32B-Instruct-AWQ` | `1ed0a6145da0ce550c628e8e8b678f51e695995d` | 2024-11-18 |
+| `XGenerationLab/XiYanSQL-QwenCoder-32B-2504` | `50c30a65a388e9cdc39965b76c30cdbe427a2365` | 2025-12-04 |
+
+Each latest commit is months older than the first cluster run (2026-09-14), so `main` was this commit
+for every run made so far: these are the weights every development run was served. Each pinned job
+file now downloads that commit by name (`--revision` and `--tokenizer-revision`), `run_meta.json`
+records the revision asked for and the snapshots the job's cache actually holds (`model_revision`,
+`model_snapshots`), and a held-out run is refused unless that cache holds the pinned commit and no
+other. **Untested on the cluster:** the check reads the cache as Hugging Face lays it out
+(`$HF_HOME/hub/models--<org>--<name>/snapshots/<commit>`). A development run made first will show it
+in `model_snapshots`; if that is empty, the held-out run would be refused, not wrongly allowed.
 
 Until a measurement pin is recorded, every held-out run is refused. Once one is, the **offline**
 figure commands (`audit_vs_verify`, `summarize_run`, `entity_link_eval`, `rescore_v2`,

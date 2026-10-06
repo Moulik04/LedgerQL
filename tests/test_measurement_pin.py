@@ -101,7 +101,9 @@ def repo(tmp_path, monkeypatch):
             "server": dict(SERVER),
         },
         "settings": json.loads(json.dumps(M.SETTINGS)),
+        "models": dict(M.MODEL_REVISIONS),
     }
+    _download(tmp_path / "hf", MODEL, M.MODEL_REVISIONS[MODEL])
     monkeypatch.setattr(run_env, "installed", lambda packages: {"duckdb": "1.5.5"})
     monkeypatch.setattr(
         run_env, "server_versions", lambda python: {"interpreter": python, **SERVER}
@@ -110,6 +112,14 @@ def repo(tmp_path, monkeypatch):
 
 
 HELDOUT, DEV = "evals/heldout_v1.jsonl", "evals/gold_v3.jsonl"
+MODEL = M.SETTINGS["pipeline"]["model"][0]  # also the first generation-only model
+
+
+def _download(cache, model, revision):
+    """What a download of `model` at `revision` leaves in a Hugging Face cache."""
+    (cache / "hub" / ("models--" + model.replace("/", "--")) / "snapshots" / revision).mkdir(
+        parents=True
+    )
 
 
 def _settings(mode="pipeline", **changed):
@@ -125,6 +135,7 @@ def _require(gold, pin, path, mode="pipeline", environ=None, **changed):
         settings=_settings(mode, **changed),
         db=path / "db.duckdb",
         server_python="/venv/bin/python",
+        model_cache=path / "hf",
         pins=[] if pin is None else [pin],
         repo=path,
         environ={} if environ is None else environ,
@@ -196,6 +207,43 @@ def test_a_model_server_whose_versions_cannot_be_read_is_refused(repo):
     assert M.problems(pin, path, server=unread) == [
         "the model server's versions could not be read (no server interpreter was given)"
     ]
+
+
+def test_weights_downloaded_at_another_revision_are_refused(repo):
+    path, pin = repo
+    want = M.MODEL_REVISIONS[MODEL]
+    assert M.revision_problems(pin["models"], MODEL, path / "hf") == []
+    _download(path / "moved", MODEL, "f" * 40)  # the repository's main moved on
+    assert M.revision_problems(pin["models"], MODEL, path / "moved") == [
+        f"{MODEL} was downloaded at revision {'f' * 40} and the pin names {want}"
+    ]
+    _download(path / "moved", MODEL, want)  # the pinned one beside another is still not it alone
+    assert "and the pin names" in M.revision_problems(pin["models"], MODEL, path / "moved")[0]
+
+
+def test_weights_that_cannot_be_found_or_a_model_with_no_pinned_revision_are_refused(repo):
+    path, pin = repo
+    assert M.revision_problems(pin["models"], MODEL, path / "empty") == [
+        f"the downloaded weights of {MODEL} were not found under {path / 'empty'} (--model-cache)"
+    ]
+    assert M.revision_problems(pin["models"], MODEL, None) == [
+        f"the downloaded weights of {MODEL} were not found under None (--model-cache)"
+    ]
+    assert M.revision_problems(pin["models"], "Org/Other", path / "hf") == [
+        "no revision is pinned for Org/Other"
+    ]
+
+
+def test_every_declared_model_has_a_pinned_revision_and_its_job_files_download_that_one():
+    declared = {model for d in M.SETTINGS.values() for model in d["model"]}
+    assert set(M.MODEL_REVISIONS) == declared
+    revisions = M.MODEL_REVISIONS.values()
+    assert all(len(sha) == 40 and set(sha) <= set("0123456789abcdef") for sha in revisions)
+    jobs = [rel for rel in M.PINNED if rel.endswith(".sbatch")]
+    for rel in jobs:
+        text = (M.REPO / rel).read_text()
+        model = text.split("run_model_eval.sh ")[-1].split()[0]
+        assert f"export MODEL_REVISION={M.MODEL_REVISIONS[model]}\n" in text, rel
 
 
 def test_a_setting_exported_by_the_submitting_shell_is_refused():
@@ -319,6 +367,7 @@ def test_the_refusal_names_the_pin_and_every_difference(repo, monkeypatch):
     (path / "evals/scorer.py").write_text("x = 2\n")
     (path / "uv.lock").write_text("")
     (path / "db.duckdb").write_bytes(b"another database")
+    _download(path / "hf", MODEL, "f" * 40)
     monkeypatch.setattr(run_env, "server_versions", lambda python: {**SERVER, "vllm": "0.30.1"})
     with pytest.raises(FrozenGoldError) as e:
         _require(HELDOUT, pin, path, environ={"OLLAMA_TEMPERATURE": "0.9"}, seed=7)
@@ -329,6 +378,7 @@ def test_the_refusal_names_the_pin_and_every_difference(repo, monkeypatch):
         "uv.lock differs",
         "db.duckdb differs from the pin",
         "the model server has vllm 0.30.1",
+        f"{MODEL} was downloaded at revision",
         "OLLAMA_TEMPERATURE is set in the environment",
         "seed is 7 and the declared pipeline setting is 42",
     ):
@@ -398,7 +448,7 @@ def test_a_pin_records_the_server_the_database_and_the_settings_from_the_cluster
     assert env["server"] == SERVER  # the three packages, not the interpreter's path
     assert env["database_sha256"] == run_env.sha256_file(path / "db.duckdb")
     assert env["cluster_record"] == _cluster(path)  # kept whole, as it was read
-    assert pin["settings"] == M.SETTINGS
+    assert pin["settings"] == M.SETTINGS and pin["models"] == M.MODEL_REVISIONS
     _require(HELDOUT, pin, path)
 
 
@@ -523,6 +573,7 @@ def test_both_live_entry_points_check_the_pin_after_the_freeze_and_the_configura
             "settings=heldout_settings(",
             "db=args.db",
             "server_python=args.server_python",
+            "model_cache=args.model_cache",
         ):
             assert given in call, (name, given)
 
@@ -536,12 +587,17 @@ def test_the_recorded_pin_if_any_matches_the_working_tree():
         assert not Path(M.PIN_PATH).exists()
         with pytest.raises(FrozenGoldError, match="not pinned"):
             M.require_pinned(
-                HELDOUT, mode="pipeline", settings={}, db="data/ledgerql.duckdb", server_python=None
+                HELDOUT,
+                mode="pipeline",
+                settings={},
+                db="data/ledgerql.duckdb",
+                server_python=None,
+                model_cache=None,
             )
         return
     assert M.problems(pin) == []
     assert set(pin["files"]) == set(M.PINNED)
-    assert pin["settings"] == M.SETTINGS
+    assert pin["settings"] == M.SETTINGS and pin["models"] == M.MODEL_REVISIONS
     assert pin["environment"]["server"]["vllm"] == M.setup_vllm_version()
 
 

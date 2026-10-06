@@ -31,4 +31,7 @@ export ENTITY_LINK_AB=""
 # The 256K default is what overflowed the cache before (docs/bridges2.md).
 export MAX_MODEL_LEN=5120
 export VLLM_EXTRA_ARGS="--gpu-memory-utilization 0.95"
+# The commit of the model's repository to download: main as it has stood since before the first
+# cluster run (2026-09-14), so the weights every earlier run of this job was served.
+export MODEL_REVISION=1ed0a6145da0ce550c628e8e8b678f51e695995d
 bash scripts/bridges2/run_model_eval.sh Qwen/Qwen2.5-Coder-32B-Instruct-AWQ 1

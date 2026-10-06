@@ -683,6 +683,11 @@ def main(argv: list[str] | None = None) -> int:
         "unless the versions it reports are the pinned ones",
     )
     ap.add_argument(
+        "--model-cache",
+        help="the HF_HOME the model server downloaded its weights into; a held-out run is "
+        "refused unless it holds the pinned revision of the model and no other",
+    )
+    ap.add_argument(
         "--judge-model",
         help="a local Ollama model that decides the judge-primary answer_must_state items",
     )
@@ -692,13 +697,15 @@ def main(argv: list[str] | None = None) -> int:
     heldout_config.require_declared(
         args.gold
     )  # ... and unless the code is the declared configuration
-    # ... and the measurement, the environment, the database, the server and the settings are pinned
+    # ... and the measurement, the environment, the database, the server, the weights and the
+    # settings are the pinned ones
     measurement_pin.require_pinned(
         args.gold,
         mode="pipeline",
         settings=heldout_settings(),
         db=args.db,
         server_python=args.server_python,
+        model_cache=args.model_cache,
     )
     judge = must_state.OllamaJudge(args.judge_model) if args.judge_model else None
     only = set(args.cases.split(",")) if args.cases else None

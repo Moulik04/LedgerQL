@@ -111,10 +111,16 @@ echo "First run downloads the checkpoint into \$LOCAL ($LOCAL) -- this can take 
 # headroom while shrinking the KV cache requirement to well under 1GiB.
 # MAX_MODEL_LEN overrides the 8192 default; the generation-only bake-off jobs set
 # it per job, sized from their longest prompt (see the *_genonly.sbatch files).
+# MODEL_REVISION is the commit of the model's repository to download, for the weights and for
+# the tokenizer (vLLM takes the two separately and each defaults to `main`, which is whatever
+# the repository holds that day). Each job file names it. A held-out run is refused unless the
+# one snapshot in this job's cache is the pinned revision (evals/measurement_pin.py).
 "$VLLM_PYTHON/vllm" serve "$REPO_ID" \
     --port "$PORT" \
     --tensor-parallel-size "$TP_SIZE" \
     --max-model-len "${MAX_MODEL_LEN:-8192}" \
+    --revision "${MODEL_REVISION:-main}" \
+    --tokenizer-revision "${MODEL_REVISION:-main}" \
     ${VLLM_EXTRA_ARGS:-} \
     > "$VLLM_OUT" 2> "$VLLM_ERR" &
 VLLM_PID=$!
@@ -195,14 +201,14 @@ if [ "${EVAL_MODE:-pipeline}" = "gen_only" ]; then
             echo "Generation-only eval: profile $profile ..."
             uv run python -m evals.gen_only_eval --profile "$profile" --model "$REPO_ID" \
                 --host http://localhost:$PORT --db data/ledgerql.duckdb --out "$OUT" --gold "$GOLD_FILE" \
-                --server-python "$VLLM_PYTHON/python"
+                --server-python "$VLLM_PYTHON/python" --model-cache "$HF_HOME"
             if [ -n "${ENTITY_LINK_AB:-}" ]; then
                 # Entity-linking A/B: the same server session, the same seeds, the same
                 # cases, only the resolved-companies hint differs.
                 echo "Generation-only eval: profile $profile, WITH --entity-link ..."
                 uv run python -m evals.gen_only_eval --profile "$profile" --model "$REPO_ID" \
                     --host http://localhost:$PORT --db data/ledgerql.duckdb --out "$OUT" --gold "$GOLD_FILE" \
-                    --server-python "$VLLM_PYTHON/python" --entity-link
+                    --server-python "$VLLM_PYTHON/python" --model-cache "$HF_HOME" --entity-link
             fi
         done
     fi
@@ -214,8 +220,13 @@ else
     echo "Running eval with LLM_BACKEND=vllm OLLAMA_MODEL=$REPO_ID LEDGERQL_ENTITY_LINK=${LEDGERQL_ENTITY_LINK:-unset (linker off)} -> $OUT ..."
     VLLM_HOST="http://localhost:$PORT" LLM_BACKEND=vllm OLLAMA_MODEL="$REPO_ID" \
         uv run python evals/run_eval.py --db data/ledgerql.duckdb --reports-dir "$OUT" \
-        --gold "${GOLD_FILE:-evals/gold_v3.jsonl}" --server-python "$VLLM_PYTHON/python"
+        --gold "${GOLD_FILE:-evals/gold_v3.jsonl}" --server-python "$VLLM_PYTHON/python" \
+        --model-cache "$HF_HOME"
 fi
+
+# The revision(s) of the model this job's cache holds: what the server was actually given.
+SNAPSHOTS="$(ls "$HF_HOME/hub/models--$(echo "$REPO_ID" | sed 's|/|--|g')/snapshots" 2>/dev/null | tr '\n' ' ')" || SNAPSHOTS=""
+SNAPSHOTS="${SNAPSHOTS% }"
 
 # Provenance: what ran, on which commit, so every figure is attributable.
 cat > "$OUT/run_meta.json" <<META
@@ -223,6 +234,8 @@ cat > "$OUT/run_meta.json" <<META
   "commit": "$(git rev-parse HEAD)",
   "expected_commit": "$EXPECTED_COMMIT",
   "model": "$REPO_ID",
+  "model_revision": "${MODEL_REVISION:-main}",
+  "model_snapshots": "$SNAPSHOTS",
   "eval_mode": "${EVAL_MODE:-pipeline}",
   "vllm_port": "${PORT:-}",
   "profiles": "${PROFILES:-}",

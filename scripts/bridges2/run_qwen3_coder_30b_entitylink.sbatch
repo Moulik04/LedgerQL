@@ -35,4 +35,7 @@ export GOLD_FILE="${GOLD_FILE:-evals/gold_v3.jsonl}"
 # The 256K default is what overflowed the cache before (docs/bridges2.md).
 export MAX_MODEL_LEN=5120
 export VLLM_EXTRA_ARGS="--gpu-memory-utilization 0.95"
+# The commit of the model's repository to download: main as it has stood since before the first
+# cluster run (2026-09-14), so the weights every earlier run of this job was served.
+export MODEL_REVISION=b2cff646eb4bb1d68355c01b18ae02e7cf42d120
 bash scripts/bridges2/run_model_eval.sh Qwen/Qwen3-Coder-30B-A3B-Instruct 1

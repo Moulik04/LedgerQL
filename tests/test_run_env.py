@@ -77,3 +77,14 @@ def test_every_variable_that_overrides_a_default_the_figures_depend_on_is_listed
         read |= set(re.findall(r'os\.environ\.get\(\s*"([A-Z_]+)"', path.read_text()))
     given_to_the_run = {"OLLAMA_HOST", "VLLM_HOST", "OLLAMA_MODEL", "LLM_BACKEND"}
     assert read - given_to_the_run == set(E.SETTINGS)
+
+
+def test_the_revisions_served_are_the_snapshots_the_cache_holds_for_that_model(tmp_path):
+    snapshots = tmp_path / "hub" / "models--Org--Name" / "snapshots"
+    (snapshots / ("a" * 40)).mkdir(parents=True)
+    assert E.served_revisions("Org/Name", tmp_path) == ["a" * 40]
+    (snapshots / ("b" * 40)).mkdir()
+    assert E.served_revisions("Org/Name", tmp_path) == ["a" * 40, "b" * 40]
+    assert E.served_revisions("Org/Other", tmp_path) is None  # nothing was downloaded for it
+    assert E.served_revisions("Org/Name", None) is None
+    assert E.served_revisions("Org/Name", tmp_path / "missing") is None

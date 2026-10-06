@@ -280,8 +280,12 @@ recorded. H3 is not amended.
     as they are in the working tree, so an edit that was never committed is refused.
   - **Recorded only:** what legitimately varies between runs (the job id, the node, the port, the
     time), in each run's `run_meta.json`, with everything above as that run resolved it.
-  - **Not covered, stated:** each job downloads its model at the repository's `main` revision,
-    which is neither pinned nor recorded (`docs/bridges2.md`).
+  - **The weights are pinned to a commit (MJ, 2026-10-05).** Each job used to download its model
+    at the repository's `main`. The pin now names the commit of each model's repository
+    (`MODEL_REVISIONS`), each pinned job file downloads that commit, and a held-out run is refused
+    unless the job's own download cache holds that commit and no other. Each repository's latest
+    commit (the 30B 2025-12-03, the 32B AWQ 2024-11-18, XiYanSQL 2025-12-04) is older than the
+    first cluster run (2026-09-14), so these are the weights every development run was served.
 - **Configuration H2** (superseded by H3 on 2026-10-04; kept as written). H2 supersedes H1; both
   are in `evals/heldout_config.json`, which is append-only. H2 is H1 with two changes under `ledgerql/`, declared together as one
   configuration on 2026-10-03: the verifier (`verify.py`) accepts true values in the forms it used

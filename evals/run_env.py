@@ -110,6 +110,18 @@ def server_versions(python: str | None, packages=SERVER_PACKAGES, timeout: float
         return {"interpreter": str(python), "unavailable": f"{type(e).__name__}: {e}"[:300]}
 
 
+def served_revisions(model: str, cache) -> list[str] | None:
+    """The revisions of `model` (a Hugging Face repository id) that the cache at `cache` (an
+    `HF_HOME`) holds: the commit hashes its snapshots are stored under. None if it holds none. A
+    job downloads into a cache of its own, so there this is what its server was given."""
+    if not cache:
+        return None
+    snapshots = Path(cache) / "hub" / ("models--" + model.replace("/", "--")) / "snapshots"
+    if not snapshots.is_dir():
+        return None
+    return sorted(p.name for p in snapshots.iterdir() if p.is_dir()) or None
+
+
 def describe(server_python: str | None = None, db_path: str | None = None) -> dict:
     out = {
         "python": platform.python_version(),

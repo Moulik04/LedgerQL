@@ -22,8 +22,9 @@ cluster reports them. The pin is its own file: the configuration declarations
 
 **A held-out run is refused** (`require_pinned`) unless a pin exists and all of these match it:
 every listed file and `uv.lock`; the installed `duckdb` and `sqlglot`; the database file; the model
-server's `vllm`, `transformers` and `torch`; and the generation settings (`SETTINGS`), with no
-variable that overrides a default set in the environment. Whatever can change an output is
+server's `vllm`, `transformers` and `torch`; the revision of the weights it downloaded
+(`MODEL_REVISIONS`); and the generation settings (`SETTINGS`), with no variable that overrides a
+default set in the environment. Whatever can change an output is
 compared. What legitimately varies between runs (job id, node, port, time) is only recorded.
 
 **An offline figure command is refused** (`require_unchanged`) once a pin exists, if the files,
@@ -155,6 +156,17 @@ SETTINGS = {
     },
 }
 
+# The commit of each model's Hugging Face repository that a held-out run is served. Each was the
+# head of `main` when read on 2026-10-05, and each repository's latest commit is older than the
+# first cluster run (2026-09-14), so these are also the weights every development run was served
+# (no job ever named a revision, so each got `main`). Latest commits: the 30B 2025-12-03, the
+# 32B AWQ 2024-11-18, XiYanSQL 2025-12-04. The pinned job files download exactly these.
+MODEL_REVISIONS = {
+    "Qwen/Qwen3-Coder-30B-A3B-Instruct": "b2cff646eb4bb1d68355c01b18ae02e7cf42d120",
+    "Qwen/Qwen2.5-Coder-32B-Instruct-AWQ": "1ed0a6145da0ce550c628e8e8b678f51e695995d",
+    "XGenerationLab/XiYanSQL-QwenCoder-32B-2504": "50c30a65a388e9cdc39965b76c30cdbe427a2365",
+}
+
 # The pinned commands that compute a figure from stored records, on the laptop, after a run. Each
 # opens with the check named here (a test holds them to it).
 _WITH_DB, _NO_DB = (
@@ -240,6 +252,7 @@ def draft(repo: Path = REPO) -> dict:
             "locked": run_env.locked(lock_path=repo / "uv.lock"),
         },
         "settings": json.loads(json.dumps(SETTINGS)),
+        "models": dict(MODEL_REVISIONS),
     }
 
 
@@ -319,6 +332,22 @@ def settings_problems(declared: dict, mode: str, settings: dict) -> list[str]:
     return out
 
 
+def revision_problems(pinned: dict, model: str, model_cache) -> list[str]:
+    """Why the weights in the job's own download cache (`model_cache`, its `HF_HOME`) are not the
+    pinned revision of `model`, and only that one."""
+    want = pinned.get(model)
+    if want is None:
+        return [f"no revision is pinned for {model}"]
+    served = run_env.served_revisions(model, model_cache)
+    if served is None:
+        return [
+            f"the downloaded weights of {model} were not found under {model_cache} (--model-cache)"
+        ]
+    if served != [want]:
+        return [f"{model} was downloaded at revision {', '.join(served)} and the pin names {want}"]
+    return []
+
+
 def _refuse(pin: dict, found: list[str]) -> None:
     if found:
         raise FrozenGoldError(
@@ -334,14 +363,16 @@ def require_pinned(
     settings: dict,
     db,
     server_python: str | None,
+    model_cache,
     pins: list[dict] | None = None,
     repo: Path = REPO,
     environ=None,
 ) -> None:
     """Refuse a held-out run unless the measurement is pinned and this run matches the pin: the
     files, the environment, the database `db`, the model server whose interpreter is
-    `server_python`, and the generation `settings` of a run of this `mode` ("pipeline" or
-    "gen_only"). Any other gold file is not checked."""
+    `server_python`, the weights in the job's download cache `model_cache`, and the generation
+    `settings` of a run of this `mode` ("pipeline" or "gen_only"). Any other gold file is not
+    checked."""
     if not Path(path).name.startswith("heldout"):
         return
     pin = active_pin(pins)
@@ -353,6 +384,7 @@ def require_pinned(
     _refuse(
         pin,
         problems(pin, repo, db=db, server=run_env.server_versions(server_python))
+        + revision_problems(pin["models"], settings.get("model"), model_cache)
         + override_problems(os.environ if environ is None else environ)
         + settings_problems(pin["settings"], mode, settings),
     )
@@ -461,6 +493,9 @@ def main(argv: list[str] | None = None) -> int:
         print("\nGeneration settings a held-out run must have:\n")
         for mode, declared in SETTINGS.items():
             print(f"  {mode}: {declared}")
+        print("\nThe revision of each model's weights:\n")
+        for model, revision in MODEL_REVISIONS.items():
+            print(f"  {model}\n      {revision}")
         print(
             "\nFrom the cluster's record when the pin is applied: the database's hash, and the "
             f"model server's {', '.join(run_env.SERVER_PACKAGES)} (setup_env.sh installs vllm "

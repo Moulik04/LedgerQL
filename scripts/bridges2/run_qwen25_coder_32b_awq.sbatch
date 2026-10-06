@@ -20,4 +20,7 @@ export PROFILES=""
 export ENTITY_LINK_AB=""
 export MAX_MODEL_LEN=8192
 export VLLM_EXTRA_ARGS=""
+# The commit of the model's repository to download: main as it has stood since before the first
+# cluster run (2026-09-14), so the weights every earlier run of this job was served.
+export MODEL_REVISION=1ed0a6145da0ce550c628e8e8b678f51e695995d
 bash scripts/bridges2/run_model_eval.sh Qwen/Qwen2.5-Coder-32B-Instruct-AWQ 1

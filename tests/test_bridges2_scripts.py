@@ -488,6 +488,7 @@ def test_a_pinned_job_file_sets_every_variable_the_job_body_would_otherwise_inhe
         "VLLM_EXTRA_ARGS",
         "PROFILES",
         "ENTITY_LINK_AB",
+        "MODEL_REVISION",
     }
     text = (SCRIPTS / job).read_text()
     for name in sorted(job_level):
@@ -576,3 +577,30 @@ def test_setup_stops_on_an_environment_that_holds_another_version(tmp_path):
     done, uv_log = _run_vllm_block(tmp_path, installed="0.30.1")
     assert done.returncode == 1 and uv_log == ""  # it says so and changes nothing
     assert "0.30.1" in done.stderr and "0.29.0" in done.stderr
+
+
+def test_the_server_is_started_on_the_revision_the_job_file_names_for_weights_and_tokenizer():
+    text = _job_text()
+    start = text.index('"$VLLM_PYTHON/vllm" serve "$REPO_ID"')
+    serve = text[start : text.index("&\n", start)]
+    # vLLM takes the two separately, and each defaults to the repository's main
+    assert '--revision "${MODEL_REVISION:-main}"' in serve
+    assert '--tokenizer-revision "${MODEL_REVISION:-main}"' in serve
+
+
+def test_every_scored_run_tells_the_eval_where_the_weights_were_downloaded():
+    # a held-out run is refused unless the one snapshot in the job's cache is the pinned revision
+    text = _job_text()
+    assert 'export HF_HOME="$LOCAL/hf_cache"' in text
+    scored = [c.split("\n\n")[0] for c in text.split("uv run python ")[1:]]
+    scored = [c for c in scored if "--gold" in c]
+    assert len(scored) == 3
+    for command in scored:
+        assert '--model-cache "$HF_HOME"' in command, command
+
+
+def test_run_meta_records_the_revision_asked_for_and_the_snapshots_downloaded():
+    text = _job_text()
+    assert '"model_revision": "${MODEL_REVISION:-main}"' in text
+    assert '"model_snapshots": "$SNAPSHOTS"' in text
+    assert "SNAPSHOTS=" in text[: text.index('cat > "$OUT/run_meta.json"')]
