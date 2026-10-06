@@ -19,6 +19,7 @@ import argparse
 import json
 from pathlib import Path
 
+from evals import measurement_pin
 from evals.rescore_v2 import DEFAULT_DB, LABELS, VERSIONS, Gold, Pool, score_bakeoff
 
 MODEL = "qwen25_coder_7b"
@@ -176,6 +177,7 @@ def main(argv: list[str] | None = None) -> int:
         "--pack-to", type=Path, help="where --run-dir writes the compact tracked evidence"
     )
     args = ap.parse_args(argv)
+    measurement_pin.require_unchanged(args.db)
     if args.run_dir:
         if not args.model:
             ap.error("--run-dir needs --model")

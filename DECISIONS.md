@@ -3497,3 +3497,106 @@ list, with the offline-commands proposal; whether the server versions, the datab
 settings variables are enforced or only recorded; on the cluster, the three commands at the end of
 `docs/bridges2.md`'s new section. Then the pin, the freeze of the set, gen-only P1/P2/P3, and H3 and the
 32B once each.
+
+## 2026-10-05 (evening) — The pin list approved, the offline commands held to the pin, and the database, the settings and the server enforced
+
+MJ's decisions on the last entry's open questions. Nothing under `ledgerql/` changed and
+`heldout_config.json` was not touched: H3 and the freeze stand. **No pin is recorded yet**: it waits
+for the blind labels and their adjudication, as before.
+
+### 1. The list is approved, with the three additions
+
+The 40 files of the draft, including the three that were not in MJ's own list: `gen_prompts` (the
+prompts of the generation-only runs), `docs/schema.md`, and the ten job scripts. The prompts and the
+job scripts are in because they decide what a model is shown and how it is served.
+
+**`docs/schema.md` was part of the pipeline all along.** `ledgerql/schema_index.py` reads it into
+every generation prompt, and it sits outside `ledgerql/`, so no configuration's tree hash ever
+covered it. Checked: it is the same file (git blob `de17a780`, SHA-256 `903a117f...`) at the commits
+of H1 (`97c6994`), H2 (`590188e`), H3 (`458478a`) and at HEAD, and it last changed in `3365375`
+(2026-09-03), before H1 was declared. So every run made under any H read the same schema text, and
+no figure is affected. From the pin on, a change to it stops a held-out run. H3 is not amended: the
+measurement pin is where it is fixed, and protocol 6a now says it was pipeline input from the start.
+
+### 2. The offline figure commands refuse on a tree that differs from the pin
+
+Figure 1 and the re-scored figures are computed on the laptop, after a run, by commands that are
+given records and cannot tell a held-out run from a development one. Once a pin is recorded, each
+of them opens with `measurement_pin.require_unchanged` and stops if a pinned file, `uv.lock`, the
+installed `duckdb` or `sqlglot`, or the database it was given differs from the pin. The files are
+hashed as they are on disk, so an edit that was never committed is refused, which the test in CI
+could not do. Until a pin exists nothing is held and development work is not stopped.
+
+The commands: `audit_vs_verify`, `summarize_run`, `entity_link_eval`, `rescore_v2`, `passn_scoring`,
+`signal_precheck`, `pipeline_acceptance` and `pairwise_agreement` (the last opens no database). A
+test requires every pinned module with a command line to be one of these, a live entry point, or
+listed with the reason it is neither. Ten are listed: the pin's, the configuration's and the
+environment record's own commands, the held-out gold check, the two gold builders, the evidence
+packer, the label-sheet tooling, and two counterfactuals that read only development gold v1.
+
+### 3. Enforced, not only recorded
+
+The rule (MJ): whatever can change an output is enforced; record-only is for what legitimately varies
+between runs (job id, node, port, time). A held-out run is now refused on a difference in any of:
+
+- **The database.** The pin holds the SHA-256 of the file. It is taken from the cluster's own record,
+  and the pin is refused unless the laptop's `data/ledgerql.duckdb` has the same hash, because the
+  runs happen on one copy and the offline figures are computed against the other. Every command that
+  reads the database opens it read-only (only `ledgerql.data.build` writes), so a run does not change
+  the file it is checked against.
+- **The model server.** The pin holds `vllm`, `transformers` and `torch` from the cluster's record.
+  Each run reads them again, through `--server-python`, from the environment `vllm serve` is started
+  from, and stops on any difference or if they cannot be read. `setup_env.sh` now installs
+  `vllm==0.29.0` and stops if an existing environment holds another version. **0.29.0 is read from
+  job 47412929's server log and is not yet confirmed on the cluster**; MJ confirms it with the three
+  commands in `docs/bridges2.md`, and the pin is refused if the cluster's vLLM is not the version the
+  script names. Naming vLLM does not fix `torch` or `transformers` on a rebuild; the run's check does.
+- **The generation settings.** The declaration is `SETTINGS` in `evals/measurement_pin.py` and is
+  copied into the pin: for the pipeline, the model (H3's two), the vLLM backend, 5 candidates,
+  candidate temperature 0.7, answer temperature 0.2, seed 42, linker on; for the generation-only
+  runs, the three models of the pinned job files, N=5, temperature 0.7, `max_tokens` 2048, seed 42.
+  Tests hold it to H3 where H3 speaks, to the code's defaults in a shell that exports nothing, and to
+  the models the pinned job files serve. Each run reports what it resolved and is refused unless it
+  is equal. Separately, **any variable that overrides a default stops a held-out run if it is set at
+  all** (`OLLAMA_SEED`, both temperatures, the row limit, both timeouts, `LEDGERQL_DB_PATH`), so the
+  row limit and the timeouts, which the declaration does not name, cannot be changed either.
+  `LEDGERQL_ENTITY_LINK` is the exception: it must be `1`, which H3's own check already required.
+- **How the model is served.** The pipeline sends no token limit, so a pipeline reply is bounded by
+  the server's context length, and the two pipeline job files took that, the extra server flags and
+  the mode from whatever the submitting shell exported (`submit.sh` passes the whole environment on).
+  Every pinned job file now sets all five such variables itself, to the job body's defaults (8192, no
+  extra flags; job 47412929's log shows `max_seq_len=8192`), and a test fails if a pinned job file
+  inherits one. `run_meta.json` records the context length and the flags. Left to the submission, on
+  purpose: `GOLD_FILE` and `SMOKE_ONLY`.
+
+Applying the pin now takes the cluster's record (`--cluster-env`, the output of the third command in
+`docs/bridges2.md`) and keeps it whole inside the pin.
+
+### 4. A correction to the last entry: the server's torch version is not known
+
+The last entry and `docs/bridges2.md` said job 47412929 ran "vLLM 0.29.0 on torch 2.11.0+cu126" and
+that no log states the `transformers` version. The vLLM version is right: the server log states it
+twice. **The torch figure is not the server's.** It is in the job's `.err` file, in the banner that
+`module load pytorch/26.05-2.11-py3` prints, which lists the module's own packages (and says
+`transformers 5.7.0`). The vLLM environment is built on a standalone interpreter and holds its own
+`torch` and `transformers`; the server log names neither. So today only the vLLM version of the
+development run is known from the files. `docs/bridges2.md` is corrected. The pin does not depend on
+that line: it takes all three from the cluster's record.
+
+### 5. Found and left open: the weights' revision
+
+Every job downloads its model from Hugging Face at `revision=main` (the server log shows it), into
+scratch that is wiped after the job. Which commit of each model repository was served is neither
+pinned nor recorded, so two runs weeks apart could be served different weights with no trace here.
+This can change outputs and is not covered by anything above. Not built: the revision the development
+runs used cannot be recovered, and choosing one is MJ's decision. Stated in protocol 6a.
+
+### 6. No more machinery
+
+MJ: with this, the pins, freezes and checks are complete, and the held-out set is the only thing that
+moves the project. The README carries one status line at the top saying the held-out figures are
+pending. Tests: 1,040 before, 1,093 after; the new ones were each seen to fail first.
+
+**Owed, in order.** MJ: the 14 blind labels and the adjudication; the 80 held-out questions; on the
+cluster, the three commands, and the record they print. Then the pin (`apply --cluster-env`), the
+freeze of the set, gen-only P1/P2/P3, and H3 and the 32B once each.

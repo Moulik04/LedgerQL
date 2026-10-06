@@ -21,7 +21,7 @@ import argparse
 import json
 from pathlib import Path
 
-from evals import number_audit, pipeline_acceptance, run_eval
+from evals import measurement_pin, number_audit, pipeline_acceptance, run_eval
 from ledgerql import verify
 
 RUNS = {
@@ -395,6 +395,7 @@ def main(argv: list[str] | None = None) -> int:
         help="a per-case jsonl to audit instead of the committed dev runs (repeatable)",
     )
     args = ap.parse_args(argv)
+    measurement_pin.require_unchanged(args.db)
     runs = dict(r.split("=", 1) for r in args.run) or None
     rows, totals = compare_runs(args.db, runs)
     text = render(rows, totals, plant_table(), honest_table(), blocks_by_run(args.db, runs))

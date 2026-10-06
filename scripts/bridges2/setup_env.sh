@@ -80,12 +80,25 @@ fi
 (cd "$REPO_DIR" && uv sync --all-groups)
 
 # --- vLLM's own separate venv ---
+# The version is named: it is the one the development runs were served by (job 47412929's server
+# log), and a held-out run is refused on any other (evals/measurement_pin.py). Naming it here
+# fixes vllm only. torch and transformers are whatever vllm's requirements resolve to on the day
+# of the install, so a rebuilt environment can still differ; the run's own check is what catches
+# that. Do not rebuild this environment between the held-out runs.
+VLLM_VERSION=0.29.0
 if [ -x "$VLLM_ENV_DIR/.venv/bin/vllm" ]; then
-    echo "vLLM already installed at $VLLM_ENV_DIR/.venv -- skipping."
+    HAVE="$("$VLLM_ENV_DIR/.venv/bin/python" -c 'import importlib.metadata as m; print(m.version("vllm"))')"
+    if [ "$HAVE" != "$VLLM_VERSION" ]; then
+        echo "STOP: $VLLM_ENV_DIR/.venv holds vllm $HAVE and this script names $VLLM_VERSION." >&2
+        echo "Nothing was changed. A held-out run on this environment would be refused." >&2
+        echo "To rebuild it on the named version: rm -rf $VLLM_ENV_DIR, then re-run this script." >&2
+        exit 1
+    fi
+    echo "vLLM $HAVE already installed at $VLLM_ENV_DIR/.venv -- skipping."
 else
-    echo "Creating a separate venv for vLLM at $VLLM_ENV_DIR..."
+    echo "Creating a separate venv for vLLM $VLLM_VERSION at $VLLM_ENV_DIR..."
     mkdir -p "$VLLM_ENV_DIR"
-    (cd "$VLLM_ENV_DIR" && uv venv --python "$PY_INTERP" && uv pip install --python .venv/bin/python vllm "huggingface_hub[cli]")
+    (cd "$VLLM_ENV_DIR" && uv venv --python "$PY_INTERP" && uv pip install --python .venv/bin/python "vllm==$VLLM_VERSION" "huggingface_hub[cli]")
 fi
 
 echo "vLLM version: $("$VLLM_ENV_DIR/.venv/bin/vllm" --version)"

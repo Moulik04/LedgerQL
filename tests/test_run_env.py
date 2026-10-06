@@ -65,3 +65,15 @@ def test_the_record_is_one_json_object_with_settings_as_set_or_unset(monkeypatch
     assert out["uv_lock_sha256"] == E.sha256_file(E.LOCK_PATH) and len(out["uv_lock_sha256"]) == 64
     assert out["database_sha256"].startswith("ba7816bf")
     assert set(out["server"]) >= {"vllm", "transformers", "torch"}
+
+
+def test_every_variable_that_overrides_a_default_the_figures_depend_on_is_listed():
+    # the variables `ledgerql/` and the offline scorer read with a default, the host and the
+    # model apart (the job gives those to the run itself)
+    import re
+
+    read = set()
+    for path in [*(E.REPO / "ledgerql").glob("*.py"), *(E.REPO / "evals").glob("*.py")]:
+        read |= set(re.findall(r'os\.environ\.get\(\s*"([A-Z_]+)"', path.read_text()))
+    given_to_the_run = {"OLLAMA_HOST", "VLLM_HOST", "OLLAMA_MODEL", "LLM_BACKEND"}
+    assert read - given_to_the_run == set(E.SETTINGS)

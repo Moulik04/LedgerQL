@@ -21,6 +21,8 @@ set -euo pipefail
 cd "$SLURM_SUBMIT_DIR"
 export EVAL_MODE=gen_only
 export PROFILES="current xiyan omnisql"
+# Set, not inherited: a value left exported in the submitting shell would add linked runs.
+export ENTITY_LINK_AB=""
 # Context length, explicit: the longest prompt over all 103 cases and 3 profiles is
 # 2253 tokens (omnisql, measured with these models' tokenizers), plus 2048 generated
 # tokens (evals/gen_only_eval.py DEFAULT_MAX_TOKENS) = 4301; 5120 leaves headroom.

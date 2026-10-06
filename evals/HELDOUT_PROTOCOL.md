@@ -197,6 +197,10 @@ not grounded by one group of an identifier in the result or the SQL. Auditor and
 Amended 2026-10-05 (later), at MJ's request, before any held-out run: what the figures depend on
 outside `ledgerql/` (the measurement code and the environment) is pinned separately from H. H3 is
 not amended and `heldout_config.json` is not touched.
+Amended 2026-10-05 (evening), by MJ's decisions on that draft, before the set is frozen and before
+any held-out run: the pinned list is approved; the offline figure commands are held to the pin; and
+the database, the generation settings and the model server's versions are enforced, not only
+recorded. H3 is not amended.
 
 - **The headline configuration is H3, and it is final** (it supersedes H2; all three are in
   `evals/heldout_config.json`, which is append-only). H3 is H2 with one change under `ledgerql/`, in
@@ -240,9 +244,13 @@ not amended and `heldout_config.json` is not touched.
     the configuration and pin code), plus `docs/schema.md`, the schema text that `ledgerql/` puts
     in every generation prompt and that H3's tree hash does not cover, plus the job scripts. A test
     fails if such a module is missing from the list, and every other `evals` module is listed with
-    the reason it is not pinned. **The list is a draft until MJ approves it, and the pin is
-    recorded only after MJ's blind labels are in and any grader disagreement is adjudicated**,
-    since that may change the grader.
+    the reason it is not pinned. **MJ approved the list on 2026-10-05** (40 files, with the three
+    additions beyond MJ's own list: the generation-only prompts, `docs/schema.md` and the ten job
+    scripts). **The pin is recorded only after MJ's blind labels are in and any grader
+    disagreement is adjudicated**, since that may change the grader. `docs/schema.md` was part of
+    the pipeline all along: `ledgerql/` reads it into every generation prompt, and it has been the
+    same file (git blob `de17a780`) at the commits of H1, H2 and H3 and since, so every run made
+    under any of them read the same schema text.
   - **The environment pin**, in the same record: the SHA-256 of `uv.lock`. A held-out run is refused
     if `uv.lock` differs from it, **or if the installed `duckdb` or `sqlglot` is not the version
     that `uv.lock` names**, since a matching file proves nothing about an environment that was not
@@ -251,13 +259,29 @@ not amended and `heldout_config.json` is not touched.
     pinned file, `uv.lock` and those two installed versions match it. Until a pin is recorded every
     held-out run is refused. A change after the pin needs a new pin (`M2`), declared before any
     held-out run, as a pipeline change needs a new configuration; the old one is kept.
-  - **Recorded, not enforced:** every run's `run_meta.json` carries the resolved `duckdb` and
-    `sqlglot`, `uv.lock`'s hash, the database file's hash, the settings variables as set or unset,
-    and the model server's `vllm`, `transformers` and `torch`. The server environment on the
-    cluster is installed without a lock file (`docs/bridges2.md`), so there is nothing to refuse
-    against: its versions are read from it by each job, and each held-out run's entry in
-    `evals/heldout_runs.md` states them. If the H3 run and the 32B run report different server
-    versions, that is stated beside the agree-policy table.
+  - **Whatever can change an output is enforced, not only recorded (MJ, 2026-10-05).** The pin
+    also holds, and a held-out run is refused on any difference in:
+    - **the database**, by the SHA-256 of the file, taken from the cluster's own record and
+      required to equal the laptop's copy, which the offline figures are computed against;
+    - **the model server's `vllm`, `transformers` and `torch`**, taken from the same record and
+      read again by each run from the environment the server is started from. `setup_env.sh`
+      names the vLLM version the development runs were served by (0.29.0, job 47412929's server
+      log; MJ confirms it on the cluster before the pin);
+    - **the generation settings**: the model, the backend, the seed, the candidate and answer
+      temperatures, the number of candidates, the generation-only token limit and the linker must
+      equal the declaration (`SETTINGS` in `evals/measurement_pin.py`, which restates H3 where H3
+      speaks; a test holds it to H3). A variable that overrides a pipeline default stops the run
+      if it is set at all, so nothing depends on what the submitting shell exported. The context
+      length and the server flags are set in each pinned job file and inherited by none.
+  - **The offline figure commands are held to the pin too.** Figure 1 and the re-scored figures
+    are computed on the laptop from retrieved records, by commands that cannot tell a held-out
+    run from a development one. Once a pin is recorded, each of them refuses to run if a pinned
+    file, `uv.lock`, an installed package or the database differs from it. The files are hashed
+    as they are in the working tree, so an edit that was never committed is refused.
+  - **Recorded only:** what legitimately varies between runs (the job id, the node, the port, the
+    time), in each run's `run_meta.json`, with everything above as that run resolved it.
+  - **Not covered, stated:** each job downloads its model at the repository's `main` revision,
+    which is neither pinned nor recorded (`docs/bridges2.md`).
 - **Configuration H2** (superseded by H3 on 2026-10-04; kept as written). H2 supersedes H1; both
   are in `evals/heldout_config.json`, which is append-only. H2 is H1 with two changes under `ledgerql/`, declared together as one
   configuration on 2026-10-03: the verifier (`verify.py`) accepts true values in the forms it used
@@ -467,8 +491,10 @@ configuration is run once for its confirmatory comparison.
    2026-10-05; H3 is not amended). A named file list and the hash of `uv.lock`, in
    `evals/measurement_pin.json`; a held-out run is refused unless a pin is recorded and the files,
    `uv.lock` and the installed `duckdb` and `sqlglot` match it; every run records its resolved
-   versions, the model server's included. **Owed:** MJ's approval of the list (drafted 2026-10-05,
-   `python -m evals.measurement_pin draft`), then the pin itself, recorded after the blind labels
-   are in and any grader disagreement is adjudicated.
+   versions, the model server's included. MJ approved the list on 2026-10-05 and decided that the
+   database, the generation settings and the server's versions are enforced, and that the offline
+   figure commands refuse on a tree that differs from the pin. **Owed:** the cluster's record
+   (`docs/bridges2.md`), then the pin itself, recorded after the blind labels are in and any
+   grader disagreement is adjudicated.
 13. Still open: whether an `informal` share of one quarter of the mention styles is right (3.2),
    and the four confirmatory comparisons in 6.

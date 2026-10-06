@@ -30,7 +30,7 @@ from pathlib import Path
 
 import duckdb
 
-from evals import bakeoff_evidence, must_state, offline_exec
+from evals import bakeoff_evidence, measurement_pin, must_state, offline_exec
 from evals.passn_scoring import load_jsonl
 from evals.scoring import case_match, load_gold
 from ledgerql import refusal as refusal_module
@@ -642,6 +642,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     ap.add_argument("--judge-model", default="llama3.1:8b")
     args = ap.parse_args(argv)
+    measurement_pin.require_unchanged(args.db)
     judge = must_state.OllamaJudge(args.judge_model) if args.judge else None
     if args.part == "report":
         text = build_report(args.db, args.reports_dir, judge)

@@ -16,7 +16,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from evals import must_state, run_eval, summarize_run
+from evals import measurement_pin, must_state, run_eval, summarize_run
 from evals import rescore_v2 as R
 
 STATES = ("ANSWER", "ANSWER_WITH_ASSUMPTION", "ABSTAIN")
@@ -146,6 +146,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--judge-model", default="llama3.1:8b")
     ap.add_argument("--write", type=Path)
     args = ap.parse_args(argv)
+    measurement_pin.require_unchanged(args.db)
     judge = must_state.OllamaJudge(args.judge_model) if args.judge else None
     out = []
     for spec, base in zip(args.runs, args.baselines, strict=True):

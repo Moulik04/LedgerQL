@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from collections import defaultdict
 from datetime import date
@@ -649,6 +650,21 @@ def write_reports(summary: dict, reports_dir: Path) -> tuple[Path, Path]:
     return md_path, jsonl_path
 
 
+def heldout_settings() -> dict:
+    """The generation settings this process runs with, as the pipeline's modules resolved them
+    from the environment. A held-out run is refused unless they are the declared ones
+    (evals/measurement_pin.py)."""
+    return {
+        "model": generate_module.OLLAMA_MODEL,
+        "backend": os.environ.get("LLM_BACKEND", "ollama"),
+        "candidates": pipeline.N_CANDIDATES,
+        "consensus_temperature": generate_module.OLLAMA_CONSENSUS_TEMPERATURE,
+        "temperature": answer_module.OLLAMA_TEMPERATURE,
+        "seed": generate_module.OLLAMA_SEED,
+        "entity_link": pipeline.ENTITY_LINK,
+    }
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--gold", default="evals/gold.jsonl")
@@ -662,6 +678,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     ap.add_argument("--cases", help="comma-separated case ids; the summary then covers only those")
     ap.add_argument(
+        "--server-python",
+        help="the interpreter of the model server's environment; a held-out run is refused "
+        "unless the versions it reports are the pinned ones",
+    )
+    ap.add_argument(
         "--judge-model",
         help="a local Ollama model that decides the judge-primary answer_must_state items",
     )
@@ -671,7 +692,14 @@ def main(argv: list[str] | None = None) -> int:
     heldout_config.require_declared(
         args.gold
     )  # ... and unless the code is the declared configuration
-    measurement_pin.require_pinned(args.gold)  # ... and the scoring code and environment are pinned
+    # ... and the measurement, the environment, the database, the server and the settings are pinned
+    measurement_pin.require_pinned(
+        args.gold,
+        mode="pipeline",
+        settings=heldout_settings(),
+        db=args.db,
+        server_python=args.server_python,
+    )
     judge = must_state.OllamaJudge(args.judge_model) if args.judge_model else None
     only = set(args.cases.split(",")) if args.cases else None
     summary = run(Path(args.gold), args.db, judge=judge, only=only)

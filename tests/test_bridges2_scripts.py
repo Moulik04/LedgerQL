@@ -445,3 +445,134 @@ def test_run_meta_is_valid_json_and_carries_the_environment_the_job_read():
     assert meta["environment"]["server"]["vllm"] == "0.29.0"
     assert meta["environment"]["packages"]["duckdb"] == "1.5.5"
     assert meta["model"] == "org/model" and meta["tensor_parallel_size"] == 1
+
+
+# --- nothing a held-out run depends on is left to the submitting shell or to "whatever is current"
+
+PINNED_JOBS = sorted(
+    p.name for p in SCRIPTS.glob("*.sbatch") if p.name != "run_omnisql_32b_genonly.sbatch"
+)
+# The variables the job body reads with a default that a job file does not have to set, and why.
+NOT_SET_BY_THE_JOB_FILE = {
+    "GOLD_FILE": "the submission's choice: which gold the run is scored against",
+    "SMOKE_ONLY": "the submission's choice: stop after the smoke test",
+    "LEDGERQL_ENTITY_LINK": "checked against configuration H by the run itself",
+    "EXPECTED_COMMIT": "given by submit.sh",
+    "LOCAL": "set by the cluster",
+    "SLURM_JOB_ID": "set by the cluster",
+    "PORT": "picked by the job",
+    "smoke_status": "set by the job",
+}
+
+
+def test_the_pinned_job_files_are_the_ones_the_measurement_pin_lists():
+    from evals import measurement_pin
+
+    assert PINNED_JOBS == sorted(
+        Path(rel).name for rel in measurement_pin.PINNED if rel.endswith(".sbatch")
+    )
+
+
+@pytest.mark.parametrize("job", PINNED_JOBS)
+def test_a_pinned_job_file_sets_every_variable_the_job_body_would_otherwise_inherit(job):
+    # submit.sh exports the submitting shell's whole environment to the job. A variable the job
+    # body reads with a default (the context length, extra server flags, the mode) and the job file
+    # does not set is whatever that shell happened to hold.
+    import re
+
+    read = set(re.findall(r"\$\{([A-Za-z_]+):[-?]", _job_text()))
+    job_level = read - set(NOT_SET_BY_THE_JOB_FILE)
+    assert job_level == {
+        "EVAL_MODE",
+        "MAX_MODEL_LEN",
+        "VLLM_EXTRA_ARGS",
+        "PROFILES",
+        "ENTITY_LINK_AB",
+    }
+    text = (SCRIPTS / job).read_text()
+    for name in sorted(job_level):
+        lines = [x for x in text.splitlines() if x.startswith(f"export {name}=")]
+        assert len(lines) == 1, (job, name)
+        assert "$" not in lines[0], (job, name)  # a literal, never the inherited value
+
+
+@pytest.mark.parametrize(
+    "job", ["run_qwen3_coder_30b_fp16.sbatch", "run_qwen25_coder_32b_awq.sbatch"]
+)
+def test_the_pipeline_jobs_state_the_job_bodys_defaults_in_the_file(job):
+    assert _exported(job, "EVAL_MODE") == "pipeline"
+    assert _exported(job, "MAX_MODEL_LEN") == "8192"  # the job body's default
+    assert _exported(job, "VLLM_EXTRA_ARGS") == ""
+    assert _exported(job, "PROFILES") == "" and _exported(job, "ENTITY_LINK_AB") == ""
+
+
+def test_run_meta_records_how_the_model_was_served():
+    text = _job_text()
+    assert '"max_model_len": "${MAX_MODEL_LEN:-8192}"' in text
+    assert '"vllm_extra_args": "${VLLM_EXTRA_ARGS:-}"' in text
+
+
+def test_every_scored_run_tells_the_eval_which_interpreter_serves_the_model():
+    # a held-out run is refused unless the server's versions are the pinned ones, and the eval
+    # reads them through the interpreter of the environment that `vllm serve` was started from
+    text = _job_text()
+    assert 'VLLM_PYTHON="$ROOT/vllm-env/.venv/bin"' in text and '"$VLLM_PYTHON/vllm" serve' in text
+    commands = text.split("uv run python ")[1:]
+    scored = [
+        c[: c.index("\n    fi") if "\n    fi" in c else None]
+        for c in commands
+        if "--gold" in c.split("\n\n")[0]
+    ]
+    assert len(scored) == 3  # gen-only, gen-only linked, the pipeline
+    for command in scored:
+        invocation = command.split("\n\n")[0]
+        assert '--server-python "$VLLM_PYTHON/python"' in invocation, invocation
+
+
+def _vllm_block() -> str:
+    text = (SCRIPTS / "setup_env.sh").read_text()
+    start = text.index("# --- vLLM's own separate venv ---")
+    return text[start : text.index('echo "vLLM version:', start)]
+
+
+def _run_vllm_block(tmp_path, installed: str | None):
+    """The vLLM part of setup_env.sh as written, against a fake `uv` that records its arguments
+    and, if `installed` is given, an existing environment holding that version."""
+    env_dir = tmp_path / "vllm-env"
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    (bin_dir / "uv").write_text(f'#!/bin/bash\necho "$@" >> {tmp_path}/uv.log\n')
+    (bin_dir / "uv").chmod(0o755)
+    if installed is not None:
+        venv_bin = env_dir / ".venv/bin"
+        venv_bin.mkdir(parents=True)
+        for name, body in (("vllm", "exit 0"), ("python", f"echo {installed}")):
+            (venv_bin / name).write_text(f"#!/bin/bash\n{body}\n")
+            (venv_bin / name).chmod(0o755)
+    script = f"set -euo pipefail\nVLLM_ENV_DIR={env_dir}\nPY_INTERP=python3\n{_vllm_block()}"
+    done = subprocess.run(
+        ["bash", "-c", script],
+        capture_output=True,
+        text=True,
+        env={**ENV, "PATH": f"{bin_dir}:{ENV['PATH']}"},
+    )
+    log = tmp_path / "uv.log"
+    return done, log.read_text() if log.exists() else ""
+
+
+def test_setup_installs_the_named_vllm_version_not_whatever_is_current(tmp_path):
+    done, uv_log = _run_vllm_block(tmp_path, installed=None)
+    assert done.returncode == 0, done.stderr
+    assert "pip install" in uv_log and "vllm==0.29.0" in uv_log
+
+
+def test_setup_leaves_an_environment_that_holds_the_named_version_alone(tmp_path):
+    done, uv_log = _run_vllm_block(tmp_path, installed="0.29.0")
+    assert done.returncode == 0 and uv_log == ""
+    assert "0.29.0" in done.stdout
+
+
+def test_setup_stops_on_an_environment_that_holds_another_version(tmp_path):
+    done, uv_log = _run_vllm_block(tmp_path, installed="0.30.1")
+    assert done.returncode == 1 and uv_log == ""  # it says so and changes nothing
+    assert "0.30.1" in done.stderr and "0.29.0" in done.stderr

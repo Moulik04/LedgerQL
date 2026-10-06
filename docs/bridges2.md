@@ -419,17 +419,25 @@ There are two environments, built differently.
 |---|---|---|
 | where | `~/ledgerql-bridges2/ledgerql/.venv` | `~/ledgerql-bridges2/vllm-env/.venv` |
 | holds | `duckdb`, `sqlglot`, `httpx`: everything `evals/` and `ledgerql/` import | `vllm` and what it pulls in (`torch`, `transformers`), `huggingface_hub` |
-| built by | `setup_env.sh`: `uv venv --python <3.13.7>` then `uv sync --all-groups` | `setup_env.sh`: `uv pip install vllm "huggingface_hub[cli]"` |
-| **from a lock file?** | **yes, `uv.lock`.** Every command a job runs goes through `uv run`, which brings the environment to `uv.lock` before it runs | **no.** No version is named and nothing is locked: it holds whatever was current the first time `setup_env.sh` ran. The script skips the install when the venv exists, so it changes only if the venv is rebuilt |
+| built by | `setup_env.sh`: `uv venv --python <3.13.7>` then `uv sync --all-groups` | `setup_env.sh`: `uv pip install "vllm==0.29.0" "huggingface_hub[cli]"` |
+| **from a lock file?** | **yes, `uv.lock`.** Every command a job runs goes through `uv run`, which brings the environment to `uv.lock` before it runs | **no.** Since 2026-10-05 `setup_env.sh` names the vLLM version (`VLLM_VERSION`) and stops if the existing venv holds another. Nothing else is locked: `torch` and `transformers` are whatever vLLM's requirements resolved to on the day of the install. The script skips the install when the venv exists, so it changes only if the venv is rebuilt |
 | Python | 3.13.7, the interpreter of `module load pytorch/26.05-2.11-py3` (the laptop uses 3.12; `uv.lock` names the same package versions for both) | the same interpreter |
 
 Also outside the commit: the modules a job loads (`pytorch/26.05-2.11-py3`, `cuda-h100/13.3.1`), and
 `data/ledgerql.duckdb`, which is gitignored and copied to the cluster by hand.
 
-**What is known about the server environment today.** One retrieved server log states it: job 47412929
-(2026-10-04, the 30B dev run under H2) ran **vLLM 0.29.0** on **torch 2.11.0+cu126**. No retrieved log
-states the `transformers` version, and earlier jobs' server logs were not retrieved, so whether every
-earlier run used the same vLLM is not known from the files.
+**What is known about the server environment today.** One retrieved server log states the vLLM
+version: job 47412929 (2026-10-04, the 30B dev run under H2) ran **vLLM 0.29.0**
+(`vllm_server_47412929.out`, the banner and the engine line). Earlier jobs' server logs were not
+retrieved, so whether every earlier run used the same vLLM is not known from the files.
+
+**Corrected 2026-10-05: the server's `torch` and `transformers` are not known from any retrieved
+file.** This section said the job ran "on torch 2.11.0+cu126". That figure is from the job's `.err`
+file, in the banner `module load pytorch/26.05-2.11-py3` prints, and the banner lists the *module's*
+packages (it also says `transformers 5.7.0`). The vLLM venv is built on a standalone interpreter
+(`PY_INTERP` in `setup_env.sh`) and holds its own `torch` and `transformers`, installed by `uv pip
+install vllm`. The server log names neither. They are read from the venv itself by the command at the
+end of this section.
 
 **What every job records now** (`run_meta.json`, key `environment`, written by `python -m evals.run_env`
 before any GPU work):
@@ -439,35 +447,65 @@ before any GPU work):
 - `server`: `vllm`, `transformers` and `torch`, read by the server environment's own interpreter;
 - `settings`: the variables that override a pipeline default (`OLLAMA_SEED`, `OLLAMA_TEMPERATURE`,
   `OLLAMA_CONSENSUS_TEMPERATURE`, `LEDGERQL_ENTITY_LINK`, `LEDGERQL_ROW_LIMIT`,
-  `LEDGERQL_QUERY_TIMEOUT_SECONDS`, `LEDGERQL_DB_PATH`), as set or unset. The job inherits the
-  submitting shell's environment, so one of these left set would change a run without changing a file.
+  `LEDGERQL_QUERY_TIMEOUT_SECONDS`, `LEDGERQL_OFFLINE_TIMEOUT_SECONDS`, `LEDGERQL_DB_PATH`), as set
+  or unset. The job inherits the submitting shell's environment, so one of these left set would
+  change a run without changing a file.
+
+Beside it, `run_meta.json` carries how the model was served: `max_model_len` and `vllm_extra_args`.
 
 Reading never stops a job; what cannot be read is recorded as `unavailable`.
 
-**What is enforced, and what is only recorded.**
+**What is enforced, and what is only recorded** (MJ, 2026-10-05: whatever can change an output is
+enforced; only what legitimately varies between runs is recorded and not compared).
 
-| | a held-out run is refused if it differs | recorded in `run_meta.json` |
+| | a held-out run is refused if it differs | where it is fixed |
 |---|---|---|
-| `ledgerql/` | yes (configuration H, tree hash) | commit |
-| scoring, auditor, grader, prompts, `docs/schema.md`, job scripts | yes, once the measurement pin is recorded (`evals/measurement_pin.py`) | commit |
-| `uv.lock` | yes, with the measurement pin | hash |
-| installed `duckdb`, `sqlglot` | yes, with the measurement pin: they must be the versions the pinned `uv.lock` names | versions |
-| `vllm`, `transformers`, `torch` | **no**: there is no lock to compare with | versions |
-| the database file | **no** | hash |
-| the settings variables above | only `LEDGERQL_ENTITY_LINK` (configuration H) | all of them |
+| `ledgerql/` | yes | configuration H3, tree hash |
+| scoring, auditor, grader, prompts, `docs/schema.md`, job scripts | yes | the measurement pin's file hashes (`evals/measurement_pin.py`) |
+| `uv.lock`; installed `duckdb`, `sqlglot` | yes: they must be the versions the pinned `uv.lock` names | the pin |
+| the database file | yes, by SHA-256 | the pin, from the cluster's record; it must also be the laptop's |
+| `vllm`, `transformers`, `torch` of the server | yes: read through `--server-python`, the interpreter of the venv `vllm serve` was started from | the pin, from the cluster's record; `setup_env.sh` names the vLLM version |
+| model, backend, seed, both temperatures, number of candidates, the generation-only token limit, the linker | yes: what the run resolved must equal the declaration | `SETTINGS` in `evals/measurement_pin.py`, which restates H3 where H3 speaks (a test holds it to H3) |
+| the variables that override a default (the list above) | yes: any of them set in the job's environment stops the run, `LEDGERQL_ENTITY_LINK` apart (H3 requires it to be `1`) | nothing may be exported |
+| context length, extra server flags, mode, profiles | by construction: every pinned job file sets them itself, so none is inherited from the submitting shell, and the job files are pinned | the job files |
+| job id, node, port, time | **recorded only** (`run_meta.json`): these vary legitimately | |
 
-Until a measurement pin is recorded, every held-out run is refused.
+The pipeline sends no token limit of its own, so a pipeline reply is bounded by the server's context
+length: `MAX_MODEL_LEN=8192` in the two pipeline job files (job 47412929's log shows
+`max_seq_len=8192`). The generation-only eval sends `max_tokens` 2048, which is compared.
 
-**Before the held-out runs, on the login node:**
+**Not enforced and not recorded: which revision of the weights is served.** Every job downloads its
+model from Hugging Face at `revision=main` (the server log says so). If a model's repository is
+updated between two runs, they are served different weights and no file here shows it. Open, for MJ.
+
+Until a measurement pin is recorded, every held-out run is refused. Once one is, the **offline**
+figure commands (`audit_vs_verify`, `summarize_run`, `entity_link_eval`, `rescore_v2`,
+`passn_scoring`, `signal_precheck`, `pipeline_acceptance`, `pairwise_agreement`) are refused too on a
+tree whose pinned files, `uv.lock`, installed packages or database differ from the pin. They hash the
+working tree, so an uncommitted edit counts.
+
+**Before the pin, on the login node** (the three commands):
 
 ```bash
 cd ~/ledgerql-bridges2/ledgerql && git pull --ff-only origin main
 uv sync --all-groups          # also drops the packages removed from uv.lock on 2026-10-05
 uv run python -m evals.run_env --server-python ~/ledgerql-bridges2/vllm-env/.venv/bin/python \
-    --db data/ledgerql.duckdb
+    --db data/ledgerql.duckdb > ~/cluster_env.json && cat ~/cluster_env.json
 ```
 
 The last command prints what a job would record. `packages` must equal `locked`, and `server` must show
-a version for `vllm`, `transformers` and `torch`. **Do not rebuild `vllm-env` between the H3 run and the
-32B run**: the two are compared in the agree-policy table and nothing but the record would show that
-they ran on different servers.
+a version for `vllm`, `transformers` and `torch`; `vllm` is expected to be 0.29.0. Then, on the laptop,
+once the labels are adjudicated:
+
+```bash
+ssh bridges2 'cat ~/cluster_env.json' > reports/runs/cluster_env.json     # gitignored; the pin keeps a copy
+python -m evals.measurement_pin apply --approved-by MJ --why "..." --cluster-env reports/runs/cluster_env.json
+```
+
+The pin is refused, and says why, if the cluster's `uv.lock` or eval packages are not this tree's, if a
+server version is missing, if the server's vLLM is not the one `setup_env.sh` names, or if the cluster's
+database is not byte-for-byte the laptop's `data/ledgerql.duckdb` (the offline figures are computed
+against the laptop's copy). Commit `evals/measurement_pin.json` and submit from that commit.
+
+**Do not rebuild `vllm-env`, and do not rebuild or replace the database, between the pin and the last
+held-out run**: either changes what the pin compares, and every later run is refused until a new pin.

@@ -15,7 +15,8 @@ actually resolved, as one JSON object for `run_meta.json`:
 - `settings`: the environment variables that override a pipeline default, as set or unset.
 
 Reading the environment never fails a run: what cannot be read is recorded as such. Whether a
-held-out run may proceed is decided elsewhere (`evals/measurement_pin.py`).
+held-out run may proceed is decided elsewhere (`evals/measurement_pin.py`), which compares all of
+this with the pin.
 """
 
 from __future__ import annotations
@@ -44,6 +45,7 @@ SETTINGS = (
     "LEDGERQL_ENTITY_LINK",
     "LEDGERQL_ROW_LIMIT",
     "LEDGERQL_QUERY_TIMEOUT_SECONDS",
+    "LEDGERQL_OFFLINE_TIMEOUT_SECONDS",
     "LEDGERQL_DB_PATH",
 )
 

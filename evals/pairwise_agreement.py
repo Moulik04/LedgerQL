@@ -24,6 +24,7 @@ import argparse
 from itertools import permutations
 from pathlib import Path
 
+from evals import measurement_pin
 from evals.passn_scoring import load_jsonl
 from evals.signal_precheck import (
     auroc,
@@ -81,6 +82,7 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("models", nargs="+", metavar="label=path")
     args = ap.parse_args(argv)
+    measurement_pin.require_unchanged()
     models = {}
     for spec in args.models:
         label, _, path = spec.partition("=")

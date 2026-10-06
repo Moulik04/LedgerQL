@@ -17,7 +17,7 @@ import json
 from collections import Counter
 from pathlib import Path
 
-from evals import must_state, run_eval
+from evals import measurement_pin, must_state, run_eval
 from evals import rescore_v2 as R
 from ledgerql import frame as frame_module
 from ledgerql import refusal as refusal_module
@@ -221,6 +221,7 @@ def main(argv: list[str] | None = None) -> int:
         "--ablate-frame", action="store_true", help="grade the answers with the framing removed"
     )
     args = ap.parse_args(argv)
+    measurement_pin.require_unchanged(args.db)
     judge = must_state.OllamaJudge(args.judge_model) if args.judge else None
     records = load_run(args.run_dir)
     if args.ablate_frame:

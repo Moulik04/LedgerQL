@@ -34,7 +34,7 @@ from pathlib import Path
 
 import duckdb
 
-from evals import offline_exec
+from evals import measurement_pin, offline_exec
 from evals.scoring import case_matches, load_gold
 
 GOLD_PATH = Path(__file__).resolve().parent / "gold.jsonl"
@@ -184,6 +184,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--db", default="data/ledgerql.duckdb")
     ap.add_argument("--gold-version", choices=("v1", "v2"), default="v1")
     args = ap.parse_args(argv)
+    measurement_pin.require_unchanged(args.db)
 
     cases_by_id = load_gold(args.gold_version)
     per_case = load_jsonl(args.report)

@@ -321,7 +321,19 @@ def _print_smoke(records: list[dict]) -> None:
             print(f"    sql: {c['sql'][:400]!r}")
 
 
-def main(argv: list[str] | None = None) -> int:
+def heldout_settings(args) -> dict:
+    """The generation settings of this run. A held-out run is refused unless they are the declared
+    ones (evals/measurement_pin.py)."""
+    return {
+        "model": args.model,
+        "candidates": args.n,
+        "temperature": args.temperature,
+        "max_tokens": args.max_tokens,
+        "seed": generate.OLLAMA_SEED,
+    }
+
+
+def parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--profile", choices=PROFILES, required=True)
     ap.add_argument("--model", default=os.environ.get("OLLAMA_MODEL"))
@@ -345,6 +357,16 @@ def main(argv: list[str] | None = None) -> int:
         default=GOLD_PATH,
         help="gold file (default: gold.jsonl, v1); a held-out file must match its freeze pin",
     )
+    ap.add_argument(
+        "--server-python",
+        help="the interpreter of the model server's environment; a held-out run is refused "
+        "unless the versions it reports are the pinned ones",
+    )
+    return ap
+
+
+def main(argv: list[str] | None = None) -> int:
+    ap = parser()
     args = ap.parse_args(argv)
     if not args.model:
         ap.error("--model (or $OLLAMA_MODEL) is required")
@@ -353,7 +375,14 @@ def main(argv: list[str] | None = None) -> int:
     heldout_config.require_declared(
         args.gold
     )  # ... and unless the code is the declared configuration
-    measurement_pin.require_pinned(args.gold)  # ... and the scoring code and environment are pinned
+    # ... and the measurement, the environment, the database, the server and the settings are pinned
+    measurement_pin.require_pinned(
+        args.gold,
+        mode="gen_only",
+        settings=heldout_settings(args),
+        db=args.db,
+        server_python=args.server_python,
+    )
     gold = load_jsonl(args.gold)
     cases = select_cases(gold, set(args.cases.split(",")) if args.cases else None)
     if args.smoke:

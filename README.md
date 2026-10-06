@@ -1,14 +1,13 @@
 # LedgerQL
 
+> **Status: held-out figures pending.** The held-out set is still being built and no model has run
+> on it; each figure marked `[held-out: pending]` will be filled from pre-registered runs, each made
+> once ([protocol, section 6a](evals/HELDOUT_PROTOCOL.md)). Every other number is from the 103-case
+> development set.
+
 Questions in plain English about company financials, answered by local open-weight models that
 write SQL over SEC filings. It is built so that every question ends one of three ways: an answer
 taken from the data, an answer that says what it assumed, or a refusal that says why.
-
-> **Status (2026-10-04): the held-out evaluation has not been run.** Every held-out figure in this
-> README is a placeholder, written `[held-out: pending]`. Which figures will be reported, how each
-> is computed and which pipeline configuration produces them were fixed in writing first
-> ([evals/HELDOUT_PROTOCOL.md](evals/HELDOUT_PROTOCOL.md), section 6a). The numbers that do appear
-> below are from the 103-case development set and say so.
 
 ## The problem
 

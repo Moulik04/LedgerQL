@@ -38,6 +38,7 @@ from pathlib import Path
 
 import duckdb
 
+from evals import measurement_pin
 from evals.passn_scoring import _run_candidate_ex, load_jsonl
 from evals.replay_repair_off import revert_exec_error_repairs
 from evals.replay_year_rule import apply_year_rule
@@ -258,6 +259,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     ap.add_argument("--gold-version", choices=("v1", "v2"), default="v1")
     args = ap.parse_args(argv)
+    measurement_pin.require_unchanged(args.db)
 
     gold = load_gold(args.gold_version)
     rows = {

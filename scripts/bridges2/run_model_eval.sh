@@ -63,7 +63,8 @@ fi
 # the database's hash, and the versions in the vLLM environment, which is installed without a
 # lock file (setup_env.sh) and so is known only by asking it. The commit pins the code, not these.
 # Reading never stops a job: what cannot be read is recorded as unavailable. Whether a held-out
-# run may proceed is decided by the eval itself (evals/measurement_pin.py).
+# run may proceed is decided by the eval itself (evals/measurement_pin.py), which compares the
+# same things with the pin and refuses on any difference.
 RUN_ENV="$(uv run python -m evals.run_env --server-python "$VLLM_PYTHON/python" --db data/ledgerql.duckdb)" \
     || RUN_ENV='{"unavailable": "python -m evals.run_env failed"}'
 echo "Run environment: $RUN_ENV"
@@ -185,30 +186,35 @@ if [ "${EVAL_MODE:-pipeline}" = "gen_only" ]; then
         echo "SMOKE_ONLY set: stopping after the smoke test. Log: $OUT/smoke.log"
     else
         # GOLD_FILE: the gold the run scores against (default: the frozen v3). A held-out
-        # file is refused unless it matches its freeze pin (evals/scoring.require_frozen).
+        # file is refused unless it matches its freeze pin (evals/scoring.require_frozen), and
+        # unless this run matches the measurement pin (evals/measurement_pin.py): the files, the
+        # eval environment, the database, the settings, and the versions in the environment the
+        # server was started from, which the eval reads through --server-python.
         GOLD_FILE="${GOLD_FILE:-evals/gold_v3.jsonl}"
         for profile in $PROFILES; do
             echo "Generation-only eval: profile $profile ..."
             uv run python -m evals.gen_only_eval --profile "$profile" --model "$REPO_ID" \
-                --host http://localhost:$PORT --db data/ledgerql.duckdb --out "$OUT" --gold "$GOLD_FILE"
+                --host http://localhost:$PORT --db data/ledgerql.duckdb --out "$OUT" --gold "$GOLD_FILE" \
+                --server-python "$VLLM_PYTHON/python"
             if [ -n "${ENTITY_LINK_AB:-}" ]; then
                 # Entity-linking A/B: the same server session, the same seeds, the same
                 # cases, only the resolved-companies hint differs.
                 echo "Generation-only eval: profile $profile, WITH --entity-link ..."
                 uv run python -m evals.gen_only_eval --profile "$profile" --model "$REPO_ID" \
                     --host http://localhost:$PORT --db data/ledgerql.duckdb --out "$OUT" --gold "$GOLD_FILE" \
-                    --entity-link
+                    --server-python "$VLLM_PYTHON/python" --entity-link
             fi
         done
     fi
 else
     # Entity linking is read from the environment by the pipeline (LEDGERQL_ENTITY_LINK=1 is on;
     # submit.sh passes the submitting shell's value through). Printed here and recorded in
-    # run_meta.json, so a run made with the wrong setting cannot pass for the right one.
+    # run_meta.json, so a run made with the wrong setting cannot pass for the right one. A
+    # held-out run is refused unless it is the declared setting.
     echo "Running eval with LLM_BACKEND=vllm OLLAMA_MODEL=$REPO_ID LEDGERQL_ENTITY_LINK=${LEDGERQL_ENTITY_LINK:-unset (linker off)} -> $OUT ..."
     VLLM_HOST="http://localhost:$PORT" LLM_BACKEND=vllm OLLAMA_MODEL="$REPO_ID" \
         uv run python evals/run_eval.py --db data/ledgerql.duckdb --reports-dir "$OUT" \
-        --gold "${GOLD_FILE:-evals/gold_v3.jsonl}"
+        --gold "${GOLD_FILE:-evals/gold_v3.jsonl}" --server-python "$VLLM_PYTHON/python"
 fi
 
 # Provenance: what ran, on which commit, so every figure is attributable.
@@ -224,6 +230,8 @@ cat > "$OUT/run_meta.json" <<META
   "entity_link": "${LEDGERQL_ENTITY_LINK:-}",
   "gold_file": "${GOLD_FILE:-}",
   "tensor_parallel_size": $TP_SIZE,
+  "max_model_len": "${MAX_MODEL_LEN:-8192}",
+  "vllm_extra_args": "${VLLM_EXTRA_ARGS:-}",
   "slurm_job_id": "${SLURM_JOB_ID:-}",
   "host": "$(hostname)",
   "finished_utc": "$(date -u +%FT%TZ)",

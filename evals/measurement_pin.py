@@ -9,13 +9,26 @@ after held-out results exist is a measurement chosen with those results in view,
 pipeline change would be a configuration chosen with them in view.
 
 So before any held-out run the listed files and `uv.lock` are hashed into
-`evals/measurement_pin.json`, and a held-out run is refused unless a pin exists and every file,
-`uv.lock` and the installed `duckdb` and `sqlglot` match it. The pin is its own file: the
-configuration declarations (`heldout_config.json`) are not touched by it.
+`evals/measurement_pin.json`, with the database's hash and the model server's versions as the
+cluster reports them. The pin is its own file: the configuration declarations
+(`heldout_config.json`) are not touched by it.
 
     python -m evals.measurement_pin draft    # the list, for review; writes nothing
-    python -m evals.measurement_pin check    # does the working tree match the pin?
-    python -m evals.measurement_pin apply --approved-by MJ --why "..."   # record the pin
+    python -m evals.measurement_pin check [--db data/ledgerql.duckdb]   # does this tree match?
+    python -m evals.measurement_pin apply --approved-by MJ --why "..." --cluster-env <file>
+
+`<file>` is what `python -m evals.run_env --server-python ... --db ...` printed on the cluster
+(docs/bridges2.md). The pin is refused if that record disagrees with this tree.
+
+**A held-out run is refused** (`require_pinned`) unless a pin exists and all of these match it:
+every listed file and `uv.lock`; the installed `duckdb` and `sqlglot`; the database file; the model
+server's `vllm`, `transformers` and `torch`; and the generation settings (`SETTINGS`), with no
+variable that overrides a default set in the environment. Whatever can change an output is
+compared. What legitimately varies between runs (job id, node, port, time) is only recorded.
+
+**An offline figure command is refused** (`require_unchanged`) once a pin exists, if the files,
+`uv.lock`, the installed packages or the database it is given differ from it. It hashes the
+working tree, so an edit that was never committed is refused too.
 
 `PINNED` is the list. It is checked against the code: every module a held-out entry point
 imports, directly or not, must be in it, and every other `evals/*.py` must be in `NOT_PINNED`
@@ -27,6 +40,8 @@ from __future__ import annotations
 import ast
 import datetime as dt
 import json
+import os
+import re
 from pathlib import Path
 
 from evals import run_env
@@ -34,6 +49,7 @@ from evals.scoring import FrozenGoldError
 
 REPO = Path(__file__).resolve().parent.parent
 PIN_PATH = Path(__file__).resolve().parent / "measurement_pin.json"
+DEFAULT_DB = "data/ledgerql.duckdb"
 
 # The commands that produce a held-out figure. What they import is pinned with them.
 ENTRY_POINTS = {
@@ -110,6 +126,74 @@ NOT_PINNED = {
 }
 
 
+# What a held-out run generates with. Configuration H3 declares the pipeline's models, the number
+# of candidates, the candidate temperature, the seed and the linker (a test holds these to it); the
+# answer temperature is the pipeline's default at H3's tree; the generation-only values are
+# protocol section 6's (N=5, temperature 0.7, seeds from 42) and that eval's token limit. A list
+# is the set of allowed values. The pipeline sends no token limit of its own: a reply is bounded by
+# the server's context length, which each job file sets (MAX_MODEL_LEN).
+SETTINGS = {
+    "pipeline": {
+        "model": ["Qwen/Qwen3-Coder-30B-A3B-Instruct", "Qwen/Qwen2.5-Coder-32B-Instruct-AWQ"],
+        "backend": "vllm",
+        "candidates": 5,
+        "consensus_temperature": 0.7,
+        "temperature": 0.2,
+        "seed": 42,
+        "entity_link": True,
+    },
+    "gen_only": {
+        "model": [
+            "Qwen/Qwen3-Coder-30B-A3B-Instruct",
+            "Qwen/Qwen2.5-Coder-32B-Instruct-AWQ",
+            "XGenerationLab/XiYanSQL-QwenCoder-32B-2504",
+        ],
+        "candidates": 5,
+        "temperature": 0.7,
+        "max_tokens": 2048,
+        "seed": 42,
+    },
+}
+
+# The pinned commands that compute a figure from stored records, on the laptop, after a run. Each
+# opens with the check named here (a test holds them to it).
+_WITH_DB, _NO_DB = (
+    "measurement_pin.require_unchanged(args.db)",
+    "measurement_pin.require_unchanged()",
+)
+OFFLINE_COMMANDS = {
+    "evals/audit_vs_verify.py": _WITH_DB,
+    "evals/summarize_run.py": _WITH_DB,
+    "evals/entity_link_eval.py": _WITH_DB,
+    "evals/rescore_v2.py": _WITH_DB,
+    "evals/passn_scoring.py": _WITH_DB,
+    "evals/signal_precheck.py": _WITH_DB,
+    "evals/pipeline_acceptance.py": _WITH_DB,
+    "evals/pairwise_agreement.py": _NO_DB,
+}
+NOT_OFFLINE_COMMANDS = {
+    "evals/heldout_config.py": "applies the linker rule to the dev A/B; the decision is recorded",
+    "evals/heldout_gold_check.py": "checks the gold before the set is frozen; computes no figure",
+    "evals/measurement_pin.py": "the pin's own command line (draft, check, apply)",
+    "evals/run_env.py": "prints the environment; computes no figure",
+    "evals/bakeoff_evidence.py": "packs candidates into the evidence file; scores nothing",
+    "evals/must_state.py": "builds the label sheets and the grader's agreement, before the pin",
+    "evals/gold_v2.py": "rebuilds the development gold v2 from v1; scores nothing",
+    "evals/gold_v3.py": "rebuilds the development gold v3, which is frozen by its own hash",
+    "evals/replay_repair_off.py": "a counterfactual on development reports, scored against gold v1",
+    "evals/replay_year_rule.py": "a counterfactual on development reports, scored against gold v1",
+}
+
+SETUP_ENV = "scripts/bridges2/setup_env.sh"
+
+
+def setup_vllm_version(repo: Path = REPO) -> str | None:
+    """The vLLM version `setup_env.sh` installs (None: it names none)."""
+    path = repo / SETUP_ENV
+    found = re.search(r"^VLLM_VERSION=(\S+)$", path.read_text(), re.M) if path.is_file() else None
+    return found.group(1).strip("\"'") if found else None
+
+
 def evals_imports(repo: Path = REPO) -> dict[str, set[str]]:
     """For each `evals/*.py`, the `evals/*.py` files it imports (anywhere in the file, so an
     import inside a function counts)."""
@@ -147,13 +231,15 @@ def file_hashes(paths=None, repo: Path = REPO) -> dict[str, str | None]:
 
 
 def draft(repo: Path = REPO) -> dict:
-    """What a pin applied now would record. Nothing is written."""
+    """What a pin applied now would record from this tree. Nothing is written. The database's hash
+    and the server's versions come from the cluster's record when the pin is applied."""
     return {
         "files": file_hashes(repo=repo),
         "environment": {
             "uv_lock_sha256": run_env.sha256_file(repo / "uv.lock"),
             "locked": run_env.locked(lock_path=repo / "uv.lock"),
         },
+        "settings": json.loads(json.dumps(SETTINGS)),
     }
 
 
@@ -170,8 +256,12 @@ def active_pin(pins: list[dict] | None = None) -> dict | None:
     return live[0] if live else None
 
 
-def problems(pin: dict, repo: Path = REPO, installed: dict | None = None) -> list[str]:
-    """Every way the working tree and the environment differ from the pin."""
+def problems(
+    pin: dict, repo: Path = REPO, installed: dict | None = None, *, db=None, server=None
+) -> list[str]:
+    """Every way the working tree and the environment differ from the pin. The database is
+    compared if `db` is given, and the model server if `server` is (its versions as
+    `run_env.server_versions` read them)."""
     out = []
     for rel, pinned in sorted(pin["files"].items()):
         actual = run_env.sha256_file(repo / rel)
@@ -188,12 +278,70 @@ def problems(pin: dict, repo: Path = REPO, installed: dict | None = None) -> lis
             out.append(
                 f"{name} {installed.get(name)} is installed and the pinned uv.lock names {version}"
             )
+    if db is not None:
+        actual = run_env.sha256_file(db)
+        if actual is None:
+            out.append(f"the database {db} does not exist")
+        elif actual != env["database_sha256"]:
+            out.append(f"the database {db} differs from the pin")
+    if server is not None:
+        if "unavailable" in server:
+            out.append(f"the model server's versions could not be read ({server['unavailable']})")
+        else:
+            out += [
+                f"the model server has {name} {server.get(name)} and the pin names {version}"
+                for name, version in sorted(env["server"].items())
+                if server.get(name) != version
+            ]
     return out
 
 
-def require_pinned(path, pins: list[dict] | None = None, repo: Path = REPO) -> None:
-    """Refuse a held-out run unless the measurement is pinned and matches its pin. Any other gold
-    file is not checked."""
+def override_problems(environ) -> list[str]:
+    """The variables set in `environ` that override a default. A held-out run takes every setting
+    from the declaration, so one of these left exported in the submitting shell stops it. The
+    linker's variable is the exception: it has to be set, and configuration H checks its value."""
+    return [
+        f"{name} is set in the environment ({environ[name]!r}): a held-out run takes its "
+        "settings from the declaration, not from the submitting shell; unset it"
+        for name in sorted(run_env.SETTINGS)
+        if name != "LEDGERQL_ENTITY_LINK" and name in environ
+    ]
+
+
+def settings_problems(declared: dict, mode: str, settings: dict) -> list[str]:
+    """Every generation setting of this run (`settings`, as the run resolved it) that is not the
+    declared one for its mode."""
+    out = []
+    for name, want in declared[mode].items():
+        got = settings.get(name)
+        if not (got in want if isinstance(want, list) else got == want):
+            out.append(f"{name} is {got!r} and the declared {mode} setting is {want!r}")
+    return out
+
+
+def _refuse(pin: dict, found: list[str]) -> None:
+    if found:
+        raise FrozenGoldError(
+            f"the measurement differs from pin {pin['id']}: " + "; ".join(found) + ". A change "
+            "to the measurement after the pin needs a new pin, declared before any held-out run"
+        )
+
+
+def require_pinned(
+    path,
+    *,
+    mode: str,
+    settings: dict,
+    db,
+    server_python: str | None,
+    pins: list[dict] | None = None,
+    repo: Path = REPO,
+    environ=None,
+) -> None:
+    """Refuse a held-out run unless the measurement is pinned and this run matches the pin: the
+    files, the environment, the database `db`, the model server whose interpreter is
+    `server_python`, and the generation `settings` of a run of this `mode` ("pipeline" or
+    "gen_only"). Any other gold file is not checked."""
     if not Path(path).name.startswith("heldout"):
         return
     pin = active_pin(pins)
@@ -202,16 +350,69 @@ def require_pinned(path, pins: list[dict] | None = None, repo: Path = REPO) -> N
             "the measurement code and environment are not pinned: record the pin "
             "(python -m evals.measurement_pin apply) before any held-out run"
         )
-    found = problems(pin, repo)
-    if found:
-        raise FrozenGoldError(
-            f"the measurement differs from pin {pin['id']}: " + "; ".join(found) + ". A change "
-            "to the measurement after the pin needs a new pin, declared before any held-out run"
+    _refuse(
+        pin,
+        problems(pin, repo, db=db, server=run_env.server_versions(server_python))
+        + override_problems(os.environ if environ is None else environ)
+        + settings_problems(pin["settings"], mode, settings),
+    )
+
+
+def require_unchanged(db=None, pins: list[dict] | None = None, repo: Path | None = None) -> None:
+    """Refuse to compute a figure offline on a tree that differs from the pin: a pinned file
+    (committed or not), `uv.lock`, the installed packages, or the database `db` if the command
+    opens one. Until a pin is recorded nothing is held, so development work is not stopped."""
+    pin = active_pin(pins)
+    if pin is not None:
+        _refuse(pin, problems(pin, REPO if repo is None else repo, db=db))
+
+
+def cluster_problems(record: dict, repo: Path = REPO, db=None) -> list[str]:
+    """Why the cluster's record (`python -m evals.run_env --server-python ... --db ...`, run
+    there) cannot be pinned with this tree."""
+    out = []
+    locked = run_env.locked(lock_path=repo / "uv.lock")
+    if record.get("uv_lock_sha256") != run_env.sha256_file(repo / "uv.lock"):
+        out.append("the cluster's uv.lock is not this tree's: pull there, uv sync, and read again")
+    if record.get("packages") != locked:
+        out.append(
+            f"the cluster's eval environment has {record.get('packages')}; uv.lock names {locked}"
         )
+    server = record.get("server") or {}
+    out += [
+        f"the cluster's record has no version for the model server's {name}"
+        for name in run_env.SERVER_PACKAGES
+        if not server.get(name)
+    ]
+    named = setup_vllm_version(repo)
+    if server.get("vllm") and server["vllm"] != named:
+        out.append(
+            f"the cluster's model server has vllm {server['vllm']}; setup_env.sh installs {named}"
+        )
+    theirs, ours = record.get("database_sha256"), run_env.sha256_file(db)
+    if theirs is None:
+        out.append("the cluster's record does not state the database's hash (run it with --db)")
+    elif ours is None:
+        out.append(f"there is no local database at {db} to compare the cluster's with")
+    elif theirs != ours:
+        out.append(
+            f"the cluster's database is not the local one ({theirs[:12]} there, {ours[:12]} here)"
+        )
+    return out
 
 
-def apply(approved_by: str, why: str, path: Path = PIN_PATH, repo: Path = REPO) -> dict:
-    """Record a pin of the working tree as it is. An earlier pin is kept, marked superseded."""
+def apply(
+    approved_by: str,
+    why: str,
+    cluster_env: dict,
+    path: Path = PIN_PATH,
+    repo: Path = REPO,
+    db=None,
+) -> dict:
+    """Record a pin of the working tree as it is, with the model server's versions and the
+    database's hash from the cluster's record `cluster_env`. The database the offline figures are
+    computed against (`db`, here) must be the one the cluster holds. An earlier pin is kept,
+    marked superseded."""
     pins = load_pins(path)
     new = {
         "id": f"M{len(pins) + 1}",
@@ -224,6 +425,14 @@ def apply(approved_by: str, why: str, path: Path = PIN_PATH, repo: Path = REPO) 
     missing = [rel for rel, digest in new["files"].items() if digest is None]
     if missing or new["environment"]["uv_lock_sha256"] is None:
         raise ValueError(f"cannot pin files that do not exist: {missing or ['uv.lock']}")
+    found = cluster_problems(cluster_env, repo, repo / DEFAULT_DB if db is None else db)
+    if found:
+        raise ValueError("the cluster's record cannot be pinned: " + "; ".join(found))
+    new["environment"] |= {
+        "database_sha256": cluster_env["database_sha256"],
+        "server": {name: cluster_env["server"][name] for name in run_env.SERVER_PACKAGES},
+        "cluster_record": cluster_env,
+    }
     for old in pins:
         if old["status"] == "active":
             old["status"], old["superseded_by"] = "superseded", new["id"]
@@ -238,6 +447,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("command", choices=["draft", "check", "apply"])
     ap.add_argument("--approved-by")
     ap.add_argument("--why")
+    ap.add_argument("--cluster-env", type=Path, help="apply: the cluster's run_env record (JSON)")
+    ap.add_argument("--db", help=f"check: also compare this database; apply: default {DEFAULT_DB}")
     args = ap.parse_args(argv)
     if args.command == "draft":
         d = draft()
@@ -247,19 +458,37 @@ def main(argv: list[str] | None = None) -> int:
         print(f"\nNot pinned ({len(NOT_PINNED)}), and why:\n")
         for rel in sorted(NOT_PINNED):
             print(f"  {rel}\n      {NOT_PINNED[rel]}")
+        print("\nGeneration settings a held-out run must have:\n")
+        for mode, declared in SETTINGS.items():
+            print(f"  {mode}: {declared}")
+        print(
+            "\nFrom the cluster's record when the pin is applied: the database's hash, and the "
+            f"model server's {', '.join(run_env.SERVER_PACKAGES)} (setup_env.sh installs vllm "
+            f"{setup_vllm_version()})."
+        )
         return 0
     if args.command == "check":
         pin = active_pin()
         if pin is None:
             print("no measurement pin is recorded: held-out runs are refused")
             return 1
-        found = problems(pin)
+        found = problems(pin, db=args.db)
         print("\n".join(found) if found else f"the working tree matches pin {pin['id']}")
         return 1 if found else 0
-    if not (args.approved_by and args.why):
-        ap.error("apply needs --approved-by and --why")
-    new = apply(args.approved_by, args.why)
-    print(f"recorded pin {new['id']}: {len(new['files'])} files and uv.lock")
+    if not (args.approved_by and args.why and args.cluster_env):
+        ap.error("apply needs --approved-by, --why and --cluster-env")
+    try:
+        new = apply(
+            args.approved_by, args.why, json.loads(args.cluster_env.read_text()), db=args.db
+        )
+    except ValueError as e:
+        print(f"not pinned: {e}")
+        return 1
+    env = new["environment"]
+    print(
+        f"recorded pin {new['id']}: {len(new['files'])} files, uv.lock, database "
+        f"{env['database_sha256'][:12]}, server {env['server']}"
+    )
     return 0
 
 
