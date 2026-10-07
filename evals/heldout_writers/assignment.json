@@ -1,0 +1,202 @@
+{
+ "seed": 20261007,
+ "slot_sheet_sha256": "2dc674a9998f7f5099d495ce9c1e7a360be9de2e991dc2770f37722200b0a40e",
+ "method": "scripts/heldout_writers.py assign_groups: each expected behaviour's slots shuffled, the groups shuffled, the slots dealt round the groups",
+ "groups": {
+  "1": [
+   "H06",
+   "H13",
+   "H17",
+   "H44",
+   "H45",
+   "H65",
+   "H66",
+   "H74"
+  ],
+  "2": [
+   "H08",
+   "H10",
+   "H20",
+   "H30",
+   "H37",
+   "H38",
+   "H58",
+   "H70"
+  ],
+  "3": [
+   "H07",
+   "H11",
+   "H21",
+   "H29",
+   "H46",
+   "H49",
+   "H64",
+   "H80"
+  ],
+  "4": [
+   "H14",
+   "H19",
+   "H24",
+   "H28",
+   "H60",
+   "H61",
+   "H63",
+   "H72"
+  ],
+  "5": [
+   "H23",
+   "H27",
+   "H31",
+   "H35",
+   "H40",
+   "H42",
+   "H69",
+   "H79"
+  ],
+  "6": [
+   "H04",
+   "H18",
+   "H33",
+   "H51",
+   "H53",
+   "H54",
+   "H75",
+   "H78"
+  ],
+  "7": [
+   "H12",
+   "H25",
+   "H39",
+   "H48",
+   "H52",
+   "H62",
+   "H67",
+   "H77"
+  ],
+  "8": [
+   "H01",
+   "H05",
+   "H16",
+   "H34",
+   "H47",
+   "H55",
+   "H57",
+   "H76"
+  ],
+  "9": [
+   "H02",
+   "H09",
+   "H15",
+   "H22",
+   "H26",
+   "H50",
+   "H56",
+   "H71"
+  ],
+  "10": [
+   "H03",
+   "H32",
+   "H36",
+   "H41",
+   "H43",
+   "H59",
+   "H68",
+   "H73"
+  ]
+ },
+ "mix": {
+  "1": {
+   "ANSWER": 4,
+   "ANSWER_WITH_ASSUMPTION": 2,
+   "ABSTAIN": 2
+  },
+  "2": {
+   "ANSWER": 4,
+   "ANSWER_WITH_ASSUMPTION": 2,
+   "ABSTAIN": 2
+  },
+  "3": {
+   "ANSWER": 4,
+   "ANSWER_WITH_ASSUMPTION": 2,
+   "ABSTAIN": 2
+  },
+  "4": {
+   "ANSWER": 4,
+   "ANSWER_WITH_ASSUMPTION": 1,
+   "ABSTAIN": 3
+  },
+  "5": {
+   "ANSWER": 4,
+   "ANSWER_WITH_ASSUMPTION": 2,
+   "ABSTAIN": 2
+  },
+  "6": {
+   "ANSWER": 4,
+   "ANSWER_WITH_ASSUMPTION": 1,
+   "ABSTAIN": 3
+  },
+  "7": {
+   "ANSWER": 4,
+   "ANSWER_WITH_ASSUMPTION": 2,
+   "ABSTAIN": 2
+  },
+  "8": {
+   "ANSWER": 4,
+   "ANSWER_WITH_ASSUMPTION": 1,
+   "ABSTAIN": 3
+  },
+  "9": {
+   "ANSWER": 4,
+   "ANSWER_WITH_ASSUMPTION": 1,
+   "ABSTAIN": 3
+  },
+  "10": {
+   "ANSWER": 4,
+   "ANSWER_WITH_ASSUMPTION": 2,
+   "ABSTAIN": 2
+  }
+ },
+ "writers": {
+  "W1": {
+   "primary": 1,
+   "extra": 2
+  },
+  "W2": {
+   "primary": 2,
+   "extra": 3
+  },
+  "W3": {
+   "primary": 3,
+   "extra": 4
+  },
+  "W4": {
+   "primary": 4,
+   "extra": 5
+  },
+  "W5": {
+   "primary": 5,
+   "extra": 6
+  },
+  "W6": {
+   "primary": 6,
+   "extra": 7
+  },
+  "W7": {
+   "primary": 7,
+   "extra": 8
+  },
+  "W8": {
+   "primary": 8,
+   "extra": 9
+  },
+  "W9": {
+   "primary": 9,
+   "extra": 10
+  },
+  "W10": {
+   "primary": 10,
+   "extra": 1
+  }
+ },
+ "reassigned": []
+}

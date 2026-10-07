@@ -1,6 +1,9 @@
 # Held-out gold set: protocol
 
 Status: **approved by MJ, 80 questions** (2026-10-01), with the pre-registered headline of 6a added.
+**Amended 2026-10-07 (MJ), before any question or any form exists:** the questions are written by
+ten external writers through one form, not by MJ (2, 3.4, 3.5), and what is done with a second
+writer's questions is fixed in 6b.
 No model has been, or may be, run on any held-out question until the set is frozen and committed
 (section 5).
 
@@ -22,9 +25,15 @@ set. This set is also the only fair test of the linker and of the XiYan + DDL pi
 
 | who | does | must not |
 |---|---|---|
-| MJ | writes the questions, in the slot sheet's mention styles (3.2) | look at any model output, or at which dev questions models fail, while writing; fit questions to a known weakness or to the linker |
-| Claude | writes the gold SQL and the `answer_must_state` items, validates them (4), commits | open any candidate or report file, or run any model, while writing; change a question |
-| both | freeze (5) | edit anything after the freeze |
+| ten external writers (`W1` to `W10`) | each writes the eight questions of one group of slots, and optionally of one more (3.4), in a form that shows a slot's type, its company and how to refer to it (3.5) | use ChatGPT, Claude or any AI tool, even for wording; check whether the data can answer a question; look up the project or ask how the tool works before they have finished |
+| MJ | coordinates only: sends each writer a code, a group number and the link; reassigns the group of a writer who drops out; relays a question that fails validation back to its writer (4.3); reviews the gold | write or edit a question, in any way; give a writer any model output; choose which writer gets which slots (the draw does) |
+| Claude | generates the form's script from the slot sheet; applies the rules of 3.5 to the responses; writes the gold SQL and the `answer_must_state` items, validates them (4), commits | open any candidate or report file, or run any model, while writing; change a question |
+| MJ and Claude | freeze (5) | edit anything after the freeze |
+
+Until 2026-10-07 MJ was to write the questions. No question had been written when this changed.
+The writers have seen no model output, no development question and nothing of the pipeline, and
+are asked not to look until they have finished. MJ and Claude have seen a great deal of all three,
+which is why neither writes or edits a question.
 
 Claude has seen a great deal of model output on the dev set and cannot unsee it. The mitigations
 are procedural: gold is written from the question, `docs/schema.md` and the database alone;
@@ -59,6 +68,17 @@ What each tier tests is in `evals/README.md` section 1; write new questions of t
 about different facts, companies and phrasings. Calibration twins come in pairs (an easy and a
 hard question about the same underlying fact).
 
+**The tier is not shown to the writers (2026-10-07).** A writer sees a slot's type, its company and
+how to refer to it (3.5), and the form explains three types, not twelve tiers. So what the sheet
+fixes is the behaviour mix (40 / 16 / 24) and which company is asked about in which style; **the
+tier mix above is a plan, not a constraint**. In the gold a case's `tier` is the tier of
+`evals/README.md` section 1 that the question as written fits, decided by the gold writer from the
+question and the writer's note alone, before any model runs, and reviewed by MJ with the SQL; the
+sheet's label is kept beside it as `slot_tier`. The tier mix that results is reported. No
+confirmatory comparison (6) is defined by tier. Calibration twins cannot be written as pairs by
+writers who do not see each other's questions, so the four `calibration_twin` slots are ordinary
+answerable slots.
+
 ### 3.2 The slot sheet
 
 `evals/heldout_template.jsonl` (rendered for reading as `evals/heldout_template.md`) has one row per question: id, tier, expected behaviour, and for
@@ -77,11 +97,73 @@ committed before any question is written**, so neither writer chose which compan
 about. Nothing else about a question is constrained: which fiscal year, which metric and which
 phrasing are the writer's.
 
+**What a writer is shown (2026-10-07).** The form names the styles in plain words: `legal` is
+"official name", `informal` is "everyday name", `ticker` is "ticker" and `brand` is "brand", each
+with a one-line explanation and an example. The company is shown by a readable name and its
+ticker (`Trade Desk (The)` as "The Trade Desk", `Lilly (Eli)` as "Eli Lilly", a share class
+dropped): never the stored form, which is what the database matches on, and never the name class.
+
 ### 3.3 The question file
 
-Questions go in `evals/heldout_questions.jsonl`: `{"id", "question"}` per slot row, nothing else.
-Write them as a person asking an analyst would. A question may be ambiguous or unanswerable
-where its tier says so; say nothing about what the answer should be.
+`evals/heldout_questions.jsonl` is the **primary set** (3.4): one row per slot, `{"id",
+"question", "writer", "note"}`, the question exactly as its writer typed it.
+`evals/heldout_questions_secondary.jsonl` holds the second writers' questions in the same form.
+Both are built from the form's response export by the rules of 3.5, never by hand. `writer` is the
+code (`W1` ...): this repository records no name, address or other identity of a writer.
+`note` is what the writer said the question leaves unclear, or why it should be refused; the gold
+writer reads it, and no model and no part of the pipeline is ever given it.
+
+### 3.4 The writers and their groups (MJ, 2026-10-07)
+
+- **Ten groups of eight.** The 80 slots are dealt into 10 groups of 8 by a seeded shuffle
+  stratified on the expected behaviour (seed 20261007, `scripts/heldout_writers.py`), so each
+  group is as close to the sheet's 40 / 16 / 24 as whole slots allow: every group has 4
+  answerable slots, six groups have 2 that need an assumption and 2 to refuse, and four groups
+  have 1 and 3. The seed and the assignment are recorded in
+  `evals/heldout_writers/assignment.json`, committed with this amendment and before any form
+  exists; a test regenerates it.
+- **One code, one group.** Each writer has a code, `W1` to `W10`. `Wn` is the **primary writer**
+  of group n.
+- **An optional extra group.** `Wn` may also write group n+1 (`W10` writes group 1). No one writes
+  a group twice, and if all ten take the extra group every slot has exactly two writers.
+- **The primary set** is the primary writers' 80 questions, one per slot. It is the held-out set
+  of this protocol: the headline, the four confirmatory comparisons and the power note (6, 6a)
+  apply to it unchanged.
+- **The secondary set** is the extra-group questions. What is done with it is fixed in 6b. It is
+  never mixed into a headline figure.
+- **A writer who drops out.** MJ reassigns the group, and the replacement becomes its primary
+  writer. The reassignment (group, old code, new code, date) is appended to `assignment.json`
+  (`reassigned`) before the replacement's questions are read.
+- **Roles.** MJ coordinates and never edits a question. A question that fails gold validation
+  goes back to its writer (4.3).
+
+### 3.5 The form and the responses (MJ, 2026-10-07)
+
+One Google Form, built by a generated Apps Script (`evals/heldout_writers/build_form.gs`, written
+by `scripts/heldout_writers.py` from the slot sheet and the draw). Its first page has the
+instructions to writers, a plain description of what the database contains (only what is there;
+the known gaps are not listed), the writer's code and a group number; the group number leads to
+that group's eight slots, one page each. A slot's page shows the slot id, the type ("answerable",
+"needs an assumption" or "should be refused"), the company and how to refer to it, then the
+question (required) and a note (required for the last two types). It shows no tier, no name class,
+no stored name and nothing else from the sheet, and it does not name this project. It asks for no
+sign-in and collects no email address. Responses go to a linked sheet.
+
+The export of that sheet is committed unedited as `evals/heldout_writers/responses.csv`, and these
+rules, fixed here before any response exists, turn it into the two question files:
+
+1. A code is read without regard to case or surrounding spaces.
+2. A submission counts only for a (code, group) pair the draw or a recorded reassignment gives:
+   the code's own group, or its extra group. Any other submission (an unknown code, a group that
+   is not that code's) is discarded and listed.
+3. **One submission per code per group.** A repeat is discarded and the first, by the form's
+   timestamp, is kept.
+4. A slot's primary question is its group's primary writer's; its secondary question is the
+   extra writer's.
+5. **A question is used exactly as typed.** Nothing is corrected: not a typo, not the phrasing,
+   not a mention style the writer did not follow. A departure from the slot is noted on the case
+   and reported.
+6. Coverage is reported per slot (primary / secondary / missing) before any gold is written.
 
 ## 4. The gold
 
@@ -105,8 +187,8 @@ stating it (`evals/KNOWN_GOLD_ISSUES.md`, `reports/must_state_agreement.md`).
 
 ### 4.2 Expected behaviour, reason codes and alternatives
 
-ABSTAIN cases carry the reason code the tier implies (`evals/README.md` section 2), decided by reading
-the question and schema, not a model's answer. `accept_alternatives` may list **only**
+ABSTAIN cases carry the reason code the question implies (`evals/README.md` section 2), decided by
+reading the question, its writer's note and the schema, not a model's answer. `accept_alternatives` may list **only**
 `ABSTAIN:<REASON_CODE>` entries, which the abstain scorer parses.
 
 **Every acceptable answer must be executable.** Prose cannot be scored, and the dev gold shows what
@@ -136,15 +218,30 @@ For every ANSWER and ASSUMPTION case:
 A disagreement at step 2 is resolved by reading the schema, never by running a model. Cases that
 cannot be made unambiguous are dropped before the freeze, not patched after.
 
+**A question that fails validation goes back to its writer (MJ, 2026-10-07).** MJ relays it. The
+feedback is limited to what the data does not contain; it never includes any model output, and it
+never proposes a wording. The writer's new question replaces the old one and is used as typed;
+both versions and the feedback as sent are recorded in `evals/heldout_writers/returned.jsonl`. A
+question that still cannot be validated is dropped before the freeze, as above, and the set is
+reported as that much smaller. The primary set's gold is written and validated first.
+
 ## 5. The freeze
 
 1. Commit the slot sheet and its hash (done before questions).
-2. MJ commits `heldout_questions.jsonl`. Questions are then fixed.
-3. Claude runs `python -m evals.heldout_gold_check` (4.2) and commits `heldout_v1.jsonl` (questions, gold, rubric items) with its SHA-256 in
-   `evals/heldout_v1.sha256`, checked by a test, and tags the commit `heldout-v1-frozen`.
-4. **Only then** may a model run on it. `gen_only_eval` and `run_eval` refuse a held-out file
+2. Commit the writers' groups and the rules for the responses (3.4, 3.5, 6b), before any form
+   exists (2026-10-07). MJ then builds the form and sends each writer a code and a group.
+3. MJ brings back the response export. It is committed unedited, the rules of 3.5 are applied,
+   coverage is reported per slot, and the two question files are committed. Questions are then
+   fixed, except for a question returned to its writer under 4.3.
+4. Claude runs `python -m evals.heldout_gold_check` (4.2) and commits `heldout_v1.jsonl` (questions, gold, rubric items) with its SHA-256 in
+   `evals/heldout_v1.sha256`, checked by a test, and tags the commit `heldout-v1-frozen`. This is
+   the primary set. The secondary set, if it is to be used, is frozen the same way as
+   `heldout_secondary_v1.jsonl`, **before any model runs on any held-out question**: a secondary
+   gold written after a held-out result exists would be written with that result in view, so it
+   is not written.
+5. **Only then** may a model run on it. `gen_only_eval` and `run_eval` refuse a held-out file
    without a matching hash.
-5. After the freeze nothing is edited. A gold problem found later goes on
+6. After the freeze nothing is edited. A gold problem found later goes on
    `evals/HELDOUT_KNOWN_ISSUES.md`; scores are never restated, and the affected case is reported
    with and without (a sensitivity line).
 
@@ -469,6 +566,34 @@ matches the tree). H3 is not amended.
   be run as specified, the reason and the replacement are declared (a new entry in
   `heldout_config.json` and in the run log) *before* the replacement is run.
 
+### 6b. The primary set, the secondary set and the writers (MJ, 2026-10-07)
+
+Fixed before any question exists.
+
+- **The headline is the primary set, alone.** Every figure of 6a, the four confirmatory
+  comparisons, their statistics and the power note are computed on the primary writers' 80
+  questions exactly as written above. A second writer's question never enters them.
+- **If every one of the 80 slots has a secondary question** in the frozen secondary set, one
+  **combined analysis** is run on all 160, reported beside the headline as secondary and never in
+  its place. Each configuration is run once on the secondary file, as on the primary. Each figure
+  of 6a, and the net gain of P1 and of P2, is recomputed with **every slot weighted equally**:
+  each of a slot's two questions counts one half. Intervals are percentile bootstraps **over
+  slots**: a resample draws 80 slots with replacement and takes both questions of each (10000
+  resamples, seed 20261007). No sign test is reported for the combined analysis, since two
+  questions on one slot are not independent cases; a claim that linking helps rests on the
+  primary set, by the rule of 6.
+- **If coverage is partial** (any slot without a secondary question, or the secondary set not
+  frozen before the first held-out run), the secondary set is reported **descriptively only**:
+  its counts, with no interval, no test and no comparison, and never pooled with the primary set.
+- **Per-writer results**, as a check that no single writer drives a finding. For each writer code,
+  on the primary set: the counts behind each headline figure on that writer's eight questions,
+  and each headline figure and P1's and P2's net gain recomputed with that writer's group left
+  out. The ten leave-one-out values are printed beside each figure. A result that does not hold
+  when one writer is left out is reported as resting on that writer. Descriptive: no test.
+- **Not built yet.** The combined analysis and the per-writer table read stored records only.
+  The code for them is written, and joins the measurement pin as a new pin, before any held-out
+  run (6a).
+
 ## 7. Run log
 
 Every held-out run is appended to `evals/heldout_runs.md` (commit, model, prompt, flags, job id,
@@ -527,3 +652,13 @@ configuration is run once for its confirmatory comparison.
    the patterns unchanged and against the cluster's record.
 13. Still open: whether an `informal` share of one quarter of the mention styles is right (3.2),
    and the four confirmatory comparisons in 6.
+14. **Ten external writers write the questions** (2026-10-07, MJ, before any question or form
+   exists): ten groups of eight by a seeded stratified draw (seed 20261007), `Wn` primary for
+   group n and optionally writing group n+1; the primary set is the headline set, unchanged; the
+   secondary set gets one combined analysis only if all 80 slots have a second writer, and is
+   otherwise descriptive (6b); writers are recorded by code only; MJ coordinates and never edits
+   a question; a question that fails validation goes back to its writer with feedback limited to
+   what the data does not contain. The tier is not shown to writers, so the tier mix is reported
+   and not controlled (3.1).
+15. **A held-out `answer_must_state` item states only the required fact** (2026-10-07, MJ), with
+   any explanation in a separate field (4.1).

@@ -3726,3 +3726,62 @@ exactly that. Also seen while reading: `summarize_run` and `rescore_v2` load the
 name (v1 to v3) and take no gold file. Listed here for MJ's decision; nothing was built.
 
 Tests: 1,100 before, 1,116 after.
+
+## 2026-10-07 (later) — Ten external writers, their groups and the form
+
+MJ's design. The protocol was amended and committed before any form exists (`evals/HELDOUT_PROTOCOL.md`
+2, 3.1 to 3.5, 4.3, 5, 6b, decided 14). No pinned file changed: the pin is still M1. Nothing under
+`ledgerql/` changed.
+
+**What MJ decided.** The 80 held-out questions are written by ten external writers through one
+Google Form, not by MJ. The 80 slots are dealt into 10 groups of 8 by a seeded shuffle stratified on
+answerable / assumption / refuse. `Wn` is the primary writer of group n and may also write group n+1
+(`W10`: group 1). The primary writers' 80 questions are the held-out set, and the pre-registration
+and the power note apply to it unchanged. The extra-group questions are a secondary set: one
+pre-registered combined analysis on all 160 if every slot has a second writer (slots weighted
+equally, intervals bootstrapped over slots), descriptive only otherwise, never in a headline figure.
+One submission per code per group, the first kept. Writers are recorded by code only. Per-writer
+results are reported as a check. MJ coordinates and never edits a question; a question that fails
+gold validation goes back to its writer with feedback limited to what the data does not contain.
+
+**The draw.** Seed 20261007, `scripts/heldout_writers.py`, recorded in
+`evals/heldout_writers/assignment.json`. Every group has 4 answerable slots; six groups have 2
+assumption and 2 refuse, four have 1 and 3 (the sheet is 40 / 16 / 24, so 4 / 1.6 / 2.4 a group).
+The script is under `scripts/`, not `evals/`: it reads the slot sheet only and computes no figure,
+and a new `evals` module would have had to be named in a pinned file.
+
+**The form.** `evals/heldout_writers/build_form.gs` is generated; MJ runs it once at
+script.google.com (`evals/heldout_writers/README.md` has the steps, the checks and the ten
+messages). **It has not been run against Google**: here it was only run against a stand-in for
+`FormApp` that records the calls (a test), which checks the structure and the branching, not
+Google's behaviour. The check list in the README is what covers that.
+
+**Decisions made while writing it, each MJ's to reverse before the link goes out:**
+
+1. **How the four mention styles are named to a writer.** `legal` is shown as "official name",
+   `informal` as "everyday name", `ticker` as "ticker", `brand` as "brand", with MJ's explanations.
+   MJ's text explains four names and the sheet has four styles; this is the pairing that keeps
+   "brand" as "brand". It is one table in the generator (`STYLES`).
+2. **The tier is not shown, so it is no longer controlled.** MJ's page header is slot id, type,
+   company and style, and the instructions explain three types. A writer therefore cannot know a
+   slot was planned as `aggregation` or `adversarial`. The protocol now says so: the tier mix is
+   reported; a case's `tier` in the gold is the one the written question fits, decided before any
+   model runs; the sheet's label is kept as `slot_tier`; calibration twins cannot be written as
+   pairs. `tier` still matters to one reported metric (the guardrail score covers three tiers).
+3. **The company is shown by a readable name, never the stored one.** `Trade Desk (The)` is shown
+   as "The Trade Desk", `Lilly (Eli)` as "Eli Lilly", a share class is dropped, and the ticker is
+   always given. A writer who copied the stored form would hand the linker an exact match.
+4. **Both sets are frozen before any model runs on either.** MJ's order (primary gold first) is
+   kept; a secondary gold written after a held-out result exists is not written at all.
+5. **Rules MJ's text implies and does not state:** a code is read without regard to case; a
+   submission for a group that is not the code's own or its extra group is discarded and listed; a
+   question is used exactly as typed, even where the style was not followed; a returned question
+   and the feedback sent are recorded in `evals/heldout_writers/returned.jsonl`.
+6. **The combined analysis:** 10000 resamples of slots, seed 20261007, each question counting one
+   half; no sign test on the 160, since two questions on one slot are not independent.
+
+**Not built.** The code that reads the response export, the combined analysis and the per-writer
+table. The last two produce held-out figures, so they are to be written and pinned (a new pin)
+before any held-out run; the first is written when the export exists, from the rules as fixed today.
+
+Tests: 1,116 before, 1,126 after.

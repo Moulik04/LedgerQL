@@ -224,11 +224,16 @@ which a test checks. Problems found since are listed in
 not fixed and there is no v4, because a set revised with model output in view no longer measures
 generalisation cleanly.
 
-**Blind held-out set.** 80 questions in the same tier mix (40 answer, 16 assumption, 24 refuse).
-Which companies get asked about, and in which naming style (brand, legal name, ticker, informal),
-was drawn by a seeded shuffle from companies that are not in the development set, and committed
-with its hash before any question existed, so neither writer chose them. The questions are written
-by the author without looking at any model output or at which development questions models fail.
+**Blind held-out set.** 80 questions in the same behaviour mix (40 answer, 16 assumption, 24
+refuse). Which companies get asked about, and in which naming style (brand, legal name, ticker,
+informal), was drawn by a seeded shuffle from companies that are not in the development set, and
+committed with its hash before any question existed, so no writer chose them. The questions are
+written by ten people outside the project, eight each, through a form that shows a slot's type,
+its company and how to refer to it, and nothing about the pipeline; they are asked to use no AI
+tool and not to look the project up first. Which writer gets which slots was drawn by a second
+seeded shuffle. The author coordinates and edits no question. A writer may also write a second
+group; those questions are kept apart and never enter a headline figure. The tier is not shown to
+the writers, so the tier mix of the questions is reported, not controlled.
 The gold SQL is written by Claude, the AI assistant this project was built with, from the question,
 the schema and the database alone, with no model run and no report open; each gold query has a
 second, independently written formulation that must return the same result, and the author reviews
