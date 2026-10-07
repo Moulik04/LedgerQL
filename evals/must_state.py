@@ -151,7 +151,8 @@ def stated(results: list[ItemResult]) -> bool | None:
 class OllamaJudge:
     """A local model as the judge: temperature 0, one word back. Its votes are cached so a
     re-score never asks twice, and logged so they can be audited. Once the measurement is pinned,
-    only the pinned model at the pinned digest is asked (`evals/measurement_pin.py`)."""
+    only the pinned model at the pinned digest, on the pinned Ollama, is asked
+    (`evals/measurement_pin.py`)."""
 
     def __init__(self, model: str = "llama3.1:8b", host: str = "http://127.0.0.1:11434"):
         import ollama
@@ -160,7 +161,7 @@ class OllamaJudge:
 
         self.model = model
         self._client = ollama.Client(host=host)
-        measurement_pin.require_judge(model, self._client)
+        measurement_pin.require_judge(model, self._client, host)
         self._cache: dict[tuple, bool | None] = {}
         self.log: list[dict] = []
 

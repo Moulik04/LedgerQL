@@ -634,7 +634,9 @@ var DATA = {
 function buildForm() {
   var form = FormApp.create(DATA.title);
   form.setDescription(DATA.intro);
-  form.setProgressBar(true);
+  // Off: the bar counts every page of the form, so it barely moves for a writer on one group.
+  // The page titles ("question 5 of 8") say where a writer is.
+  form.setProgressBar(false);
   form.setCollectEmail(false);
   form.setLimitOneResponsePerUser(false);
   form.setAllowResponseEdits(false);

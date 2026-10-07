@@ -512,10 +512,16 @@ def test_the_judge_is_refused_once_pinned_unless_ollama_serves_the_pinned_digest
     from evals import measurement_pin
     from evals.scoring import FrozenGoldError
 
-    pin = {"id": "M1", "status": "active", "judge": {"llama3.1:8b": "a" * 64}}
+    pin = {"id": "M1", "status": "active", "judge": {"llama3.1:8b": "a" * 64}, "ollama": "1.2.3"}
     monkeypatch.setattr(measurement_pin, "load_pins", lambda path=None: [pin])
+    served = {"version": "1.2.3"}
+    monkeypatch.setattr(measurement_pin, "served_ollama_version", lambda host: served["version"])
     _fake_ollama(monkeypatch, "a" * 64)
     assert M.OllamaJudge()("q", "an answer", "an item") is False
+    served["version"] = "1.2.4"  # the same weights on another Ollama
+    with pytest.raises(FrozenGoldError, match="Ollama is version 1.2.4 and the pin names 1.2.3"):
+        M.OllamaJudge()
+    served["version"] = "1.2.3"
     _fake_ollama(monkeypatch, "b" * 64)
     with pytest.raises(FrozenGoldError, match="bbbbbbbbbbbb"):
         M.OllamaJudge()

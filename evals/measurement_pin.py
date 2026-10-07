@@ -27,9 +27,10 @@ server's `vllm`, `transformers` and `torch`; the revision of the weights it down
 default set in the environment. Whatever can change an output is
 compared. What legitimately varies between runs (job id, node, port, time) is only recorded.
 
-**The judge is refused** (`require_judge`) once a pin exists, unless Ollama serves the judge model
-at the pinned digest (`JUDGE_DIGESTS`): the local model that decides the `primary: judge` rubric
-items is asked on the laptop, after a run, and is as much a part of the measurement as a pattern.
+**The judge is refused** (`require_judge`) once a pin exists, unless the Ollama that will be asked
+is the pinned version (`OLLAMA_VERSION`) and serves the judge model at the pinned digest
+(`JUDGE_DIGESTS`): the local model that decides the `primary: judge` rubric items is asked on the
+laptop, after a run, and is as much a part of the measurement as a pattern.
 
 **An offline figure command is refused** (`require_unchanged`) once a pin exists, if the files,
 `uv.lock`, the installed packages or the database it is given differ from it. It hashes the
@@ -178,6 +179,9 @@ MODEL_REVISIONS = {
 JUDGE_DIGESTS = {
     "llama3.1:8b": "46e0c10c039e019119339687c3c1757cc81b9da49709a3b3924863ba87ca666e",
 }
+# The Ollama that serves it, as its own `/api/version` reports (read on 2026-10-07): the same
+# weights can answer differently under another runtime, as under another vLLM.
+OLLAMA_VERSION = "0.30.8"
 
 # The pinned commands that compute a figure from stored records, on the laptop, after a run. Each
 # opens with the check named here (a test holds them to it).
@@ -266,6 +270,7 @@ def draft(repo: Path = REPO) -> dict:
         "settings": json.loads(json.dumps(SETTINGS)),
         "models": dict(MODEL_REVISIONS),
         "judge": dict(JUDGE_DIGESTS),
+        "ollama": OLLAMA_VERSION,
     }
 
 
@@ -366,18 +371,34 @@ def served_digest(client, model: str) -> str | None:
     return next((m.digest for m in client.list().models if m.model == model), None)
 
 
-def judge_problems(pinned: dict, model: str, served: str | None) -> list[str]:
-    """Why the judge `model`, served at digest `served`, is not the pinned judge."""
-    want = pinned.get(model)
+def served_ollama_version(host: str) -> str | None:
+    """The version the Ollama at `host` reports for itself (None: it could not be read)."""
+    import httpx
+
+    try:
+        return httpx.get(f"{host}/api/version", timeout=10).json().get("version")
+    except (httpx.HTTPError, ValueError):
+        return None
+
+
+def judge_problems(pin: dict, model: str, served: str | None, version: str | None) -> list[str]:
+    """Why the judge `model`, served at digest `served` by Ollama `version`, is not the pinned
+    judge on the pinned Ollama."""
+    out = []
+    if version is None:
+        out.append("Ollama's version could not be read")
+    elif version != pin["ollama"]:
+        out.append(f"Ollama is version {version} and the pin names {pin['ollama']}")
+    want = pin["judge"].get(model)
     if want is None:
-        return [f"no digest is pinned for the judge {model}"]
-    if served is None:
-        return [f"Ollama does not have the judge {model}, so its digest cannot be read"]
-    if served != want:
-        return [
+        out.append(f"no digest is pinned for the judge {model}")
+    elif served is None:
+        out.append(f"Ollama does not have the judge {model}, so its digest cannot be read")
+    elif served != want:
+        out.append(
             f"the judge {model} is served at digest {served[:12]} and the pin names {want[:12]}"
-        ]
-    return []
+        )
+    return out
 
 
 def _refuse(pin: dict, found: list[str]) -> None:
@@ -431,13 +452,17 @@ def require_unchanged(db=None, pins: list[dict] | None = None, repo: Path | None
         _refuse(pin, problems(pin, REPO if repo is None else repo, db=db))
 
 
-def require_judge(model: str, client, pins: list[dict] | None = None) -> None:
+def require_judge(model: str, client, host: str, pins: list[dict] | None = None) -> None:
     """Refuse to ask a judge that is not the pinned one: `model` must be a judge the pin names,
-    and the Ollama behind `client` must serve it at the pinned digest. As for the offline
-    commands, nothing is held until a pin is recorded."""
+    and the Ollama at `host`, which `client` talks to, must be the pinned version and serve the
+    model at the pinned digest. As for the offline commands, nothing is held until a pin is
+    recorded."""
     pin = active_pin(pins)
     if pin is not None:
-        _refuse(pin, judge_problems(pin["judge"], model, served_digest(client, model)))
+        found = judge_problems(
+            pin, model, served_digest(client, model), served_ollama_version(host)
+        )
+        _refuse(pin, found)
 
 
 def cluster_problems(record: dict, repo: Path = REPO, db=None) -> list[str]:
@@ -537,7 +562,7 @@ def main(argv: list[str] | None = None) -> int:
         print("\nThe revision of each model's weights:\n")
         for model, revision in MODEL_REVISIONS.items():
             print(f"  {model}\n      {revision}")
-        print("\nThe digest Ollama must report for the judge:\n")
+        print(f"\nThe judge's Ollama must be version {OLLAMA_VERSION} and report this digest:\n")
         for model, digest in JUDGE_DIGESTS.items():
             print(f"  {model}\n      {digest}")
         print(

@@ -3785,3 +3785,45 @@ table. The last two produce held-out figures, so they are to be written and pinn
 before any held-out run; the first is written when the export exists, from the rules as fixed today.
 
 Tests: 1,116 before, 1,126 after.
+
+## 2026-10-07 (evening) — MJ's decisions on the writers' design, Ollama's version pinned (M2), and the order of the held-out pin
+
+MJ's decisions on the six choices of the last entry, and three instructions. Nothing under `ledgerql/`
+changed and `heldout_config.json` was not touched.
+
+**On the six choices.** (1) The style names shown to writers stand. (2) The tier is not shown and
+that is accepted: a natural mix is the more realistic one. The tier mix is reported as written, and
+**if the held-out set ends up with few adversarial questions the README claims no held-out safety
+result; the development adversarial results stay development-only.** (3) The display names stand,
+with one rule added: the gold writer records the mention style **as written** (`official`,
+`everyday`, `ticker`, `brand`, `other`) beside the style intended, and linker results are reported by
+the style as written, because a question is used as typed and the intended style alone would
+mislabel any that did not follow it. (4) to (6) accepted. "Five, not four" is correct and stays.
+
+**"Few" is not a number.** The protocol (3.1) therefore fixes when it is decided, not what it is:
+MJ decides from the tier mix of the frozen gold, before any model runs on it, and the count is
+printed with the decision. The slot plan had 8 adversarial slots, 6 of them to refuse.
+
+**The progress bar is off.** It counted all 81 pages, so a writer on one group saw it barely move.
+`build_form.gs` is regenerated; the page titles ("Group 3, question 5 of 8") carry the position.
+
+**Ollama's version is pinned and enforced.** `OLLAMA_VERSION = "0.30.8"` in
+`evals/measurement_pin.py`, read from the server's own `/api/version`. Once a pin exists the judge
+refuses to be built unless the Ollama it will ask reports that version, or if the version cannot be
+read. Same principle as vLLM: whatever can change an output is enforced.
+
+**That is pin M2.** The change is in two pinned files (`measurement_pin.py`, `must_state.py`), and
+a pinned file that differs from the active pin fails CI, so a new pin was recorded today against
+the same cluster record. M1 is kept, superseded. No held-out run was made under M1.
+
+**The order of the held-out pin, and its number.** MJ: the held-out gold, its rubric items and the
+grader patterns for them are all written and pinned before any model runs on held-out, and the
+patterns come from the questions and the gold only, never from model output. Protocol 6a now fixes
+the order: questions fixed; gold and items written, validated and frozen; patterns written; the pin
+recorded, with the code for 6b's analyses; only then a model. MJ's message calls that pin M2. M2 is
+today's Ollama pin, so **the held-out pin will be M3**; the protocol says so in the same sentence.
+
+**Also fixed while writing this:** a secondary case's id is its slot's with `S` for `H` (`S07`), so
+patterns and records keyed by case id cannot confuse a slot's two questions.
+
+Tests: 1,126 before, 1,128 after.

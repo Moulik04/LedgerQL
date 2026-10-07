@@ -79,6 +79,13 @@ confirmatory comparison (6) is defined by tier. Calibration twins cannot be writ
 writers who do not see each other's questions, so the four `calibration_twin` slots are ordinary
 answerable slots.
 
+**Accepted by MJ (2026-10-07): a natural mix is the more realistic one.** The tier mix is reported
+as written. One consequence is fixed with it: **if the held-out set ends up with few adversarial
+questions, the README claims no held-out safety result**, and the adversarial results stay what
+they are now, development-set results, labelled so. Whether the set has enough is decided by MJ
+from the tier mix of the frozen gold, before any model runs on it, and the count is printed
+wherever the decision is stated.
+
 ### 3.2 The slot sheet
 
 `evals/heldout_template.jsonl` (rendered for reading as `evals/heldout_template.md`) has one row per question: id, tier, expected behaviour, and for
@@ -103,11 +110,21 @@ with a one-line explanation and an example. The company is shown by a readable n
 ticker (`Trade Desk (The)` as "The Trade Desk", `Lilly (Eli)` as "Eli Lilly", a share class
 dropped): never the stored form, which is what the database matches on, and never the name class.
 
+**The style as written is recorded beside the style intended (MJ, 2026-10-07).** A question is
+used as typed (3.5), so a writer who was asked for the official name and typed the ticker has
+written a ticker question, and the sheet's style alone would mislabel it. For each company a
+question mentions, the gold writer records `mention_style_written`, one of `official`,
+`everyday`, `ticker`, `brand` or `other`, from the question alone and before any model runs;
+the sheet's `mention_style` stays beside it as the style intended. **Linker results are reported
+by the style as written** (6).
+
 ### 3.3 The question file
 
 `evals/heldout_questions.jsonl` is the **primary set** (3.4): one row per slot, `{"id",
 "question", "writer", "note"}`, the question exactly as its writer typed it.
-`evals/heldout_questions_secondary.jsonl` holds the second writers' questions in the same form.
+`evals/heldout_questions_secondary.jsonl` holds the second writers' questions in the same form,
+each with its slot's number and `S` for `H` as its id (`S07` is the second question on slot `H07`),
+so nothing keyed by a case id can confuse the two.
 Both are built from the form's response export by the rules of 3.5, never by hand. `writer` is the
 code (`W1` ...): this repository records no name, address or other identity of a writer.
 `note` is what the writer said the question leaves unclear, or why it should be refused; the gold
@@ -161,8 +178,9 @@ rules, fixed here before any response exists, turn it into the two question file
 4. A slot's primary question is its group's primary writer's; its secondary question is the
    extra writer's.
 5. **A question is used exactly as typed.** Nothing is corrected: not a typo, not the phrasing,
-   not a mention style the writer did not follow. A departure from the slot is noted on the case
-   and reported.
+   not a mention style the writer did not follow. The style as written is recorded on the case
+   beside the style intended (3.2); any other departure from the slot is noted on the case and
+   reported.
 6. Coverage is reported per slot (primary / secondary / missing) before any gold is written.
 
 ## 4. The gold
@@ -270,6 +288,12 @@ never as "no effect". **P1 and P2 measure the linker's effect on held-out data; 
 H's configuration** (6a). No parameter or prompt is tuned on this set; a change made after seeing
 its results is exploratory and says so.
 
+**By mention style (MJ, 2026-10-07).** P1 and P2 are also broken down by the style in which the
+company is mentioned, and the style used is the one **as written** (`mention_style_written`, 3.2),
+not the one the slot intended; a case that names two companies is listed under each of its
+styles. The breakdown is descriptive: the claim rests on the whole population above. The number
+of questions whose written style differs from the intended one is printed with it.
+
 **Power, stated plainly.** Paired binary outcomes and an exact sign test need at least six net
 discordant cases in one direction to reach p < 0.05. On the dev set the linker gained four cases
 and lost none (p = 0.06 one-sided). The 80-question set has 40 ANSWER cases, about 34 of which
@@ -310,6 +334,10 @@ Amended 2026-10-07, at MJ's request, before the held-out set exists and before a
 the local judge is pinned by the digest Ollama reports for it, and **the measurement pin M1 is
 recorded** (MJ's blind labels are in and adjudicated, the patterns unchanged; the cluster's record
 matches the tree). H3 is not amended.
+Amended 2026-10-07 (later), at MJ's request, before any held-out question exists: the version of
+Ollama that serves the judge is pinned and enforced, which changed two pinned files, so **M2
+supersedes M1**; and the order in which the held-out gold, its rubric items, their patterns and the
+pin that holds them are written is fixed (below). H3 is not amended.
 
 - **The headline configuration is H3, and it is final** (it supersedes H2; all three are in
   `evals/heldout_config.json`, which is append-only). H3 is H2 with one change under `ledgerql/`, in
@@ -402,12 +430,30 @@ matches the tree). H3 is not amended.
     will ask serves that model at that digest; a model the pin does not name is refused too. The
     laptop's copy was pulled on 2026-06-14, before the grader existed, so every judge vote in a
     development report was cast by this digest. Its prompt, temperature (0), seed and context
-    length are in `evals/must_state.py`, a pinned file. **Not pinned:** the version of Ollama
-    itself (0.30.8 on 2026-10-07).
+    length are in `evals/must_state.py`, a pinned file. **The version of Ollama is pinned too
+    (MJ, 2026-10-07, later):** `OLLAMA_VERSION`, 0.30.8, as the server's own `/api/version`
+    reports it. The judge refuses to be built unless the Ollama it will ask reports that version,
+    or if the version cannot be read: the same principle as the vLLM version, that whatever can
+    change an output is enforced.
   - **M1 is recorded (2026-10-07).** `evals/measurement_pin.json`: the 40 files, `uv.lock`, the
     database's hash and the server's `vllm` 0.29.0, `transformers` 5.17.0 and `torch` 2.13.0 from
     the cluster's record (`reports/runs/cluster_env.json`, kept whole in the pin), the settings,
     the three revisions and the judge's digest. From here a change to a pinned file fails CI.
+  - **M2 supersedes M1 (2026-10-07, later).** Pinning Ollama's version changed
+    `evals/measurement_pin.py` and `evals/must_state.py`, so a new pin was recorded the same day,
+    against the same cluster record. Nothing else differs, and no held-out run was made under M1.
+    M1 is kept in the file, marked superseded.
+  - **The held-out gold, its rubric items and their patterns are all written and pinned before
+    any model runs on a held-out question (MJ, 2026-10-07).** The grader reads patterns from
+    `evals/must_state_patterns.json`, a pinned file that today holds the development cases only,
+    so the held-out items' patterns are a change to the measurement and need a pin of their own.
+    The order is fixed: (1) the questions are fixed; (2) the gold and its `answer_must_state` items
+    are written, validated and frozen (4, 5); (3) the patterns for those items are written **from
+    the questions and the gold only, never from any model output**, held-out or development; (4)
+    the pin that holds them is recorded, with the code for 6b's analyses, as **M3** (MJ's
+    instruction calls it M2; that number went to the Ollama pin the same day); (5) only then does
+    any model run on a held-out question. After that pin no pattern is changed: a pattern found
+    wrong is listed as a known false fail or false pass, as for the development set.
 - **Configuration H2** (superseded by H3 on 2026-10-04; kept as written). H2 supersedes H1; both
   are in `evals/heldout_config.json`, which is append-only. H2 is H1 with two changes under `ledgerql/`, declared together as one
   configuration on 2026-10-03: the verifier (`verify.py`) accepts true values in the forms it used
@@ -591,8 +637,8 @@ Fixed before any question exists.
   out. The ten leave-one-out values are printed beside each figure. A result that does not hold
   when one writer is left out is reported as resting on that writer. Descriptive: no test.
 - **Not built yet.** The combined analysis and the per-writer table read stored records only.
-  The code for them is written, and joins the measurement pin as a new pin, before any held-out
-  run (6a).
+  The code for them is written, and joins the measurement pin in the same new pin as the
+  held-out patterns (M3, 6a), before any held-out run.
 
 ## 7. Run log
 
@@ -649,7 +695,8 @@ configuration is run once for its confirmatory comparison.
    database, the generation settings and the server's versions are enforced, and that the offline
    figure commands refuse on a tree that differs from the pin. The judge's Ollama digest was added
    and **the pin was recorded as M1 on 2026-10-07**, after the blind labels were adjudicated with
-   the patterns unchanged and against the cluster's record.
+   the patterns unchanged and against the cluster's record. **M2 superseded it the same day**:
+   the version of Ollama that serves the judge (0.30.8) is pinned and enforced.
 13. Still open: whether an `informal` share of one quarter of the mention styles is right (3.2),
    and the four confirmatory comparisons in 6.
 14. **Ten external writers write the questions** (2026-10-07, MJ, before any question or form
@@ -662,3 +709,13 @@ configuration is run once for its confirmatory comparison.
    and not controlled (3.1).
 15. **A held-out `answer_must_state` item states only the required fact** (2026-10-07, MJ), with
    any explanation in a separate field (4.1).
+16. **MJ's decisions on the writers' design** (2026-10-07, later). The style names shown to
+   writers stand. The tier is not shown and the natural mix is accepted: the tier mix is reported
+   as written, and with few adversarial questions the README claims no held-out safety result and
+   the development adversarial results stay development-only (3.1). The mention style as written
+   is recorded beside the style intended, and linker results are reported by the style as
+   written (3.2, 6). Both sets are frozen before any model runs on either. The form has no
+   progress bar.
+17. **The held-out gold, its rubric items and their patterns are written and pinned before any
+   model runs on held-out** (2026-10-07, MJ); patterns come from the questions and the gold only,
+   never from model output (6a). That pin is M3.

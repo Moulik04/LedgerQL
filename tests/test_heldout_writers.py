@@ -161,7 +161,7 @@ def test_the_generated_script_runs_and_builds_one_branching_page_per_slot(tmp_pa
     )
     calls, groups = out["calls"], W.assign_groups(ROWS)
     form, items, pages = calls["form"], calls["items"], calls["pages"]
-    assert form["setProgressBar"] is True and form["setCollectEmail"] is False
+    assert form["setProgressBar"] is False and form["setCollectEmail"] is False
     assert form["setLimitOneResponsePerUser"] is False
     assert form["setDestination"] == ["SPREADSHEET", "sheet-id"]
     assert [i["kind"] for i in items[:3]] == ["addSectionHeaderItem", "addTextItem", "addListItem"]

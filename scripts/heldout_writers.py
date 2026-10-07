@@ -241,7 +241,9 @@ _FORM_JS = r"""
 function buildForm() {
   var form = FormApp.create(DATA.title);
   form.setDescription(DATA.intro);
-  form.setProgressBar(true);
+  // Off: the bar counts every page of the form, so it barely moves for a writer on one group.
+  // The page titles ("question 5 of 8") say where a writer is.
+  form.setProgressBar(false);
   form.setCollectEmail(false);
   form.setLimitOneResponsePerUser(false);
   form.setAllowResponseEdits(false);
@@ -370,9 +372,9 @@ def readme(assigned: dict) -> str:
         "5. After the 8th page the form offers **Submit**, not another group's page. Submit, then "
         "check that a row arrived in the response sheet with the code, the group and the "
         "answers under columns named `Hxx: your question` and `Hxx: note`.",
-        "6. Try at least the first group, the last and one in the middle. The progress bar "
-        f"counts all {pages + 1} pages of the form, so it will not reach the end for any one group; the "
-        "page title is what tells a writer where they are.",
+        "6. Try at least the first group, the last and one in the middle. There is no progress "
+        f"bar, on purpose: it would count all {pages + 1} pages of the form. The page title is "
+        "what tells a writer where they are.",
         "7. Delete your test responses before sending the link: in the editor, **Responses**, "
         "the three-dot menu, **Delete all responses**; then delete the test rows in the sheet. "
         "(A row with a code that is not assigned to its group is discarded by the rules anyway.)",
