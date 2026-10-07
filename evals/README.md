@@ -713,8 +713,22 @@ plus ten of the other 24 drawn at random (seed 20261004), shuffled and unlabelle
 (`python -m evals.must_state blind-subset` rebuilds it). The other 14 carry the first labeller's
 label only, and `agree` reports the two parts separately.
 
+**The result** (2026-10-07, `reports/must_state_agreement.md`, judge on). Blind, MJ's labels agree
+with the grader on 6 of 14 and with the first labeller on 8 of 14. MJ then re-read the eight
+disagreements with the grader and wrote a final call in each row's note; the blind labels are kept
+as given (`final_call` reads the note, and `agree` prints both). **Five of the eight were resolved
+in the grader's favour on re-reading:** in four the text does not contain the item and the blind
+label was a slip (`L04[1]`, `C06[0]`, `M02[1]`, `U07[1]`), and in one (`M01`, the 32B) a bare
+"2024" does not say fiscal or calendar, which also overturns the first labeller's label. Three
+stand against the grader (`U08` for both models, `M02[0]` for the 32B): the patterns are left
+unchanged and the three are listed as known false fails in `KNOWN_GOLD_ISSUES.md`. After
+adjudication the grader matches the final call on 11 of 14, with no false pass, and the first
+labeller on 11 of 14. The 28-label calibration table (`reports/must_state_calibration.md`) is
+against the first labeller's labels and is not restated.
+
     python -m evals.must_state calibrate [--judge]   # vs the 28 hand labels (labeller: Claude)
     python -m evals.must_state judge-check           # judge and patterns on 20 constructed answers
+    python -m evals.must_state label                 # MJ labels the blind subset, one row at a time
     python -m evals.must_state agree [--judge]       # MJ's blind labels vs the grader and those labels
     python -m evals.rescore_v2 report --judge        # the figures, with the judge on
 

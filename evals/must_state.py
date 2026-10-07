@@ -24,6 +24,7 @@ Pattern-only grading checks that something was *said*, not that it is *true*: a 
 the year verifier's job (`ledgerql/verify.py`, `evals/year_audit.py`).
 
     python -m evals.must_state calibrate   # agreement with the hand-labelled answers
+    python -m evals.must_state label       # MJ labels the 14-item blind subset, one item at a time
     python -m evals.must_state agree       # MJ's blind labels (the 14-item subset) against both
 """
 
@@ -149,13 +150,17 @@ def stated(results: list[ItemResult]) -> bool | None:
 
 class OllamaJudge:
     """A local model as the judge: temperature 0, one word back. Its votes are cached so a
-    re-score never asks twice, and logged so they can be audited."""
+    re-score never asks twice, and logged so they can be audited. Once the measurement is pinned,
+    only the pinned model at the pinned digest is asked (`evals/measurement_pin.py`)."""
 
     def __init__(self, model: str = "llama3.1:8b", host: str = "http://127.0.0.1:11434"):
         import ollama
 
+        from evals import measurement_pin
+
         self.model = model
         self._client = ollama.Client(host=host)
+        measurement_pin.require_judge(model, self._client)
         self._cache: dict[tuple, bool | None] = {}
         self.log: list[dict] = []
 
@@ -263,18 +268,27 @@ def main(argv: list[str] | None = None) -> int:
 
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument(
-        "command", choices=["calibrate", "judge-check", "blind", "blind-subset", "agree"]
+        "command", choices=["calibrate", "judge-check", "blind", "blind-subset", "label", "agree"]
     )
     ap.add_argument(
         "--blind-file",
         type=Path,
-        help="default: the full sheet for `blind`, the 14-item subset for `blind-subset` and `agree`",
+        help="default: the full sheet for `blind`, the 14-item subset for the other three",
     )
     ap.add_argument("--reports-dir", type=Path, default=Path("reports"))
     ap.add_argument("--judge", action="store_true", help="also ask the local judge (Ollama)")
     ap.add_argument("--judge-model", default="llama3.1:8b")
     ap.add_argument("--write", type=Path)
     args = ap.parse_args(argv)
+    if args.command == "label":
+        sheet = args.blind_file or SUBSET_PATH
+        try:
+            done = label_sheet(sheet, ask=input, show=print)
+        except (EOFError, KeyboardInterrupt):
+            print("\nstopped: the answers given so far are saved; run it again to continue")
+            return 1
+        print(f"\n{done} labelled in this run; no row of {sheet.name} is blank")
+        return 0
     if args.command in ("blind", "blind-subset", "agree"):
         runs, patterns = _load_runs(args.reports_dir), load_patterns()
         blind_file = args.blind_file or (BLIND_PATH if args.command == "blind" else SUBSET_PATH)
@@ -426,6 +440,38 @@ def build_blind_subset(
     return build_blind(records_by_run, patterns, subset_labels(labels, n_random, seed), seed)
 
 
+def label_sheet(path: Path = SUBSET_PATH, ask=input, show=print) -> int:
+    """Label a blind sheet by hand. Each row that has no label yet is shown alone (the question,
+    the answer as the user saw it, the rubric item) and answered y or n, and the answer is written
+    to the file at once, as true or false. Stopping part-way loses nothing, and a second run asks
+    only for the rows still blank. Returns how many rows were labelled in this run."""
+    rows = [json.loads(x) for x in path.read_text().splitlines() if x.strip()]
+    todo = [r for r in rows if r["label"] is None]
+    for n, row in enumerate(todo, len(rows) - len(todo) + 1):
+        show(
+            f"\n[{n} of {len(rows)}]\nQuestion:   {row['question']}\n"
+            f"Answer:     {row['answer']}\nMust state: {row['item_text']}"
+        )
+        reply = ""
+        while reply not in ("y", "yes", "n", "no"):
+            reply = ask("Does the answer state it? [y/n] ").strip().lower()
+        row["label"] = reply.startswith("y")
+        path.write_text("".join(json.dumps(r) + "\n" for r in rows))
+    return len(todo)
+
+
+_FINAL = re.compile(r"FINAL\b[^:]*:\s*(not stated|stated)\b")
+
+
+def final_call(row: dict) -> bool | None:
+    """MJ's adjudicated call on a blind row, written at the start of its note after the
+    disagreements were read: `FINAL (MJ, <date>): stated. <why>` or `...: not stated. <why>`.
+    None: the row was not adjudicated and its blind label stands. The label itself is never
+    edited, so the blind agreement can always be recomputed."""
+    found = _FINAL.match(row.get("note") or "")
+    return None if found is None else found.group(1) == "stated"
+
+
 def agreement(
     blind: list[dict],
     claude_labels: list[dict],
@@ -434,7 +480,9 @@ def agreement(
     judge=None,
 ) -> dict:
     """MJ's blind labels against the grader and against the first labeller, per item and overall,
-    with every disagreement listed for adjudication. Nothing is adjusted here."""
+    with every disagreement listed for adjudication. Nothing is adjusted here. Once a row's note
+    carries a final call (`final_call`), the adjudicated outcome is reported beside the blind
+    figures, which do not change."""
     claude = {(r["run"], r["case"], r["item"]): r["label"] for r in claude_labels}
     calls = {(r["run"], r["case"], r["item"]) for r in claude_labels if is_judgement_call(r)}
     by_key = {(run, r["id"]): r for run, recs in records_by_run.items() for r in recs}
@@ -455,12 +503,14 @@ def agreement(
                 "pattern": graded.pattern_pass, "judge": graded.judge_pass,
                 "decided_by": graded.decided_by, "mj_note": b.get("note", ""),
                 "answer": rec["answer"], "judgement_call": key in calls,
+                "adjudicated": final_call(b) is not None,
+                "final": b["label"] if final_call(b) is None else final_call(b),
             }
         )  # fmt: skip
 
-    def tally(field):
+    def tally(field, against="mj"):
         gradable = [r for r in rows if r[field] is not None]
-        return {"n": len(gradable), "agree": sum(r[field] == r["mj"] for r in gradable)}
+        return {"n": len(gradable), "agree": sum(r[field] == r[against] for r in gradable)}
 
     def part(is_call: bool, of: int) -> dict:
         mine = [r for r in rows if r["judgement_call"] is is_call]
@@ -477,9 +527,22 @@ def agreement(
         cell["n"] += 1
         cell["mj_claude"] += r["claude"] == r["mj"]
         cell["mj_grader"] += r["grader"] == r["mj"]
+    graded = [r for r in rows if r["grader"] is not None]
+    adjudicated = {
+        "n": sum(r["adjudicated"] for r in rows),
+        # the blind labels the grader disagreed with, and how many of those MJ took back
+        "differed_from_grader": sum(r["grader"] != r["mj"] for r in graded),
+        "to_grader": sum(r["grader"] != r["mj"] and r["grader"] == r["final"] for r in graded),
+        "final_vs_grader": tally("grader", "final"),
+        "final_vs_claude": tally("claude", "final"),
+        "false_fails": [r for r in graded if r["final"] is True and r["grader"] is False],
+        "false_passes": [r for r in graded if r["final"] is False and r["grader"] is True],
+        "rows": [r for r in rows if r["adjudicated"]],
+    }
     return {
         "n": len(rows),
         "unlabelled": unlabelled,
+        "adjudicated": adjudicated,
         # What the human check covers: the labels are a subset of the first labeller's, and not a
         # uniform one (every judgement call, a random draw of the rest).
         "first_labeller_total": len(claude_labels),
@@ -492,9 +555,50 @@ def agreement(
     }
 
 
+def _format_adjudication(adj: dict, share) -> list[str]:
+    """The outcome after MJ re-read the disagreements: how many blind labels MJ took back, the
+    final calls against the grader and the first labeller, and what stands against the grader."""
+    took_back = adj["to_grader"]
+
+    def listed(rows: list[dict]) -> list[str]:
+        return [f"- {r['run']} {r['case']}[{r['item']}]: {r['answer']}" for r in rows] or ["- none"]
+
+    return [
+        "## After adjudication",
+        "",
+        f"MJ re-read the disagreements and wrote a final call in the note of {adj['n']} rows. The "
+        "blind labels are kept as first given and every figure above is computed from them. MJ's "
+        f"blind label differed from the grader on {adj['differed_from_grader']} gradable items: "
+        f"**{took_back} {'was' if took_back == 1 else 'were'} resolved in the grader's favour on "
+        "re-reading** (the blind label was wrong and the grader right), and "
+        f"{adj['differed_from_grader'] - took_back} stand against the grader. **Final call vs the "
+        f"grader:** {share(adj['final_vs_grader'])} gradable. **Final call vs the first "
+        f"labeller:** {share(adj['final_vs_claude'])}.",
+        "",
+        "The grader's false fails by the final calls (stated, and graded not stated). The patterns "
+        "are left as they are and these are listed in `evals/KNOWN_GOLD_ISSUES.md`:",
+        "",
+        *listed(adj["false_fails"]),
+        "",
+        "Its false passes by the final calls (not stated, and graded stated):",
+        "",
+        *listed(adj["false_passes"]),
+        "",
+        "| run | case | item | blind label | final call | grader | first labeller | MJ's note |",
+        "|---|---|---|---|---|---|---|---|",
+        *(
+            f"| {r['run']} | {r['case']} | {r['item']} | {r['mj']} | {r['final']} | {r['grader']} "
+            f"| {r['claude']} | {r['mj_note']} |"
+            for r in adj["rows"]
+        ),
+        "",
+    ]
+
+
 def _format_agreement(out: dict) -> str:
     c, g = out["mj_vs_claude"], out["mj_vs_grader"]
     jc, rest = out["judgement_calls"], out["others"]
+    adj = out["adjudicated"]
 
     def share(t: dict) -> str:
         return f"{t['agree']} of {t['n']}" + (f" ({t['agree'] / t['n']:.0%})" if t["n"] else "")
@@ -504,8 +608,13 @@ def _format_agreement(out: dict) -> str:
         "",
         f"{out['n']} labelled ({out['unlabelled']} left blank), of the {out['first_labeller_total']} "
         f"items the first labeller labelled. **MJ vs the grader:** {share(g)} gradable. **MJ vs the "
-        f"first labeller:** {share(c)}. Patterns are not adjusted until MJ has adjudicated the "
-        "disagreements below.",
+        f"first labeller:** {share(c)}. "
+        + (
+            "These are the labels as MJ first gave them, blind; what re-reading changed is under "
+            "*After adjudication*."
+            if adj["n"]
+            else "Patterns are not adjusted until MJ has adjudicated the disagreements below."
+        ),
         "",
         "## What the check covers",
         "",
@@ -525,6 +634,8 @@ def _format_agreement(out: dict) -> str:
             "other items.",
             "",
         ]
+    if adj["n"]:
+        lines += _format_adjudication(adj, share)
     lines += [
         "## Per item",
         "",
@@ -535,7 +646,7 @@ def _format_agreement(out: dict) -> str:
         lines.append(
             f"| {case} | {item} | {cell['n']} | {cell['mj_claude']} | {cell['mj_grader']} |"
         )
-    lines += ["", "## Every disagreement (for MJ to adjudicate)", ""]
+    lines += ["", "## Every disagreement" + ("" if adj["n"] else " (for MJ to adjudicate)"), ""]
     for r in out["disagreements"]:
         lines += [
             f"### {r['run']} {r['case']}[{r['item']}]: MJ {r['mj']}, first labeller {r['claude']}, "

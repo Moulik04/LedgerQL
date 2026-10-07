@@ -3649,3 +3649,80 @@ behaviour, not from a run. A development run made before the held-out ones will 
 question is sent: it costs a submission, not a figure.
 
 Tests: 1,093 before, 1,100 after; the new ones were seen to fail first.
+
+## 2026-10-07 — The blind labels adjudicated, the judge pinned, and measurement pin M1 recorded
+
+MJ's decisions. Nothing under `ledgerql/` changed and `heldout_config.json` was not touched.
+
+### 1. The human check, blind and then adjudicated
+
+MJ labelled the 14-item blind subset with `python -m evals.must_state label` (one row at a time,
+each answer saved as given). Report: `reports/must_state_agreement.md`, judge on.
+
+**Blind, as first given:** MJ agrees with the grader on 6 of 14 and with the first labeller on 8 of
+14 (the four judgement calls: 0 and 2; the ten random items: 6 and 6).
+
+**Adjudicated.** MJ re-read the eight disagreements with the grader and made a final call on each.
+The blind labels are kept as recorded; the final call is in each row's note (`FINAL (MJ,
+2026-10-07): ...`), `final_call` reads it, and `agree` prints the blind figures first and the
+adjudicated outcome after them.
+
+| | item | blind | final | why |
+|---|---|---|---|---|
+| 1-4 | 30B `L04[1]`, `C06[0]`, `M02[1]`, `U07[1]` | stated | **not stated** | the text does not contain the item; the blind label was a slip |
+| 5-6 | `U08[0]`, both models | stated | **stated** | "which is base USD, not thousands or millions" explains the correct unit and is not a phrase the answer must contain (the gold author's intent); a full unscaled figure in USD states the unit |
+| 7 | 32B `M02[0]` | stated | **stated** | the answer names total assets as the figure it reports |
+| 8 | 32B `M01[0]` | stated | **not stated** | a bare "2024" / "2025" for Apple does not say fiscal or calendar, which is the ambiguity the item checks |
+
+The two `A10` rows had nothing to adjudicate: MJ, the first labeller and the judge all say not stated.
+
+**Said plainly: five of MJ's eight disagreements with the grader were resolved in the grader's
+favour on re-reading.** Four were slips (1-4). The fifth is 8, a judgement, and it also overturns
+the first labeller's label, which was marked a judgement call. (MJ's instruction said four; the
+count from the calls as given is five, and the report prints the count it computes.) Three stand
+against the grader (5, 6, 7). After adjudication the grader matches the final call on 11 of 14,
+with no false pass, and the first labeller on 11 of 14.
+
+**The patterns are unchanged.** The three are listed as known false fails in
+`evals/KNOWN_GOLD_ISSUES.md`. All three are answers from the Phase 5 measured runs, before the
+answer framing; in the development run under H3 (job 47412929) the framing states the unit and
+the metric in words the patterns match, so that run's "9 of 19 with the assumption stated" does
+not move. The 28-label calibration table is against the first labeller's labels and is not restated.
+
+**For the held-out gold** (protocol 4.1): each `answer_must_state` item states only the required
+fact; any explanation goes in a separate field, `explanation`, that neither the patterns nor the
+judge read.
+
+### 2. The judge pinned
+
+The local judge decides the five `primary: judge` items and was the one part of the grader not
+pinned. `JUDGE_DIGESTS` in `evals/measurement_pin.py` names the digest Ollama reports for
+`llama3.1:8b` (`46e0c10c039e...`), it is copied into the pin, and `OllamaJudge` refuses to be built
+once a pin exists unless the Ollama it will ask serves that model at that digest (a model the pin
+does not name is refused too). The digest was read from the running server and equals the SHA-256
+of the local manifest, which was pulled on 2026-06-14: every judge vote in a development report
+was cast by it. Not pinned: Ollama's own version (0.30.8 today).
+
+### 3. M1 recorded
+
+`python -m evals.measurement_pin apply --approved-by MJ --cluster-env reports/runs/cluster_env.json`
+recorded **M1** in `evals/measurement_pin.json`: 40 files, `uv.lock`, the database
+(`fec743dac205...`, the cluster's hash and the laptop's), the server's `vllm` 0.29.0,
+`transformers` 5.17.0 and `torch` 2.13.0, the settings, the three revisions and the judge's digest.
+The cluster's record confirms vLLM 0.29.0, which until now was read from one server log.
+`docs/bridges2.md` is corrected from the same record: the eval environment's Python is 3.12.13, not
+3.13.7 (the repository's `.python-version` names 3.12 and `uv` follows it); the server's is 3.13.7.
+
+### 4. Found and not built
+
+**The held-out rubric items have nowhere to live that M1 does not cover.** `run_eval`,
+`summarize_run` and `rescore_v2` read rubric patterns only from `evals/must_state_patterns.json`,
+keyed by case id, and that file is pinned and holds the 23 development cases. Protocol 4.1 says a
+held-out case carries its `must_state_patterns`; no code reads patterns from a case. So grading
+"assumption stated" on held-out answers needs either the held-out patterns added to that file or
+code that reads them from the frozen gold, and either is a change to a pinned file: **a second pin,
+M2, declared after the held-out gold is written and before any held-out run.** The protocol allows
+exactly that. Also seen while reading: `summarize_run` and `rescore_v2` load the gold by version
+name (v1 to v3) and take no gold file. Listed here for MJ's decision; nothing was built.
+
+Tests: 1,100 before, 1,116 after.

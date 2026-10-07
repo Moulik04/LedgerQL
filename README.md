@@ -360,7 +360,11 @@ quoted accession number read as three separate numbers), fixed in the final conf
   the 27 rubric items. A small local model decides the other five; on 20 constructed answers its
   recall was 0.60 and its precision 0.86. The 28 calibration labels were written by Claude. The
   author's blind second labelling covers 14 of them (the four marked as judgement calls and ten
-  drawn at random) and is not done yet.
+  drawn at random). Blind, it agreed with the grader on 6 of the 14 and with the first labeller
+  on 8. On re-reading, five of the author's eight disagreements with the grader were resolved in
+  the grader's favour (in four the text does not contain the item at all); three stand, and are
+  known false fails of the grader, whose patterns were left as they were. After adjudication the
+  grader matches the final call on 11 of 14 (`reports/must_state_agreement.md`).
 - **Development-set contamination.** The entity linker's alias handling, the framing's rules and
   the refusal registry were written with the development questions in view. How often a held-out
   question falls through to a generic refusal sentence, or gets no assumption stated, is unknown.

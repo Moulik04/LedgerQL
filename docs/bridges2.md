@@ -419,9 +419,9 @@ There are two environments, built differently.
 |---|---|---|
 | where | `~/ledgerql-bridges2/ledgerql/.venv` | `~/ledgerql-bridges2/vllm-env/.venv` |
 | holds | `duckdb`, `sqlglot`, `httpx`: everything `evals/` and `ledgerql/` import | `vllm` and what it pulls in (`torch`, `transformers`), `huggingface_hub` |
-| built by | `setup_env.sh`: `uv venv --python <3.13.7>` then `uv sync --all-groups` | `setup_env.sh`: `uv pip install "vllm==0.29.0" "huggingface_hub[cli]"` |
+| built by | `setup_env.sh`: `uv venv --python <3.13.7>` if there is no venv, then `uv sync --all-groups` | `setup_env.sh`: `uv pip install "vllm==0.29.0" "huggingface_hub[cli]"` |
 | **from a lock file?** | **yes, `uv.lock`.** Every command a job runs goes through `uv run`, which brings the environment to `uv.lock` before it runs | **no.** Since 2026-10-05 `setup_env.sh` names the vLLM version (`VLLM_VERSION`) and stops if the existing venv holds another. Nothing else is locked: `torch` and `transformers` are whatever vLLM's requirements resolved to on the day of the install. The script skips the install when the venv exists, so it changes only if the venv is rebuilt |
-| Python | 3.13.7, the interpreter of `module load pytorch/26.05-2.11-py3` (the laptop uses 3.12; `uv.lock` names the same package versions for both) | the same interpreter |
+| Python | **3.12.13**, as the cluster's own record states (2026-10-05). This row said 3.13.7, read from `setup_env.sh`, which creates the venv on that interpreter. The likely reason for the difference: the repository's `.python-version` names 3.12, and `uv sync` and `uv run` follow that file. The laptop runs 3.12.14, and `uv.lock` names the same `duckdb` and `sqlglot` for both | 3.13.7, the interpreter of `module load pytorch/26.05-2.11-py3` (the record confirms it) |
 
 Also outside the commit: the modules a job loads (`pytorch/26.05-2.11-py3`, `cuda-h100/13.3.1`), and
 `data/ledgerql.duckdb`, which is gitignored and copied to the cluster by hand.

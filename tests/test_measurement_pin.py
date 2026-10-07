@@ -102,6 +102,7 @@ def repo(tmp_path, monkeypatch):
         },
         "settings": json.loads(json.dumps(M.SETTINGS)),
         "models": dict(M.MODEL_REVISIONS),
+        "judge": dict(M.JUDGE_DIGESTS),
     }
     _download(tmp_path / "hf", MODEL, M.MODEL_REVISIONS[MODEL])
     monkeypatch.setattr(run_env, "installed", lambda packages: {"duckdb": "1.5.5"})
@@ -244,6 +245,53 @@ def test_every_declared_model_has_a_pinned_revision_and_its_job_files_download_t
         text = (M.REPO / rel).read_text()
         model = text.split("run_model_eval.sh ")[-1].split()[0]
         assert f"export MODEL_REVISION={M.MODEL_REVISIONS[model]}\n" in text, rel
+
+
+JUDGE = "llama3.1:8b"
+
+
+def _ollama(**served):
+    """An Ollama client that serves these models (name=digest) and nothing else."""
+    models = [
+        type("M", (), {"model": m.replace("_", ":"), "digest": d})() for m, d in served.items()
+    ]
+    listing = type("L", (), {"models": models})()
+    return type("C", (), {"list": lambda self: listing})()
+
+
+def test_a_judge_served_at_another_digest_or_not_at_all_or_not_pinned_is_refused(repo):
+    _, pin = repo
+    want = M.JUDGE_DIGESTS[JUDGE]
+    assert M.judge_problems(pin["judge"], JUDGE, want) == []
+    assert M.judge_problems(pin["judge"], JUDGE, "f" * 64) == [
+        f"the judge {JUDGE} is served at digest ffffffffffff and the pin names {want[:12]}"
+    ]
+    assert M.judge_problems(pin["judge"], JUDGE, None) == [
+        f"Ollama does not have the judge {JUDGE}, so its digest cannot be read"
+    ]
+    assert M.judge_problems(pin["judge"], "qwen3:8b", want) == [
+        "no digest is pinned for the judge qwen3:8b"
+    ]
+
+
+def test_the_judges_digest_is_read_from_the_ollama_that_will_be_asked(repo):
+    _, pin = repo
+    want = M.JUDGE_DIGESTS[JUDGE]
+    assert M.served_digest(_ollama(**{"llama3.1_8b": want, "qwen3_8b": "e" * 64}), JUDGE) == want
+    assert M.served_digest(_ollama(qwen3_8b="e" * 64), JUDGE) is None
+    M.require_judge(JUDGE, _ollama(**{"llama3.1_8b": want}), pins=[pin])
+    with pytest.raises(FrozenGoldError, match="pin M1.*served at digest eeeeeeeeeeee"):
+        M.require_judge(JUDGE, _ollama(**{"llama3.1_8b": "e" * 64}), pins=[pin])
+    M.require_judge(JUDGE, _ollama(**{"llama3.1_8b": "e" * 64}), pins=[])  # no pin: not held
+
+
+def test_the_pinned_judge_is_the_one_every_command_asks_by_default():
+    assert set(M.JUDGE_DIGESTS) == {JUDGE}
+    assert all(len(d) == 64 and set(d) <= set("0123456789abcdef") for d in M.JUDGE_DIGESTS.values())
+    for rel in M.PINNED:
+        if rel.endswith(".py") and "--judge-model" in (text := (M.REPO / rel).read_text()):
+            named = text.split('"--judge-model"')[1].split(")")[0]
+            assert "default=" not in named or f'default="{JUDGE}"' in named, rel
 
 
 def test_a_setting_exported_by_the_submitting_shell_is_refused():
@@ -449,6 +497,7 @@ def test_a_pin_records_the_server_the_database_and_the_settings_from_the_cluster
     assert env["database_sha256"] == run_env.sha256_file(path / "db.duckdb")
     assert env["cluster_record"] == _cluster(path)  # kept whole, as it was read
     assert pin["settings"] == M.SETTINGS and pin["models"] == M.MODEL_REVISIONS
+    assert pin["judge"] == M.JUDGE_DIGESTS
     _require(HELDOUT, pin, path)
 
 
@@ -598,6 +647,7 @@ def test_the_recorded_pin_if_any_matches_the_working_tree():
     assert M.problems(pin) == []
     assert set(pin["files"]) == set(M.PINNED)
     assert pin["settings"] == M.SETTINGS and pin["models"] == M.MODEL_REVISIONS
+    assert pin["judge"] == M.JUDGE_DIGESTS
     assert pin["environment"]["server"]["vllm"] == M.setup_vllm_version()
 
 

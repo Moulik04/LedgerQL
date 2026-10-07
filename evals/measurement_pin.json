@@ -1,0 +1,127 @@
+[
+ {
+  "id": "M1",
+  "status": "active",
+  "declared": "2026-10-07",
+  "approved_by": "MJ",
+  "why": "The blind labels are in and the eight disagreements adjudicated with the patterns left unchanged (reports/must_state_agreement.md); the judge's Ollama digest added; the cluster's record of 2026-10-05 matches this tree, its lock, its database and the vLLM version setup_env.sh names.",
+  "files": {
+   "docs/schema.md": "903a117f6c3822d30f46b014610ff251ae73620e07b8816e49654251aab324e6",
+   "evals/NUMBER_AUDIT_SPEC.md": "95f39130ccafff2a87b03bd318b9f0ebbce1f929106ce0ae07faea790c3aa554",
+   "evals/abstain_scoring.py": "5f0a278f1ee8a7e394e64a1c2a20554187228032e2e417073a5e60e246fc4af8",
+   "evals/audit_vs_verify.py": "0164c13d249a275a0e7ec4936aa4cff80f6b097a918bb71308185f996e9134ab",
+   "evals/bakeoff_evidence.py": "198aa6c58e9309e2dcf74673777988b8a339deb128b30ffbbf51a2851c0af084",
+   "evals/confidently_wrong.py": "3411caee5f3918909777b40748c9662e142317fa7806496dc92b275f6156b952",
+   "evals/entity_link_eval.py": "dc1068b2796c98a92f70e5db3f5a4bfaf71625bede5b26667c5c5ec7c5c6d120",
+   "evals/gen_only_eval.py": "7a16037f9d68d5dd91fd615cec199596982743aef1298c1da0bb0d775e21ee96",
+   "evals/gen_prompts.py": "86b389eea62be05ac8312cfb38a4ca2bafc2ecd4a41503b50011a42056d7648e",
+   "evals/gold_v2.py": "e10b9539b7093e80ffc444f92720e277e3a834bb516ff85ef7703949086e7dfd",
+   "evals/gold_v3.py": "e054140069e3f5e4fcb9af987d699a586321179450b5ea490874af26d1af3f60",
+   "evals/heldout_config.py": "259aaa26e3ca4f4624c4cc05211608cb58c25371c883892831a764b7dbe0fe6d",
+   "evals/heldout_gold_check.py": "25ae77aca5fb7c41a90dadda1a72c8be0ec6e2590ae632c8717d78dbbd105e0a",
+   "evals/measurement_pin.py": "6639d34ad4000001ef72efb71cb881c2077aa9bf435c290973b798510c0ffdee",
+   "evals/must_state.py": "af14a137298d5f6dfa56daffaf63af27a15455ded19781835b50d0c226ec9001",
+   "evals/must_state_patterns.json": "1b6a3ef98c1622c407c291d1f98909073f334774d8e44c3ebd26164cd0b38a54",
+   "evals/number_audit.py": "ad71e1baf48c67a0b4b0f100d16277e2083985da125069202e265e4fbd3d1e30",
+   "evals/offline_exec.py": "f79963c1c3dd65173cdbad3f23835d1efe54ac175bbf29ae734a95eb775e9c44",
+   "evals/pairwise_agreement.py": "9ca4992f044f3ac0eb267b04f775dd9f66466345d08b5612ee617aaf96439f0d",
+   "evals/passn_scoring.py": "6db4e1808acbadc9d6823b3c2900e9a1e8bb1d8b83bf86535c8a99d0b6769bcd",
+   "evals/pipeline_acceptance.py": "bce9c2b062072a550b25c953a1de6977a8fa0a6b361ad2a0bdcc9894b256224b",
+   "evals/repair_scoring.py": "525173ad1b9004ab2858167e8edf9ca9116f3a44a9bbca14b7acbae0534ef867",
+   "evals/replay_repair_off.py": "e4426f43a744d4714ce85f47941b97522903ee26c84eb436965d2535dd06cb46",
+   "evals/replay_year_rule.py": "c2801e9b9e1d58d54b4d7654bda5258814ecb602b4a1535128f60e3a95df70f3",
+   "evals/rescore_v2.py": "6a8b7906a627f403d268ed7c177ac6925c8ca6ee21997964bb7427555d8cafcb",
+   "evals/run_env.py": "ce22732ec3f17321d07e7d38b25725e9b31628f504ffc922b2bb35f1381ad9b6",
+   "evals/run_eval.py": "bd89406903a129060a742a2880de7aab6a9739d78c904edc88c93afd5df58b65",
+   "evals/scoring.py": "718c282d141e137a2e5eb040454c3c8883f11461a08f41e3b31e4fab1138903f",
+   "evals/signal_precheck.py": "e896ab2fc9763d570b52b8a43c42a2b5b1a334f7768e70ed1649d6d1ccd78a20",
+   "evals/summarize_run.py": "d615ed616fca7f3b0d9b14de2b03b6d3131c26db6793e2bfd94db71d14e32af6",
+   "scripts/bridges2/assert_commit.sh": "fa7b655a85827dab94bebd9c677dacb20d26a86767486271cb19b26f1aba0be9",
+   "scripts/bridges2/run_model_eval.sh": "23db0dc64c11e858ff7622b72927ebab22c357087fe3146e96685741acda93ba",
+   "scripts/bridges2/run_qwen25_coder_32b_awq.sbatch": "e8a3f0e0720e06732ad20e786764ac051dbfdf9cb3088483f7c3c54805b1cb32",
+   "scripts/bridges2/run_qwen25_coder_32b_awq_genonly.sbatch": "4e5334e630f5a88e57223f5bf78606300da5107ce75e2ab7fa30276ede9cef04",
+   "scripts/bridges2/run_qwen3_coder_30b_entitylink.sbatch": "d2e8ca500ab8aa8cc821b8ba3b0329824741f784a904da2027a2c03c0398555d",
+   "scripts/bridges2/run_qwen3_coder_30b_fp16.sbatch": "ccd87758da05ffa71d9e6c49532db0ce997672178596100c57d66e7b8438df73",
+   "scripts/bridges2/run_qwen3_coder_30b_genonly.sbatch": "6f25c09286a91e7cd40448f7cc5314f6dfa931fa65bb0b965f208c1560327537",
+   "scripts/bridges2/run_xiyansql_32b_entitylink.sbatch": "5ac7ee5c140ba4c0af53388adf2477cd21ab999a19579e0de0b1e2799a002aff",
+   "scripts/bridges2/run_xiyansql_32b_genonly.sbatch": "05b657a7318034db6788dde77c66b2f4c1cde71492652db374cc94d3de3b2d00",
+   "scripts/bridges2/submit.sh": "8cc71de57919ba32821848d0522e76f2941a47e2b21f90e43042b571d620fcf2"
+  },
+  "environment": {
+   "uv_lock_sha256": "865499cc2f1434c7b95875cf7d49384ec34fdc1db0e24b89eda7bfcdac223236",
+   "locked": {
+    "duckdb": "1.5.5",
+    "sqlglot": "30.17.0"
+   },
+   "database_sha256": "fec743dac2058be32ea85556c8ad66b7270cf534d2c1e05e863d8298b09ae4df",
+   "server": {
+    "vllm": "0.29.0",
+    "transformers": "5.17.0",
+    "torch": "2.13.0"
+   },
+   "cluster_record": {
+    "python": "3.12.13",
+    "packages": {
+     "duckdb": "1.5.5",
+     "sqlglot": "30.17.0"
+    },
+    "locked": {
+     "duckdb": "1.5.5",
+     "sqlglot": "30.17.0"
+    },
+    "uv_lock_sha256": "865499cc2f1434c7b95875cf7d49384ec34fdc1db0e24b89eda7bfcdac223236",
+    "server": {
+     "interpreter": "/jet/home/mjain10/ledgerql-bridges2/vllm-env/.venv/bin/python",
+     "python": "3.13.7",
+     "vllm": "0.29.0",
+     "transformers": "5.17.0",
+     "torch": "2.13.0"
+    },
+    "settings": {
+     "OLLAMA_TEMPERATURE": null,
+     "OLLAMA_CONSENSUS_TEMPERATURE": null,
+     "OLLAMA_SEED": null,
+     "LEDGERQL_ENTITY_LINK": null,
+     "LEDGERQL_ROW_LIMIT": null,
+     "LEDGERQL_QUERY_TIMEOUT_SECONDS": null,
+     "LEDGERQL_OFFLINE_TIMEOUT_SECONDS": null,
+     "LEDGERQL_DB_PATH": null
+    },
+    "database_sha256": "fec743dac2058be32ea85556c8ad66b7270cf534d2c1e05e863d8298b09ae4df"
+   }
+  },
+  "settings": {
+   "pipeline": {
+    "model": [
+     "Qwen/Qwen3-Coder-30B-A3B-Instruct",
+     "Qwen/Qwen2.5-Coder-32B-Instruct-AWQ"
+    ],
+    "backend": "vllm",
+    "candidates": 5,
+    "consensus_temperature": 0.7,
+    "temperature": 0.2,
+    "seed": 42,
+    "entity_link": true
+   },
+   "gen_only": {
+    "model": [
+     "Qwen/Qwen3-Coder-30B-A3B-Instruct",
+     "Qwen/Qwen2.5-Coder-32B-Instruct-AWQ",
+     "XGenerationLab/XiYanSQL-QwenCoder-32B-2504"
+    ],
+    "candidates": 5,
+    "temperature": 0.7,
+    "max_tokens": 2048,
+    "seed": 42
+   }
+  },
+  "models": {
+   "Qwen/Qwen3-Coder-30B-A3B-Instruct": "b2cff646eb4bb1d68355c01b18ae02e7cf42d120",
+   "Qwen/Qwen2.5-Coder-32B-Instruct-AWQ": "1ed0a6145da0ce550c628e8e8b678f51e695995d",
+   "XGenerationLab/XiYanSQL-QwenCoder-32B-2504": "50c30a65a388e9cdc39965b76c30cdbe427a2365"
+  },
+  "judge": {
+   "llama3.1:8b": "46e0c10c039e019119339687c3c1757cc81b9da49709a3b3924863ba87ca666e"
+  }
+ }
+]

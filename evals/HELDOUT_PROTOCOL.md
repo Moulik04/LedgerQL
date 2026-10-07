@@ -95,6 +95,14 @@ exactly what is asked; entity columns compare at company level; proportions carr
 a stated scale carries `scale_cols`; one quantity for several periods or entities carries
 `pivot`. There is no later "fix the gold" pass.
 
+**An `answer_must_state` item states only the required fact (MJ, 2026-10-07).** Any explanation of
+it (why it is required, what the correct value is, what it must not be confused with) goes in a
+separate field of the item, `explanation`, which neither the patterns nor the judge read: the judge
+is given the item's `text` and nothing else. Why: the development item "the raw unit (uom), which
+is base USD, not thousands or millions" carried its explanation in its text, the pattern written
+from that text demanded the explanation, and two answers that state the unit were graded as not
+stating it (`evals/KNOWN_GOLD_ISSUES.md`, `reports/must_state_agreement.md`).
+
 ### 4.2 Expected behaviour, reason codes and alternatives
 
 ABSTAIN cases carry the reason code the tier implies (`evals/README.md` section 2), decided by reading
@@ -201,6 +209,10 @@ Amended 2026-10-05 (evening), by MJ's decisions on that draft, before the set is
 any held-out run: the pinned list is approved; the offline figure commands are held to the pin; and
 the database, the generation settings and the model server's versions are enforced, not only
 recorded. H3 is not amended.
+Amended 2026-10-07, at MJ's request, before the held-out set exists and before any held-out run:
+the local judge is pinned by the digest Ollama reports for it, and **the measurement pin M1 is
+recorded** (MJ's blind labels are in and adjudicated, the patterns unchanged; the cluster's record
+matches the tree). H3 is not amended.
 
 - **The headline configuration is H3, and it is final** (it supersedes H2; all three are in
   `evals/heldout_config.json`, which is append-only). H3 is H2 with one change under `ledgerql/`, in
@@ -286,6 +298,19 @@ recorded. H3 is not amended.
     unless the job's own download cache holds that commit and no other. Each repository's latest
     commit (the 30B 2025-12-03, the 32B AWQ 2024-11-18, XiYanSQL 2025-12-04) is older than the
     first cluster run (2026-09-14), so these are the weights every development run was served.
+  - **The judge is pinned to a digest (MJ, 2026-10-07).** The local model that decides the
+    `primary: judge` rubric items (`llama3.1:8b`, asked through Ollama on the laptop, after a run)
+    is in the pin by the digest Ollama reports for it (`JUDGE_DIGESTS`,
+    `46e0c10c039e...`). Once a pin is recorded the judge refuses to be built unless the Ollama it
+    will ask serves that model at that digest; a model the pin does not name is refused too. The
+    laptop's copy was pulled on 2026-06-14, before the grader existed, so every judge vote in a
+    development report was cast by this digest. Its prompt, temperature (0), seed and context
+    length are in `evals/must_state.py`, a pinned file. **Not pinned:** the version of Ollama
+    itself (0.30.8 on 2026-10-07).
+  - **M1 is recorded (2026-10-07).** `evals/measurement_pin.json`: the 40 files, `uv.lock`, the
+    database's hash and the server's `vllm` 0.29.0, `transformers` 5.17.0 and `torch` 2.13.0 from
+    the cluster's record (`reports/runs/cluster_env.json`, kept whole in the pin), the settings,
+    the three revisions and the judge's digest. From here a change to a pinned file fails CI.
 - **Configuration H2** (superseded by H3 on 2026-10-04; kept as written). H2 supersedes H1; both
   are in `evals/heldout_config.json`, which is append-only. H2 is H1 with two changes under `ledgerql/`, declared together as one
   configuration on 2026-10-03: the verifier (`verify.py`) accepts true values in the forms it used
@@ -497,8 +522,8 @@ configuration is run once for its confirmatory comparison.
    `uv.lock` and the installed `duckdb` and `sqlglot` match it; every run records its resolved
    versions, the model server's included. MJ approved the list on 2026-10-05 and decided that the
    database, the generation settings and the server's versions are enforced, and that the offline
-   figure commands refuse on a tree that differs from the pin. **Owed:** the cluster's record
-   (`docs/bridges2.md`), then the pin itself, recorded after the blind labels are in and any
-   grader disagreement is adjudicated.
+   figure commands refuse on a tree that differs from the pin. The judge's Ollama digest was added
+   and **the pin was recorded as M1 on 2026-10-07**, after the blind labels were adjudicated with
+   the patterns unchanged and against the cluster's record.
 13. Still open: whether an `informal` share of one quarter of the mention styles is right (3.2),
    and the four confirmatory comparisons in 6.

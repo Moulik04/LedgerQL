@@ -273,8 +273,263 @@ def test_the_judge_asks_for_a_small_context_so_it_fits_beside_other_applications
 
     import ollama
 
+    from evals import measurement_pin
+
     monkeypatch.setattr(ollama, "Client", FakeClient)
+    monkeypatch.setattr(measurement_pin, "load_pins", lambda path=None: [])
     judge = M.OllamaJudge()
     assert judge("q", "an answer", "an item") is True
     assert seen["num_ctx"] == M.JUDGE_NUM_CTX == 1024
     assert seen["temperature"] == 0 and seen["seed"] == 42
+
+
+# --- labelling the blind sheet by hand ----------------------------------------------------------
+
+
+def _sheet(tmp_path, n=3, labelled=()):
+    rows = [
+        {
+            "answer_id": f"run-a:X{i}:0",
+            "run": "run-a",
+            "case": f"X{i}",
+            "item": 0,
+            "question": f"question {i}?",
+            "item_text": f"rubric item {i}",
+            "answer": f"the answer text {i}",
+            "label": labelled[i] if i < len(labelled) else None,
+            "note": "",
+        }
+        for i in range(n)
+    ]
+    path = tmp_path / "sheet.jsonl"
+    path.write_text("".join(json.dumps(r) + "\n" for r in rows))
+    return path, rows
+
+
+def _read(path):
+    return [json.loads(x) for x in path.read_text().splitlines() if x.strip()]
+
+
+def _replies(*replies):
+    left = list(replies)
+    asked = []
+
+    def ask(prompt):
+        asked.append(prompt)
+        return left.pop(0)
+
+    return ask, asked
+
+
+def test_labelling_shows_each_row_alone_and_writes_yes_or_no_as_true_or_false(tmp_path):
+    path, before = _sheet(tmp_path)
+    ask, asked = _replies("y", "n", "Y")
+    shown = []
+    assert M.label_sheet(path, ask=ask, show=shown.append) == 3
+    after = _read(path)
+    assert [r["label"] for r in after] == [True, False, True]
+    assert len(asked) == len(shown) == 3 and all("[y/n]" in prompt for prompt in asked)
+    for i, text in enumerate(shown):  # its own answer and rubric item, and no other row's
+        assert f"the answer text {i}" in text and f"rubric item {i}" in text
+        assert f"question {i}?" in text and f"{i + 1} of 3" in text
+        assert not any(f"the answer text {j}" in text for j in range(3) if j != i)
+    # nothing but the labels changed
+    assert [{**r, "label": None} for r in after] == before
+
+
+def test_a_reply_that_is_not_yes_or_no_is_asked_again(tmp_path):
+    path, _ = _sheet(tmp_path, n=1)
+    ask, asked = _replies("maybe", "", " NO ")
+    M.label_sheet(path, ask=ask, show=lambda text: None)
+    assert _read(path)[0]["label"] is False and len(asked) == 3
+
+
+def test_each_answer_is_saved_as_it_is_given_and_a_second_run_asks_only_for_the_rest(tmp_path):
+    import pytest
+
+    path, _ = _sheet(tmp_path)
+
+    replies = ["y"]
+
+    def interrupted(prompt):
+        if not replies:
+            raise KeyboardInterrupt
+        return replies.pop()
+
+    with pytest.raises(KeyboardInterrupt):
+        M.label_sheet(path, ask=interrupted, show=lambda text: None)
+    assert [r["label"] for r in _read(path)] == [True, None, None]  # the first answer was kept
+
+    ask, asked = _replies("n", "n")
+    shown = []
+    assert M.label_sheet(path, ask=ask, show=shown.append) == 2
+    assert [r["label"] for r in _read(path)] == [True, False, False]  # the first is not re-asked
+    assert "2 of 3" in shown[0] and "the answer text 0" not in "".join(shown)
+
+
+def test_a_sheet_that_is_already_labelled_asks_nothing(tmp_path):
+    path, _ = _sheet(tmp_path, labelled=(True, False, True))
+    text = path.read_text()
+    assert M.label_sheet(path, ask=lambda prompt: 1 / 0, show=lambda text: 1 / 0) == 0
+    assert path.read_text() == text
+
+
+def test_the_label_command_labels_the_subset_sheet_it_is_given(tmp_path, monkeypatch, capsys):
+    path, _ = _sheet(tmp_path, n=2)
+    replies = ["n", "y"]
+    monkeypatch.setattr("builtins.input", lambda prompt="": replies.pop(0))
+    assert M.main(["label", "--blind-file", str(path)]) == 0
+    assert [r["label"] for r in _read(path)] == [False, True]
+    assert "the answer text 1" in capsys.readouterr().out
+
+
+def test_stopping_the_label_command_part_way_says_so_and_keeps_what_was_answered(
+    tmp_path, monkeypatch, capsys
+):
+    path, _ = _sheet(tmp_path, n=2)
+    replies = ["y"]
+
+    def stop_after_one(prompt=""):
+        if not replies:
+            raise EOFError
+        return replies.pop()
+
+    monkeypatch.setattr("builtins.input", stop_after_one)
+    assert M.main(["label", "--blind-file", str(path)]) == 1
+    assert [r["label"] for r in _read(path)] == [True, None]
+    assert "run it again" in capsys.readouterr().out
+
+
+def test_the_label_command_defaults_to_the_14_item_subset_and_would_leave_its_text_as_it_is():
+    # written back row by row, the committed sheet is byte-identical: a diff shows labels only
+    assert M.SUBSET_PATH.name == "must_state_labels_blind_subset.jsonl"
+    text = M.SUBSET_PATH.read_text()
+    assert "".join(json.dumps(r) + "\n" for r in _read(M.SUBSET_PATH)) == text
+
+
+# --- the adjudication ---------------------------------------------------------------------------
+
+
+def test_a_final_call_is_read_from_the_note_and_a_row_without_one_has_none():
+    assert M.final_call({"note": "FINAL (MJ, 2026-10-07): stated. It names the metric."}) is True
+    assert M.final_call({"note": "FINAL (MJ, 2026-10-07): not stated. A slip."}) is False
+    assert M.final_call({"note": "FINAL: not stated"}) is False
+    assert M.final_call({"note": ""}) is None and M.final_call({}) is None
+    # only at the start of the note, and only the two calls: prose that mentions them is no call
+    assert M.final_call({"note": "I think it is stated, FINAL: stated"}) is None
+    assert M.final_call({"note": "FINAL (MJ): unsure"}) is None
+
+
+def _three_adjudicated():
+    """Three answers that state no fiscal year (the grader says False to each), all blind-labelled
+    True. Re-read: X0 was a slip, X1 stands against the grader, X2 was not adjudicated."""
+    patterns = {f"X{i}": [item(case=f"X{i}")] for i in range(3)}
+    records = {"r": [{"id": f"X{i}", "answer": f"It was {i}", "question": "q"} for i in range(3)]}
+    claude = [
+        {"run": "r", "case": f"X{i}", "item": 0, "label": lab, "note": ""}
+        for i, lab in enumerate((False, False, True))
+    ]
+    blind = [
+        {"run": "r", "case": f"X{i}", "item": 0, "label": True, "note": note}
+        for i, note in enumerate(("FINAL (MJ): not stated. Slip.", "FINAL (MJ): stated. Why.", ""))
+    ]
+    return blind, claude, records, patterns
+
+
+def test_adjudication_keeps_the_blind_figures_and_reports_the_final_calls_beside_them():
+    blind, claude, records, patterns = _three_adjudicated()
+    out = M.agreement(blind, claude, records, patterns)
+    # the blind agreement is what it was before any note was written
+    assert out["mj_vs_grader"] == {"n": 3, "agree": 0}
+    assert out["mj_vs_claude"] == {"n": 3, "agree": 1}
+    assert out == {**M.agreement([{**b, "note": ""} for b in blind], claude, records, patterns),
+                   "adjudicated": out["adjudicated"],
+                   "disagreements": out["disagreements"]}  # fmt: skip
+    adj = out["adjudicated"]
+    assert adj["n"] == 2 and adj["differed_from_grader"] == 3
+    assert adj["to_grader"] == 1  # X0: the blind label differed from the grader and was wrong
+    assert adj["final_vs_grader"] == {"n": 3, "agree": 1}
+    assert adj["final_vs_claude"] == {"n": 3, "agree": 2}  # X0 and X2
+    assert [(r["case"], r["final"]) for r in adj["false_fails"]] == [("X1", True), ("X2", True)]
+    assert adj["false_passes"] == []
+
+
+def test_the_report_states_the_blind_agreement_first_and_then_the_adjudicated_outcome():
+    blind, claude, records, patterns = _three_adjudicated()
+    text = M._format_agreement(M.agreement(blind, claude, records, patterns))
+    assert "**MJ vs the grader:** 0 of 3 (0%) gradable" in text
+    assert text.index("## What the check covers") < text.index("## After adjudication")
+    assert "1 was resolved in the grader's favour on re-reading" in text
+    assert "**Final call vs the grader:** 1 of 3 (33%) gradable" in text
+    assert "**Final call vs the first labeller:** 2 of 3 (67%)" in text
+    assert "| r | X0 | 0 | True | False | False | False |" in text  # blind, final, grader, first
+    assert "not adjusted until" not in text
+    # before any final call is written there is no such section
+    unread = [{**b, "note": ""} for b in blind]
+    before = M._format_agreement(M.agreement(unread, claude, records, patterns))
+    assert "## After adjudication" not in before and "not adjusted until" in before
+
+
+def test_the_committed_sheet_keeps_every_blind_label_and_carries_eight_final_calls():
+    rows = _read(M.SUBSET_PATH)
+    assert len(rows) == 14 and all(r["label"] in (True, False) for r in rows)
+    finals = {r["answer_id"]: M.final_call(r) for r in rows if M.final_call(r) is not None}
+    assert len(finals) == 8
+    # the three that stand against the grader, which are listed as its known false fails
+    assert {k for k, v in finals.items() if v} == {
+        "qwen25_32b:U08:0",
+        "qwen3_30b:U08:0",
+        "qwen25_32b:M02:0",
+    }
+    issues = (M.SUBSET_PATH.parent / "KNOWN_GOLD_ISSUES.md").read_text()
+    assert "U08" in issues and "known false fail" in issues
+
+
+# --- the pinned judge ---------------------------------------------------------------------------
+
+
+def _fake_ollama(monkeypatch, digest):
+    class FakeClient:
+        def __init__(self, host=None):
+            pass
+
+        def list(self):
+            served = [("other:1b", "0" * 64), ("llama3.1:8b", digest)]
+            models = [type("M", (), {"model": m, "digest": d})() for m, d in served if d]
+            return type("L", (), {"models": models})()
+
+        def generate(self, model, prompt, options):
+            return type("R", (), {"response": "NO"})()
+
+    import ollama
+
+    monkeypatch.setattr(ollama, "Client", FakeClient)
+
+
+def test_the_judge_is_refused_once_pinned_unless_ollama_serves_the_pinned_digest(monkeypatch):
+    import pytest
+
+    from evals import measurement_pin
+    from evals.scoring import FrozenGoldError
+
+    pin = {"id": "M1", "status": "active", "judge": {"llama3.1:8b": "a" * 64}}
+    monkeypatch.setattr(measurement_pin, "load_pins", lambda path=None: [pin])
+    _fake_ollama(monkeypatch, "a" * 64)
+    assert M.OllamaJudge()("q", "an answer", "an item") is False
+    _fake_ollama(monkeypatch, "b" * 64)
+    with pytest.raises(FrozenGoldError, match="bbbbbbbbbbbb"):
+        M.OllamaJudge()
+    _fake_ollama(monkeypatch, None)  # Ollama does not have the model at all
+    with pytest.raises(FrozenGoldError, match="llama3.1:8b"):
+        M.OllamaJudge()
+    _fake_ollama(monkeypatch, "a" * 64)
+    with pytest.raises(FrozenGoldError, match="other:1b"):  # a judge the pin does not name
+        M.OllamaJudge("other:1b")
+
+
+def test_before_any_pin_the_judge_is_not_held_to_a_digest(monkeypatch):
+    from evals import measurement_pin
+
+    monkeypatch.setattr(measurement_pin, "load_pins", lambda path=None: [])
+    _fake_ollama(monkeypatch, "b" * 64)
+    assert M.OllamaJudge()("q", "an answer", "an item") is False
