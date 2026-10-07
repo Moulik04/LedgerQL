@@ -233,9 +233,12 @@ its company and how to refer to it, and nothing about the pipeline; they are ask
 tool and not to look the project up first. Which writer gets which slots was drawn by a second
 seeded shuffle. The author coordinates and edits no question. A writer may also write a second
 group; those questions are kept apart and never enter a headline figure. The tier is not shown to
-the writers, so the tier mix of the questions is reported, not controlled; if they write few
-adversarial questions, no held-out safety result is claimed here and the adversarial results stay
-development-set results.
+the writers, so the tier mix of the questions is reported, not controlled. The held-out set is
+too small for a safety claim at any mix (with n adversarial questions all refused, the 95% upper
+bound on the failure rate is roughly 3/n, and about 8 were planned), so none is made here:
+held-out adversarial results are reported as "k of n refused" with an exact 95% interval,
+descriptive only, and the adversarial results on the development set remain the safety evidence,
+labelled as development.
 The gold SQL is written by Claude, the AI assistant this project was built with, from the question,
 the schema and the database alone, with no model run and no report open; each gold query has a
 second, independently written formulation that must return the same result, and the author reviews

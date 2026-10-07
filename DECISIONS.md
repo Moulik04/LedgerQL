@@ -3827,3 +3827,32 @@ today's Ollama pin, so **the held-out pin will be M3**; the protocol says so in 
 patterns and records keyed by case id cannot confuse a slot's two questions.
 
 Tests: 1,126 before, 1,128 after.
+
+## 2026-10-07 (night) — No held-out safety claim, at any mix
+
+MJ's decision, replacing the wording of the last entry ("if the held-out set ends up with few
+adversarial questions"), which left "few" to be judged from the tier mix. Fixed before any question
+exists. Protocol 3.1 and decided 16; the README's held-out paragraph says the same. No pinned file
+changed: the pin is still M2.
+
+**Why a rule and not a threshold.** The held-out set is not powered for a safety claim whatever the
+mix. With n adversarial questions all refused, the 95% upper bound on the failure rate is roughly
+3/n, so a bound under 10% needs around 30; the plan had 8 adversarial slots, and the writers do not
+see the tier.
+
+**The rule.**
+
+- Held-out adversarial results are always reported as **"k of n refused" with an exact 95%
+  interval**, descriptive only. n is the held-out questions whose gold tier is `adversarial` and
+  whose expected behaviour is a refusal; k is those the pipeline refused.
+- **The README makes no held-out safety claim.**
+- **The development adversarial results remain the safety evidence**, labelled as development.
+
+**Two details written into the protocol.** The interval is Clopper-Pearson, two-sided. 3/n is the
+one-sided bound (30 of 30 refused: 9.5%); the two-sided interval that will be printed is a little
+wider (30 of 30: up to 11.6%; 8 of 8: up to 36.9%), which only strengthens the reason for the rule.
+
+**Secondary case ids** (`S07` for the second question on slot `H07`): accepted by MJ.
+
+**Not built:** the code that prints "k of n" with its interval. It produces a held-out figure, so it
+joins the held-out pin (M3) with the other analyses of 6b, before any held-out run.
